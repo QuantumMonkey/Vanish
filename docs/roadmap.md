@@ -15,6 +15,8 @@ graph TD
     P5 --> P6[Stage 6: Orchestration & Shell Cleanup]
     P6 --> P7[Stage 7: Network & Disk Optimization]
     P7 --> P8[Stage 8: Installation Sandbox]
+    P8 --> P9[Stage 9: System Integration & Environment Clean]
+    P9 --> P10[Stage 10: Enterprise Audits & Offset Rules]
 ```
 
 ### Stage 1: Core MVP (Current Status)
@@ -78,6 +80,19 @@ graph TD
   * **Installation Logger**: Generate an isolated log file detailing every registry write, file addition, and driver registration performed by the program installer.
   * **Total Rollback Purge**: Offer a one-click rollback that reverts every change logged, ensuring zero leftover traces.
 
+### Stage 9: System Integration & Environment Clean
+* **Goal**: Purge orphaned system services, driver repositories, path variables, and file associations.
+* **Technical Tasks**:
+  * **Services & Drivers Purge**: Query registry service trees and remove leftover entries using `Remove-Service` or `sc.exe delete`, clean third-party driver store files via `pnputil /delete-driver`.
+  * **PATH Environment Cleaner**: Scan user and system scope `PATH` environment variables using the `[System.Environment]` API, executing `Test-Path` check passes to filter out dead directories and remove redundant values.
+  * **File Association & Protocol Repair**: Scan `Explorer\FileExts` registry hives, identifying broken CLSID handlers pointing to deleted executables, and purge dead file/protocol links.
+
+### Stage 10: Enterprise Audits & Offset Rules
+* **Goal**: Scrub advanced enterprise database relics and incorporate community mapping offsets.
+* **Technical Tasks**:
+  * **DCOM & WMI Namespace Cleanup**: Scan for orphaned WMI classes and DCOM app registrations referencing missing executables, cleaning the keys to prevent event log error noise.
+  * **Event Log Channel Cleaner**: Clean orphaned application log channels registered under `EventLog` keys.
+  * **Crowdsourced Offsets Database**: Load a community-driven JSON heuristics rules database to automatically map atypical directories that do not match application names (such as hidden `.config`, `.toolcache`, or `.unity3d` folders).
 
 ---
 

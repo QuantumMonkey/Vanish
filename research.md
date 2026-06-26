@@ -52,4 +52,21 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: How can we monitor installations in real-time to enable 100% complete rollback?**
   * **Report**: We compare filesystem and registry snapshots before and after installation, or hook native API calls, to log modifications and support full reversion.
 
+* **Q: How can we clean orphaned system services and kernel drivers safely?**
+  * **Report**: We delete services using `Remove-Service` or `sc.exe delete` keys under `HKLM\SYSTEM\CurrentControlSet\Services` and scrub driver repository packages via `pnputil.exe`.
+
+* **Q: How do we clean up invalid or redundant PATH environment variables?**
+  * **Report**: We read system/user scopes via `[System.Environment]`, split by `;`, execute `Test-Path` to filter out dead folders, and write back cleaned, unique path values.
+
+* **Q: How do we purge abandoned file associations and protocol handlers?**
+  * **Report**: We delete leftover extension keys under `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\FileExts\.ext` and file associations under classes to repair broken icon displays.
+
+* **Q: How do we clean orphaned DCOM objects and custom WMI namespace registrations?**
+  * **Report**: We scan for DCOM CLSIDs and WMI providers referencing missing executable paths and delete them to prevent background execution error logging.
+
+* **Q: How can we clean left-behind custom Windows Event Log providers?**
+  * **Report**: We remove registry provider registrations under `HKLM\SYSTEM\CurrentControlSet\Services\EventLog` linked to uninstalled applications to keep log pipelines clean.
+
+* **Q: How do we scan for atypical remnants that do not match application name directories?**
+  * **Report**: We integrate a community-maintained JSON rules mapping file (identifying common offsets like `.config`, `.toolcache`, `.unity3d`) to map hidden app storage directories.
 
