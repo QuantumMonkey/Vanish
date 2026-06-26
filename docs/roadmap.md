@@ -59,7 +59,7 @@ graph TD
 ### Stage 5: Threat Intelligence Hunting Model
 * **Goal**: Identify and mitigate destructive, malicious, or highly suspicious application behaviors.
 * **Technical Tasks**:
-  * **Signature-Based Hunting**: Run MD5/SHA256 hashing on startup executables and check them against local rule definitions or external Threat Intelligence APIs.
+  * **Hybrid Threat Intelligence Lookup**: Implement local digital signature (Authenticode) verification and YARA scanning as the primary safety layer, with an optional, opt-in cloud lookup for file hashes utilizing open threat feeds (like abuse.ch MalwareBazaar API or user-provided VirusTotal API keys) to prevent user privacy leaks.
   * **Behavioral Heuristics (Process Spawning)**:
     * Detect suspicious process trees (e.g., Microsoft Word spawning `powershell.exe` or `cmd.exe`).
     * Flag active programs executing destructive commands, such as attempts to delete volume shadow copies (`vssadmin delete shadows`) or edit host DNS files.
