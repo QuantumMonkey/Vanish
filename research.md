@@ -2,31 +2,39 @@
 
 This document logs key research findings, design questions, considerations, and tool analysis to serve as a permanent trail and prevent duplicate efforts.
 
+> **Note**: Cloud-based threat intelligence lookups and community threat submission features have been removed from the Vanish scope. See `docs/promptgate.md` Rule 6 for rationale. Passive local behavioral heuristics (suspicious process tree indicators) remain in scope as part of Stage 3.
+
 ---
 
 * **Q: How does BCUninstaller (BCU) identify file and registry leftovers safely?**
-  * **Report**: BCU uses a C#-based heuristic engine that scans common system locations for items containing the target application's name or GUID, utilizing shared-publisher validation checks to prevent deleting parent folders of active co-installed programs.
+  * **Report**: BCU uses a C#-based heuristic engine that scans common system locations for items containing the target application's name or GUID, comparing publisher GUIDs and InstallLocation paths across all co-installed programs to preserve shared parent directories.
+  * **License**: GPLv3
 
 * **Q: How does System Informer (formerly Process Hacker) release file handles / locks?**
   * **Report**: System Informer hijacks handles by calling `DuplicateHandle`/`NtDuplicateObject` on the target locking process and passing the `DUPLICATE_CLOSE_SOURCE` (0x01) flag to close the handle in the source process remotely.
+  * **License**: MIT
 
 * **Q: How can we run YARA pattern matching on Windows in a Node/Electron host?**
-  * **Report**: Native Node YARA npm packages fail to compile on Windows; we must bundle the official prebuilt Windows YARA binaries (`yara.exe`) and invoke them directly via Node's `child_process` execution.
+  * **Report**: Native Node YARA bindings (e.g. `node-yara-rs`) can compile on Windows with the appropriate build toolchain, but building native addons in an Electron distribution is fragile. For reliability, Vanish bundles the official prebuilt Windows YARA binary (`yara64.exe`) and invokes it via Node's `child_process`. This is a deliberate simplicity tradeoff, not an inherent platform limitation. Note: Vanish ships the YARA engine only. Rule files are user-supplied. See `docs/promptgate.md` Rule 5.
+  * **License**: BSD 3-Clause
 
 * **Q: Is keeping Vanish open-source and free a good strategic decision?**
-  * **Report**: Yes; administrative root access requires transparency to establish trust, and FOSS enables community-driven updates to installer heuristic patterns while a premium UX attracts developer adoption.
+  * **Report**: Yes; administrative root access requires transparency to establish trust, and FOSS enables community-driven updates to installer heuristic patterns. A premium UX differentiates Vanish from visually outdated existing tools and drives adoption among developers who encounter it.
 
 * **Q: What FOSS tools can accelerate the core MVP development?**
-  * **Report**: BCUninstaller (leftover heuristic matching rules), System Informer (handle hijacked closing logic), and YARA (malware rule signature integration).
+  * **Report**: BCUninstaller (leftover heuristic matching rules - **License**: GPLv3), System Informer (handle-release logic via handle duplication and remote closure - **License**: MIT), and YARA (malware rule signature integration - **License**: BSD 3-Clause).
 
 * **Q: What FOSS tool assists in building a superior handle/socket Task Manager?**
-  * **Report**: TaskExplorer (by DavidXanatos), a Qt/C++ tool built on the System Informer (Process Hacker) core, which specializes in real-time socket and open-handle process monitoring.
+  * **Report**: TaskExplorer (by DavidXanatos), a Qt/C++ tool that shares architectural concepts with System Informer (Process Hacker) and uses parts of its SDK.
+  * **License**: GPLv3
 
 * **Q: What FOSS tool assists in building a kernel-level ARK monitoring engine?**
   * **Report**: OpenArk (by BlackINT3), an anti-rootkit utility written in C++ that handles deep system hotkeys, driver callbacks, filter tables, and kernel handle manipulation.
+  * **License**: GPLv3
 
 * **Q: What FOSS tool assists in detecting fileless in-memory process injection threats?**
   * **Report**: PE-sieve and HollowsHunter (by hasherezade), which inspect running processes for code hollowing, reflective DLL loading, and memory hooks, and dump anomalous regions for forensics.
+  * **License**: BSD 2-Clause
 
 * **Q: How does a Force Uninstall handle corrupted or partially installed applications?**
   * **Report**: It purges the local cached MSI files, removes product registry entries under Windows Installer UserData registry trees, and wipes remnants from the GAC/Assembly folders.
@@ -90,15 +98,19 @@ This document logs key research findings, design questions, considerations, and 
 
 * **Q: What FOSS tool shows how to clean graphics/audio drivers deeply?**
   * **Report**: Display Driver Uninstaller (DDU) by Wagnard, which has custom safe-mode routines to purge deep OEM driver registries, kernel device maps, and DCH setup files.
+  * **License**: Freeware (closed source)
 
 * **Q: What FOSS tool shows how to programmatically audit open file handles natively?**
   * **Report**: Microsoft PowerToys' File Locksmith tool, which shows a complete C++ framework for querying the Windows system for file handles and releasing locking holds.
+  * **License**: MIT
 
 * **Q: What FOSS tool helps us clean cache/junk files for hundreds of apps out-of-the-box?**
   * **Report**: BleachBit's CleanerML, an XML-based markup database containing clean-up paths and globs for hundreds of apps; we can write a parser in Node to consume CleanerML files.
+  * **License**: GPLv3
 
 * **Q: What FOSS tool helps us find silent uninstallation arguments for thousands of desktop apps?**
   * **Report**: Windows Package Manager (winget-cli) by Microsoft, which houses an open-source manifest database detailing silent installer/uninstaller arguments and parameters.
+  * **License**: MIT
 
 * **Q: How can we identify orphaned C++ runtimes (like Visual C++) that are no longer needed?**
   * **Report**: We parse PE (Portable Executable) import directories of main application executables on disk, mapping their dynamic dependencies (e.g. `msvcr100.dll` to VC++ 2010), and flag runtimes that have no active app associations.
@@ -136,7 +148,7 @@ This document logs key research findings, design questions, considerations, and 
   * **Report**: We request specific properties via CIM SELECT filters rather than downloading full objects, using fast registry lookups as primary caches for static hardware info.
 
 * **Q: How does Vanish automatically request UAC elevation if launched by an unelevated user?**
-  * **Report**: We check elevation status on startup via `net session`; if false, we spawn a PowerShell script using `Start-Process -Verb RunAs` to re-launch Electron with administrative rights.
+  * **Report**: We check elevation status on startup using `[Security.Principal.WindowsPrincipal]::IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)`; if false, we spawn a PowerShell script using `Start-Process -Verb RunAs` to re-launch Electron with administrative rights.
 
 * **Q: How do we bypass the 24-hour rate limit when creating System Restore Points?**
   * **Report**: We temporarily set the registry DWORD `SystemRestorePointCreationFrequency` under `HKLM\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore` to `0` before checkpoint creation, reverting it afterward.

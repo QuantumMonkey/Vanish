@@ -7,20 +7,20 @@
 ## 📌 Project Overview
 Vanish is a modern Windows application manager and deep cleaner uninstaller. It is built as an Electron desktop app executing an asynchronous PowerShell backend. It replaces outdated uninstaller utilities with a high-performance, glassmorphic UI, UWP support, automatic restore point checkpoints, and three remnant scanning modes (Safe, Moderate, Advanced).
 
-* **Repository Location**: `d:\quickhelp projects\vanish-uninstaller`
+* **Repository Location**: `https://github.com/QuantumMonkey/Vanish`
 * **Status**: **v1.0.0 (Core MVP Completed & Verified)**
 
 ---
 
 ## 📁 File Structure Map
 
-* **[package.json](file:///d:/quickhelp%20projects/vanish-uninstaller/package.json)**: Scripts, configuration, and Electron (`^42.5.0`) dependency.
-* **[main.js](file:///d:/quickhelp%20projects/vanish-uninstaller/main.js)**: Host window container. Regulates window actions (minimize, maximize, close), elevation queries (`net session`), and manages asynchronous PowerShell spawns.
-* **[preload.js](file:///d:/quickhelp%20projects/vanish-uninstaller/preload.js)**: Exposes secure IPC APIs to the renderer world.
-* **[index.html](file:///d:/quickhelp%20projects/vanish-uninstaller/index.html)**: Titlebar, dashboard statistics, application table workspace, details sidebar, and multi-stage uninstallation wizard overlay.
-* **[index.css](file:///d:/quickhelp%20projects/vanish-uninstaller/index.css)**: Glassmorphic dark styling. Core variables, scrollbars, glowing orbit background animation, toggle switches, and threat-level color classes.
-* **[renderer.js](file:///d:/quickhelp%20projects/vanish-uninstaller/renderer.js)**: Handles UI controller logic. Orchestrates app loading, sorting, detail sidebar rendering, and the step-by-step uninstallation wizard state machine.
-* **[scanner.ps1](file:///d:/quickhelp%20projects/vanish-uninstaller/scanner.ps1)**: System execution engine. Decodes Base64 JSON arguments. Runs registry querying, UWP package mapping, system restore point checkpoints, remnant scans, and file/registry removals.
+* **[package.json](../package.json)**: Scripts, configuration, and Electron (`^42.5.0`) dependency. *(Status: Complete)*
+* **[main.js](../main.js)**: Host window container. Regulates window actions (minimize, maximize, close), elevation queries (WindowsPrincipal API — see `docs/promptgate.md` Rule 13), and manages asynchronous PowerShell spawns. *(Status: Complete — MVP functional)*
+* **[preload.js](../preload.js)**: Exposes secure IPC APIs to the renderer world. *(Status: Complete — MVP functional)*
+* **[index.html](../index.html)**: Titlebar, dashboard statistics, application table workspace, details sidebar, and multi-stage uninstallation wizard overlay. *(Status: Complete — MVP functional)*
+* **[index.css](../index.css)**: Glassmorphic dark styling. Core variables, scrollbars, glowing orbit background animation, toggle switches, and threat-level color classes. *(Status: Complete — MVP functional)*
+* **[renderer.js](../renderer.js)**: Handles UI controller logic. Orchestrates app loading, sorting, detail sidebar rendering, and the step-by-step uninstallation wizard state machine. *(Status: Complete — MVP functional)*
+* **[scanner.ps1](../scanner.ps1)**: System execution engine. Decodes Base64 JSON arguments. Runs registry querying, UWP package mapping, system restore point checkpoints, remnant scans, and file/registry removals. *(Status: Complete — MVP functional)*
 
 ---
 
@@ -30,16 +30,23 @@ Vanish must be run with administrative privileges to interact with HKLM registry
 1. Open PowerShell or Command Prompt as **Administrator**.
 2. Run:
    ```powershell
-   cd "d:\quickhelp projects\vanish-uninstaller"
+   cd path\to\vanish
    npm start
    ```
 
 ---
 
 ## 🔍 Next Steps & Roadmap Checklist
-For the next agent resuming work, the primary milestones outlined in the roadmap are:
-- `[ ]` **Implement Audit & Health Advisor Tab**: Create an interactive scorecard highlighting unused software, total space reclaimable, and boot-up impact statistics.
-- `[ ]` **Build Advanced Task Manager**: Create a process list viewer inside Vanish showing resource usages (CPU, Memory, Disk).
-- `[ ]` **Add "Unlocker" Capability**: Write a PowerShell helper in `scanner.ps1` utilizing handle queries to identify processes locking a specific file/folder, and kill handles/processes to release locks.
-- `[ ]` **Integrate Search & Destroy**: Enable direct keyword input to purge remnants of unlisted or corrupt software installations.
-- `[ ]` **Embed Threat Intelligence Hunting**: Add signature lookups, process behavior tracking, and alert indicators to identify destructive applications.
+
+> **Before planning, speccing, or implementing any feature**, run it through `docs/promptgate.md`. All decisions must pass the gate before work begins.
+
+> **For Stages 6–14** (Orchestration, Network, Sandbox, Environment Clean, Enterprise Audits, Cache Purge, Telemetry, Runtime/Driver Audit, CleanerML Engine), refer to `docs/roadmap.md`. The checklist below covers Core tier stages only.
+
+**Core Tier** (complete before any public release):
+
+- `[ ]` **Stage 2 — Audit & Health Advisor Tab**: Interactive scorecard: unused software, reclaimable space, boot-up impact. *(Core)*
+- `[ ]` **Stage 3 — Task Manager & Unlocker**: Process list with CPU/Memory/Disk, file handle inspector, Suspicious Activity Indicators display, Watchdog Suspension. *(Core)*
+- `[ ]` **Stage 6 — Orchestration & Shell Cleanup**: Bulk silent uninstaller, context menu cleaner, MSI service lockout manager, restore point frequency override. *(Core)*
+- `[ ]` **Stage 9 — System Integration & Environment Clean**: Services/drivers purge, PATH cleaner, file association repair, multi-user profile registry sweep, auto-UAC relauncher, registry redirection bypass. *(Core)*
+
+**Standard and Extended tiers**: See `docs/roadmap.md`.

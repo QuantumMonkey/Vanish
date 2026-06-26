@@ -23,6 +23,16 @@ graph TD
     P13 --> P14[Stage 14: CleanerML Cache Engine]
 ```
 
+## Stage Priority Tiers
+
+| Tier | Stages | Condition |
+|------|--------|-----------|
+| **Core** | 1, 2, 3, 6, 9 | Must complete before any public release |
+| **Standard** | 4, 7, 8, 11, 12, 14 | Ships in v1.x post-launch |
+| **Extended** | 10, 13 | Future milestones, no committed timeline |
+
+Do not begin Standard work until all Core stages are complete and tested on clean Windows 10 and Windows 11 VMs. Do not commit Extended stages to any public timeline. See `docs/promptgate.md` Rule 16.
+
 ### Stage 1: Core MVP (Current Status)
 * **Status**: Completed.
 * **Deliverables**: Registry & UWP package mapping, System Restore Point triggers, Safe/Moderate/Advanced scanning heuristics, and remnant deletion.
@@ -56,16 +66,11 @@ graph TD
   * Run the `Scan-Leftovers` engine with the keywords, displaying files/registry keys found in common system paths.
   * Safely purge the elements upon approval.
 
-### Stage 5: Threat Intelligence Hunting Model
-* **Goal**: Identify and mitigate destructive, malicious, or highly suspicious application behaviors.
-* **Technical Tasks**:
-  * **Keyless Threat Queries & Reporting**: Query free public threat databases (like the abuse.ch MalwareBazaar API) directly using public endpoints for file hashes, requiring no user API keys.
-  * **Community Threat Submission**: Provide a "Submit Threat Report" wizard that packages file metadata (SHA256, size, path, signature details) into a structured JSON report that users can submit directly to the FOSS project's community repository for analysis and crowdsourced rules database updates.
-  * **Behavioral Heuristics (Process Spawning)**:
-    * Detect suspicious process trees (e.g., Microsoft Word spawning `powershell.exe` or `cmd.exe`).
-    * Flag active programs executing destructive commands, such as attempts to delete volume shadow copies (`vssadmin delete shadows`) or edit host DNS files.
-  * **Persistence Scan**: Check common malware persistence paths (e.g., Winlogon Shell modifications, AppInit_DLLs, browser helper objects).
-  * **Integration with YARA**: Run lightweight YARA file pattern scans on suspicious directories.
+### Stage 5: Suspicious Activity Indicators *(Merged into Stage 3)*
+
+> **Removed**: Cloud-based threat intelligence lookups, MalwareBazaar API queries, and the Community Threat Submission wizard have been permanently cut from scope. See `docs/promptgate.md` Rule 6 for rationale.
+>
+> The behavioral heuristics components (suspicious process tree detection, destructive command flagging, persistence path display) are retained as a passive local display within the Stage 3 Task Manager view. No dedicated Stage 5 exists. Roadmap stage numbers are preserved as-is to avoid reference confusion.
 
 ### Stage 6: Orchestration & Shell Cleanup
 * **Goal**: Enable bulk uninstallation and clean left-behind Windows shell context menus.
@@ -73,7 +78,7 @@ graph TD
   * **Bulk Silent Uninstaller**: Group multiple uninstallation requests and run them sequentially (using native switches like `/qn` or `/S`) while trapping exit codes to block on reboot requirements.
   * **Context Menu Cleaner**: Scan registry keys (under `HKCR\*\shellex\ContextMenuHandlers` and related classes) for orphaned CLSID associations linked to removed executables and clean them up.
   * **Installer Lockout Manager**: Validate and configure the `msiserver` (Windows Installer) service state before executing uninstallation queues, temporarily enabling and starting it if needed, and managing concurrent locks.
-  * **Restore Point Frequency Override**: Temporarily set the `SystemRestorePointCreationFrequency` registry registry value to `0` prior to calling system checkpoint commands, restoring it immediately afterward to ensure restore points are generated successfully on consecutive uninstalls.
+  * **Restore Point Frequency Override**: Temporarily set the `SystemRestorePointCreationFrequency` registry value to `0` prior to calling system checkpoint commands, restoring it immediately afterward to ensure restore points are generated successfully on consecutive uninstalls.
 
 ### Stage 7: Network & Disk Optimization
 * **Goal**: Provide active network monitoring, firewall control, and temporary junk file cleaning.
@@ -103,7 +108,7 @@ graph TD
 ### Stage 10: Enterprise Audits & Offset Rules
 * **Goal**: Scrub advanced enterprise database relics and incorporate community mapping offsets.
 * **Technical Tasks**:
-  * **DCOM & WMI Namespace Cleanup**: Scan for orphaned WMI classes and DCOM app registrations referencing missing executables, cleaning the keys to prevent event log error noise.
+  * **DCOM & WMI Namespace Cleanup**: Scan for orphaned WMI classes and DCOM app registrations referencing missing executables. **Mandatory UI review gate required before any deletion.** Auto-deletion of WMI entries is permanently disabled by default. The UI must show an expandable list of every entry found, with individual checkboxes, before any action is taken. A quarantine manifest is generated before removal. See `docs/promptgate.md` Rule 17.
   * **Event Log Channel Cleaner**: Clean orphaned application log channels registered under `EventLog` keys.
   * **Crowdsourced Offsets Database**: Load a community-driven JSON heuristics rules database to automatically map atypical directories that do not match application names (such as hidden `.config`, `.toolcache`, or `.unity3d` folders).
 
@@ -148,15 +153,20 @@ graph TD
 * **Community-Driven Heuristics**: Software developers change installation structures constantly. An open-source model allows the community to contribute new scanning rules and file lock workarounds.
 * **Premium UX Competitiveness**: The existing FOSS options are visually outdated. A sleek, modern glassmorphic application will quickly capture developer attention.
 
+**Licensing Implementation Note**: Commercial license enforcement is deferred post-MVP per design decision in `research.md`. When implemented, it will be added as a wrapper module in `main.js` using cryptographic key validation with hardware-bound token caching. Track as a separate milestone after all Core tier stages are complete and early traction is established.
+
 ### 2. Can We Use Existing FOSS Solutions to Accelerate Development?
+
+> **Important**: No FOSS tool's code, rule files, or definition databases are bundled directly with the Vanish application binary. All definitions (BCU heuristic rules, CleanerML files, YARA rules) are downloaded as separate community packs at user request. This maintains a clean GPL boundary. See `docs/promptgate.md` Rules 4 and 11.
+
 Yes. We should review and leverage these notable open-source projects:
 * **BCUninstaller (Bulk Clog Uninstaller)**:
   * *What it is*: A feature-rich .NET application for bulk software uninstallation.
   * *How to use it*: BCUninstaller has a highly mature registry heuristic engine. We can reference its matching rules for publisher/app clustering to refine our Moderate and Advanced scan modes.
 * **System Informer (formerly Process Hacker)**:
   * *What it is*: A powerful open-source process manager and handle inspector.
-  * *How to use it*: We can study its C-based native handle querying logic to optimize our "Unlocker" C# implementation.
-* **YARA (VirusTotal)**:
+  * *How to use it*: We can study its C/C++-based native handle querying logic to optimize our "Unlocker" C# implementation.
+* **YARA** (originally by Victor Alvarez; maintained as an open-source project with VirusTotal as a major contributor):
   * *What it is*: A pattern-matching Swiss Army knife for security researchers.
   * *How to use it*: We can include the YARA DLL or node bindings to scan executable files against standard security rule files locally.
 * **Display Driver Uninstaller (DDU)**:
@@ -170,4 +180,4 @@ Yes. We should review and leverage these notable open-source projects:
   * *How to use it*: We can import and parse CleanerML definitions in Node.js to instantly clean junk files for hundreds of third-party programs.
 * **winget-cli (Windows Package Manager)**:
   * *What it is*: Microsoft's official CLI package manager.
-  * *How to use it*: We can query the winget open-source manifest database to retrieve silent installation/uninstallation arguments and switches.
+  * *How to use it*: We can query the winget open-source manifest repository as a primary source for silent installer arguments. Note: uninstaller switch coverage in winget manifests is inconsistent — many entries are missing or incorrect. The lookup chain is: (1) winget manifest, (2) project-maintained corrections JSON, (3) heuristic fallback sequence (`/qn` → `/S` → `--silent` → `-quiet`). See `docs/promptgate.md` Rule 15.
