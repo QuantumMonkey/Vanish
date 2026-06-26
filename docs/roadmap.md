@@ -12,6 +12,9 @@ graph TD
     P2 --> P3[Stage 3: Task Manager & Unlocker]
     P3 --> P4[Stage 4: Search & Destroy]
     P4 --> P5[Stage 5: Threat Intelligence]
+    P5 --> P6[Stage 6: Orchestration & Shell Cleanup]
+    P6 --> P7[Stage 7: Network & Disk Optimization]
+    P7 --> P8[Stage 8: Installation Sandbox]
 ```
 
 ### Stage 1: Core MVP (Current Status)
@@ -54,6 +57,27 @@ graph TD
     * Flag active programs executing destructive commands, such as attempts to delete volume shadow copies (`vssadmin delete shadows`) or edit host DNS files.
   * **Persistence Scan**: Check common malware persistence paths (e.g., Winlogon Shell modifications, AppInit_DLLs, browser helper objects).
   * **Integration with YARA**: Run lightweight YARA file pattern scans on suspicious directories.
+
+### Stage 6: Orchestration & Shell Cleanup
+* **Goal**: Enable bulk uninstallation and clean left-behind Windows shell context menus.
+* **Technical Tasks**:
+  * **Bulk Silent Uninstaller**: Group multiple uninstallation requests and run them sequentially (using native switches like `/qn` or `/S`) while trapping exit codes to block on reboot requirements.
+  * **Context Menu Cleaner**: Scan registry keys (under `HKCR\*\shellex\ContextMenuHandlers` and related classes) for orphaned CLSID associations linked to removed executables and clean them up.
+
+### Stage 7: Network & Disk Optimization
+* **Goal**: Provide active network monitoring, firewall control, and temporary junk file cleaning.
+* **Technical Tasks**:
+  * **Network Inspector**: List active sockets per application and resolve destination IP addresses.
+  * **Firewall Controller**: Enable one-click firewall blocking rules via PowerShell (`New-NetFirewallRule`) to cut off internet access for suspicious programs.
+  * **Junk Sweeper**: Scan and delete cache repositories, temp files, crash dumps, and leftover Windows Update downloads.
+
+### Stage 8: Installation Sandbox Rollback (The Complete End-to-End)
+* **Goal**: Allow users to monitor installer executions in real-time to enable 100% complete rollbacks.
+* **Technical Tasks**:
+  * **Snapshot Scanner**: Capture system folder and registry states immediately before and after running a custom installer, tracking diff logs.
+  * **Installation Logger**: Generate an isolated log file detailing every registry write, file addition, and driver registration performed by the program installer.
+  * **Total Rollback Purge**: Offer a one-click rollback that reverts every change logged, ensuring zero leftover traces.
+
 
 ---
 
