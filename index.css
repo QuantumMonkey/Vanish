@@ -1241,3 +1241,227 @@ input:checked + .slider:before {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
+
+/* ==========================================
+   STAGE 2 — AUDIT & HEALTH ADVISOR STYLES
+   ========================================== */
+
+.audit-section {
+  background: var(--bg-dark-card);
+  border: 1px solid var(--border-glass);
+  border-radius: 14px;
+  padding: 18px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.audit-section-title {
+  font-family: var(--font-title);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-gray);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audit-section-title i {
+  color: var(--color-primary);
+  font-size: 14px;
+}
+
+/* Info card grid */
+.audit-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.audit-info-card {
+  background: hsla(222, 40%, 8%, 0.6);
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-info-card .card-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.audit-info-card .card-value {
+  font-family: var(--font-title);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.audit-info-card .card-sub {
+  font-size: 11px;
+  color: var(--text-gray);
+}
+
+/* Disk progress bars */
+.disk-bar-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.disk-bar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.disk-bar-drive {
+  font-family: var(--font-title);
+  font-weight: 700;
+  color: var(--text-white);
+}
+
+.disk-bar-stats {
+  font-size: 12px;
+  color: var(--text-gray);
+}
+
+.disk-bar-track {
+  height: 8px;
+  background: hsla(222, 40%, 20%, 0.5);
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.disk-bar-fill {
+  height: 100%;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-accent));
+  transition: width 0.8s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.disk-bar-fill.warn {
+  background: linear-gradient(90deg, var(--color-warning), hsl(20, 90%, 55%));
+}
+
+.disk-bar-fill.danger {
+  background: linear-gradient(90deg, var(--color-danger), hsl(15, 90%, 55%));
+}
+
+/* Startup item badges */
+.audit-badge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-primary-glow);
+  border: 1px solid hsla(217, 91%, 60%, 0.3);
+  color: var(--color-primary);
+  border-radius: 99px;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.audit-badge.danger {
+  background: hsla(350, 89%, 60%, 0.15);
+  border-color: hsla(350, 89%, 60%, 0.3);
+  color: var(--color-danger);
+}
+
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.source-badge.registry   { background: hsla(217, 91%, 60%, 0.12); color: var(--color-primary); }
+.source-badge.task       { background: hsla(250, 95%, 65%, 0.12); color: var(--color-accent); }
+.source-badge.service    { background: hsla(38, 92%, 50%, 0.12);  color: var(--color-warning); }
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 5px;
+}
+
+.status-dot.active  { background: var(--color-success); }
+.status-dot.orphan  { background: var(--color-danger); }
+.status-dot.passive { background: var(--text-muted); }
+
+/* Redundancy alert boxes */
+.redundancy-group {
+  background: hsla(350, 89%, 60%, 0.06);
+  border: 1px solid hsla(350, 89%, 60%, 0.18);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.redundancy-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.redundancy-category {
+  font-family: var(--font-title);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-warning);
+}
+
+.redundancy-tip {
+  font-size: 11px;
+  color: var(--text-gray);
+  line-height: 1.4;
+}
+
+.redundancy-app-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.redundancy-pill {
+  background: hsla(222, 40%, 15%, 0.7);
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  color: var(--text-white);
+}
+
+/* No-redundancy success message */
+.audit-ok-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: hsla(142, 71%, 45%, 0.08);
+  border: 1px solid hsla(142, 71%, 45%, 0.2);
+  border-radius: 10px;
+  font-size: 13px;
+  color: var(--color-success);
+}
+

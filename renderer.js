@@ -348,29 +348,43 @@ function setupFilters() {
 
 // Setup Sidebar tabs
 function setupSidebarNavigation() {
+  const appsContentArea = document.querySelector('.content-area:not(#audit-panel)');
+  const auditPanel      = document.getElementById('audit-panel');
+
   elements.navItems.forEach(item => {
     item.addEventListener('click', (e) => {
       elements.navItems.forEach(nav => nav.classList.remove('active'));
       item.classList.add('active');
       activeTab = item.getAttribute('data-tab');
-      
-      // Manage views (for limited MVP we focus on All Apps, we'll show alerts on others)
+
       if (activeTab === 'all-apps') {
+        // Show apps panel, hide audit panel
+        if (appsContentArea) appsContentArea.style.display = '';
+        auditPanel.style.display = 'none';
         elements.searchBar.disabled = false;
         elements.typeToggle.style.pointerEvents = 'all';
         elements.typeToggle.style.opacity = '1';
         elements.sortSelector.disabled = false;
-        elements.appsTbody.parentElement.style.display = 'table';
         elements.detailsSidebar.classList.remove('active');
         loadApplications();
+
+      } else if (activeTab === 'audit') {
+        // Show audit panel, hide apps panel
+        if (appsContentArea) appsContentArea.style.display = 'none';
+        auditPanel.style.display = 'flex';
+        auditPanel.style.flexDirection = 'column';
+        auditPanel.style.flex = '1';
+        auditPanel.style.overflow = 'hidden';
+        loadAuditData();
+
       } else if (activeTab === 'force-uninstall') {
-        // Toggle view elements for force uninstall
         alert('Force Uninstall: This lets you enter a folder path or application name keyword directly to scan registry/filesystem remnants even if the application is not officially registered. Setup a test dummy application first!');
-        // Return to active All Apps tab
         document.querySelector('[data-tab="all-apps"]').click();
+
       } else if (activeTab === 'settings') {
         alert('Vanish Settings: Configuration options like custom paths to exclude, automatic backup path settings, and restore point configuration.');
         document.querySelector('[data-tab="all-apps"]').click();
+
       } else if (activeTab === 'about') {
         alert('Vanish Uninstaller v1.0.0\nCreated as a modern, high-performance, and safe deep uninstaller for Windows OS.');
         document.querySelector('[data-tab="all-apps"]').click();
@@ -768,4 +782,208 @@ function renderLeftoversTree() {
     
     tree.appendChild(regGroup);
   }
+}
+
+// ==========================================
+// STAGE 2 — AUDIT & HEALTH ADVISOR UI
+// ==========================================
+
+let auditLoaded = false;
+
+async function loadAuditData(force = false) {
+  if (auditLoaded && !force) return;
+
+  const loadingEl = document.getElementById('audit-loading');
+  const contentEl = document.getElementById('audit-content');
+  loadingEl.style.display = 'flex';
+  contentEl.style.display = 'none';
+  auditLoaded = false;
+
+  try {
+    // Fire all three PowerShell queries in parallel
+    const [diag, startup, redundancy] = await Promise.all([
+      window.api.getSystemDiagnostics(),
+      window.api.getStartupItems(),
+      window.api.getSoftwareRedundancy()
+    ]);
+
+    renderSysInfoCards(diag);
+    renderDiskBars(diag.disks || []);
+    renderStartupTable(startup);
+    renderRedundancyGroups(redundancy);
+
+    auditLoaded = true;
+    loadingEl.style.display = 'none';
+    contentEl.style.display = 'flex';
+  } catch (err) {
+    loadingEl.innerHTML = `
+      <i class="fa-solid fa-circle-xmark" style="font-size: 28px; color: var(--color-danger);"></i>
+      <div style="color: var(--color-danger);">Failed to load audit data: ${err.message}</div>
+    `;
+  }
+}
+
+// Attach refresh button
+document.addEventListener('DOMContentLoaded', () => {
+  const btnRefresh = document.getElementById('btn-refresh-audit');
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', () => loadAuditData(true));
+  }
+});
+
+function renderSysInfoCards(diag) {
+  const grid = document.getElementById('audit-sysinfo-grid');
+  if (!grid || !diag) return;
+
+  const uptimeStr = diag.os && diag.os.uptimeHours != null
+    ? `${diag.os.uptimeHours}h uptime`
+    : '';
+
+  const ramPct  = diag.ram && diag.ram.pctUsed != null ? `${diag.ram.pctUsed}%` : '';
+  const ramSub  = diag.ram ? `${diag.ram.usedGB ?? '?'} / ${diag.ram.totalGB ?? '?'} GB used` : '';
+
+  const cpuClockGHz = diag.cpu && diag.cpu.maxClockMHz
+    ? `${(diag.cpu.maxClockMHz / 1000).toFixed(2)} GHz`
+    : '';
+  const cpuSub = diag.cpu ? `${diag.cpu.cores ?? '?'} cores / ${diag.cpu.logicalCores ?? '?'} threads` : '';
+
+  const cards = [
+    { label: 'Operating System',  value: diag.os?.caption  ?? 'Unknown',    sub: `Build ${diag.os?.build ?? '?'} · ${diag.os?.architecture ?? ''}` },
+    { label: 'System Uptime',     value: uptimeStr || 'Unknown',              sub: '' },
+    { label: 'CPU',               value: shortenCpuName(diag.cpu?.name),      sub: `${cpuClockGHz} · ${cpuSub}` },
+    { label: 'RAM Usage',         value: ramPct || 'Unknown',                 sub: ramSub },
+    { label: 'GPU',               value: diag.gpu ?? 'Unknown',               sub: '' },
+    { label: 'Machine',           value: `${diag.manufacturer ?? ''} ${diag.model ?? ''}`.trim() || 'Unknown', sub: '' }
+  ];
+
+  grid.innerHTML = cards.map(c => `
+    <div class="audit-info-card">
+      <span class="card-label">${c.label}</span>
+      <span class="card-value" title="${c.value}">${c.value}</span>
+      ${c.sub ? `<span class="card-sub">${c.sub}</span>` : ''}
+    </div>
+  `).join('');
+}
+
+function shortenCpuName(name) {
+  if (!name) return 'Unknown';
+  // Collapse repeated whitespace and strip trailing processor brand noise
+  return name.replace(/\s+/g, ' ').replace(/ CPU @.*$/, '').trim();
+}
+
+function renderDiskBars(disks) {
+  const list = document.getElementById('audit-disk-list');
+  if (!list) return;
+
+  if (!disks || disks.length === 0) {
+    list.innerHTML = '<div style="color: var(--text-gray); font-size: 13px;">No local drives found.</div>';
+    return;
+  }
+
+  list.innerHTML = disks.map(d => {
+    const pct = d.pctUsed ?? 0;
+    const fillClass = pct >= 90 ? 'danger' : pct >= 75 ? 'warn' : '';
+    return `
+      <div class="disk-bar-row">
+        <div class="disk-bar-header">
+          <span class="disk-bar-drive">${d.drive}:\ &nbsp;<span style="font-weight:400; font-size:12px; color:var(--text-gray);">${d.label}</span></span>
+          <span class="disk-bar-stats">${d.usedGB} GB used of ${d.totalGB} GB &nbsp;·&nbsp; ${d.freeGB} GB free &nbsp;·&nbsp; ${pct}% full</span>
+        </div>
+        <div class="disk-bar-track">
+          <div class="disk-bar-fill ${fillClass}" style="width: ${pct}%;"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderStartupTable(startup) {
+  const tbody      = document.getElementById('audit-startup-tbody');
+  const countBadge = document.getElementById('audit-startup-count');
+  const orphanBadge= document.getElementById('audit-orphan-count');
+  if (!tbody) return;
+
+  const items   = startup.items   ?? [];
+  const total   = startup.total   ?? items.length;
+  const orphans = startup.orphans ?? 0;
+
+  if (countBadge)  countBadge.textContent  = total;
+  if (orphanBadge) {
+    orphanBadge.textContent = `${orphans} orphaned`;
+    orphanBadge.style.display = orphans > 0 ? 'inline-flex' : 'none';
+  }
+
+  if (items.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
+          <i class="fa-solid fa-circle-check" style="color:var(--color-success); margin-right:6px;"></i>No third-party startup items detected.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = items.map(item => {
+    const sourceClass = item.source === 'Registry' ? 'registry'
+                      : item.source === 'TaskScheduler' ? 'task'
+                      : 'service';
+    const sourceLabel = item.source === 'TaskScheduler' ? 'Task' : item.source;
+
+    const dotClass = item.exeExists === false ? 'orphan'
+                   : item.enabled ? 'active'
+                   : 'passive';
+    const statusLabel = item.exeExists === false ? 'Orphaned'
+                      : item.enabled ? 'Active'
+                      : 'Inactive';
+
+    const cmdShort = (item.command || '').length > 80
+      ? (item.command || '').slice(0, 80) + '…'
+      : (item.command || '—');
+
+    return `
+      <tr class="app-row">
+        <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${item.name}</td>
+        <td><span class="source-badge ${sourceClass}">${sourceLabel}</span></td>
+        <td>
+          <span class="status-dot ${dotClass}"></span>
+          <span style="font-size:12px; color: var(--text-gray);">${statusLabel}</span>
+        </td>
+        <td style="font-size: 11px; font-family: Consolas, monospace; color: var(--text-muted); word-break: break-all;" title="${item.command || ''}">${cmdShort}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function renderRedundancyGroups(redundancy) {
+  const list = document.getElementById('audit-redundancy-list');
+  if (!list) return;
+
+  const groups = redundancy.groups ?? [];
+
+  if (groups.length === 0) {
+    list.innerHTML = `
+      <div class="audit-ok-box">
+        <i class="fa-solid fa-circle-check"></i>
+        No redundant software categories detected. Your install list looks lean.
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = groups.map(g => {
+    const pills = (g.apps ?? []).map(a =>
+      `<span class="redundancy-pill">${a.name}</span>`
+    ).join('');
+    return `
+      <div class="redundancy-group">
+        <div class="redundancy-group-header">
+          <span class="redundancy-category"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${g.category}</span>
+          <span class="audit-badge danger">${g.count} installed</span>
+        </div>
+        <div class="redundancy-tip">${g.tip}</div>
+        <div class="redundancy-app-pills">${pills}</div>
+      </div>
+    `;
+  }).join('');
 }

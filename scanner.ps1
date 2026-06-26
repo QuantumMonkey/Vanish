@@ -501,6 +501,261 @@ function Purge-Remnants {
     return $results | ConvertTo-Json -Depth 5
 }
 
+# 5.5 Check Admin Elevation — WindowsPrincipal API (Promptgate Rule 13; replaces banned 'net session')
+function Check-AdminStatus {
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    return @{ isAdmin = $isAdmin } | ConvertTo-Json
+}
+
+# ==========================================
+# STAGE 2 — AUDIT & HEALTH ADVISOR BACKEND
+# ==========================================
+
+# 6. System Diagnostics (CIM-based, narrow SELECT to minimise latency)
+function Get-SystemDiagnostics {
+    # Elevation check via WindowsPrincipal (Rule 13)
+    $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    # --- OS Info ---
+    $os = $null
+    try {
+        $os = Get-CimInstance -Query "SELECT Caption, Version, BuildNumber, OSArchitecture, LastBootUpTime, FreePhysicalMemory, TotalVisibleMemorySize FROM Win32_OperatingSystem" -ErrorAction Stop
+    } catch {}
+
+    # --- CPU ---
+    $cpu = $null
+    try {
+        $cpu = Get-CimInstance -Query "SELECT Name, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed FROM Win32_Processor" -ErrorAction Stop
+    } catch {}
+
+    # --- RAM totals from OS query (already fetched above) ---
+    $ramTotalGB = if ($os -and $os.TotalVisibleMemorySize) { [math]::Round($os.TotalVisibleMemorySize / 1MB, 1) } else { $null }
+    $ramFreeGB  = if ($os -and $os.FreePhysicalMemory)     { [math]::Round($os.FreePhysicalMemory     / 1MB, 1) } else { $null }
+
+    # --- Disk volumes (filter to local fixed drives only) ---
+    $disks = @()
+    try {
+        $volumes = Get-CimInstance -Query "SELECT DriveLetter, Size, FreeSpace, VolumeName FROM Win32_LogicalDisk WHERE DriveType=3" -ErrorAction Stop
+        foreach ($v in $volumes) {
+            if (-not $v.DriveLetter) { continue }
+            $totalGB = if ($v.Size)      { [math]::Round($v.Size      / 1GB, 1) } else { 0 }
+            $freeGB  = if ($v.FreeSpace) { [math]::Round($v.FreeSpace / 1GB, 1) } else { 0 }
+            $usedGB  = [math]::Round($totalGB - $freeGB, 1)
+            $pctUsed = if ($totalGB -gt 0) { [math]::Round(($usedGB / $totalGB) * 100, 1) } else { 0 }
+            $disks += @{
+                drive    = $v.DriveLetter
+                label    = if ($v.VolumeName) { $v.VolumeName } else { "Local Disk" }
+                totalGB  = $totalGB
+                freeGB   = $freeGB
+                usedGB   = $usedGB
+                pctUsed  = $pctUsed
+            }
+        }
+    } catch {}
+
+    # --- BIOS / Manufacturer ---
+    $manufacturer = $null; $model = $null
+    try {
+        $cs = Get-CimInstance -Query "SELECT Manufacturer, Model FROM Win32_ComputerSystem" -ErrorAction Stop
+        $manufacturer = $cs.Manufacturer
+        $model        = $cs.Model
+    } catch {}
+
+    # --- GPU ---
+    $gpuName = $null
+    try {
+        $gpu = Get-CimInstance -Query "SELECT Name FROM Win32_VideoController" -ErrorAction Stop | Select-Object -First 1
+        $gpuName = if ($gpu) { $gpu.Name } else { $null }
+    } catch {}
+
+    # --- Uptime ---
+    $uptimeHours = $null
+    try {
+        if ($os -and $os.LastBootUpTime) {
+            $uptimeHours = [math]::Round(((Get-Date) - $os.LastBootUpTime).TotalHours, 1)
+        }
+    } catch {}
+
+    return @{
+        isAdmin      = $isAdmin
+        os           = @{
+            caption       = if ($os) { $os.Caption }       else { "Unknown" }
+            version       = if ($os) { $os.Version }       else { "Unknown" }
+            build         = if ($os) { $os.BuildNumber }   else { "Unknown" }
+            architecture  = if ($os) { $os.OSArchitecture } else { "Unknown" }
+            uptimeHours   = $uptimeHours
+        }
+        cpu          = @{
+            name           = if ($cpu) { $cpu.Name }                     else { "Unknown" }
+            cores          = if ($cpu) { $cpu.NumberOfCores }            else { $null }
+            logicalCores   = if ($cpu) { $cpu.NumberOfLogicalProcessors } else { $null }
+            maxClockMHz    = if ($cpu) { $cpu.MaxClockSpeed }            else { $null }
+        }
+        ram          = @{
+            totalGB = $ramTotalGB
+            freeGB  = $ramFreeGB
+            usedGB  = if ($ramTotalGB -and $ramFreeGB) { [math]::Round($ramTotalGB - $ramFreeGB, 1) } else { $null }
+            pctUsed = if ($ramTotalGB -and $ramFreeGB -and $ramTotalGB -gt 0) { [math]::Round((($ramTotalGB - $ramFreeGB) / $ramTotalGB) * 100, 1) } else { $null }
+        }
+        gpu          = $gpuName
+        manufacturer = $manufacturer
+        model        = $model
+        disks        = $disks
+    }
+}
+
+# 7. Startup Item Enumerator (Registry Run keys + Task Scheduler + Auto-start Services)
+function Get-StartupItems {
+    $items = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    # --- Registry Run Keys ---
+    $runHives = @(
+        @{ Path = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run";        Hive = "HKLM (64-bit)" },
+        @{ Path = "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run"; Hive = "HKLM (32-bit)" },
+        @{ Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";        Hive = "HKCU" },
+        @{ Path = "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce";    Hive = "HKLM RunOnce" },
+        @{ Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce";    Hive = "HKCU RunOnce" }
+    )
+    foreach ($hive in $runHives) {
+        if (Test-Path $hive.Path) {
+            try {
+                $props = Get-ItemProperty -Path $hive.Path -ErrorAction SilentlyContinue
+                if ($props) {
+                    $props.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object {
+                        $cmd = $_.Value.ToString()
+                        # Attempt to resolve executable path from the command string
+                        $exePath = $null
+                        if ($cmd -match '"([^"]+\.exe)"') { $exePath = $Matches[1] }
+                        elseif ($cmd -match '^([^\s]+\.exe)') { $exePath = $Matches[1] }
+                        $items.Add([PSCustomObject]@{
+                            name        = $_.Name
+                            command     = $cmd
+                            exePath     = $exePath
+                            exeExists   = if ($exePath) { Test-Path $exePath } else { $null }
+                            source      = "Registry"
+                            sourceDetail = $hive.Hive
+                            enabled     = $true
+                        })
+                    }
+                }
+            } catch {}
+        }
+    }
+
+    # --- Task Scheduler (logon-triggered tasks, not Windows built-ins) ---
+    try {
+        $tasks = Get-ScheduledTask -ErrorAction SilentlyContinue | Where-Object {
+            $_.State -ne 'Disabled' -and
+            $_.TaskPath -notlike '\Microsoft\*' -and
+            ($_.Triggers | Where-Object { $_ -and $_.CimClass.CimClassName -like '*Logon*' -or $_.CimClass.CimClassName -like '*Boot*' })
+        } | Select-Object -First 80  # cap to avoid very long scans
+        foreach ($task in $tasks) {
+            $action   = $task.Actions | Select-Object -First 1
+            $exePath  = if ($action) { $action.Execute } else { $null }
+            $items.Add([PSCustomObject]@{
+                name         = $task.TaskName
+                command      = if ($action) { "$($action.Execute) $($action.Arguments)" } else { "" }
+                exePath      = $exePath
+                exeExists    = if ($exePath) { Test-Path $exePath } else { $null }
+                source       = "TaskScheduler"
+                sourceDetail = $task.TaskPath
+                enabled      = ($task.State -eq 'Ready' -or $task.State -eq 'Running')
+            })
+        }
+    } catch {}
+
+    # --- Auto-start Services (non-Microsoft, StartMode=Auto) ---
+    try {
+        $services = Get-CimInstance -Query "SELECT Name, DisplayName, PathName, StartMode, State FROM Win32_Service WHERE StartMode='Auto'" -ErrorAction SilentlyContinue
+        foreach ($svc in $services) {
+            # Skip Windows-native services
+            $exePath = $null
+            if ($svc.PathName -match '"([^"]+\.exe)"') { $exePath = $Matches[1] }
+            elseif ($svc.PathName -match '^([^\s]+\.exe)') { $exePath = $Matches[1] }
+            
+            # Heuristic: skip services whose executables live under System32/SysWOW64
+            $isMsPath = $exePath -and ($exePath -like "*\System32\*" -or $exePath -like "*\SysWOW64\*" -or $exePath -like "*\Windows\*")
+            if ($isMsPath) { continue }
+
+            $items.Add([PSCustomObject]@{
+                name         = $svc.DisplayName
+                command      = $svc.PathName
+                exePath      = $exePath
+                exeExists    = if ($exePath) { Test-Path $exePath } else { $null }
+                source       = "Service"
+                sourceDetail = "StartMode=Auto | State=$($svc.State)"
+                enabled      = ($svc.State -eq 'Running')
+            })
+        }
+    } catch {}
+
+    return @{
+        items = $items
+        total = $items.Count
+        orphans = ($items | Where-Object { $_.exeExists -eq $false }).Count
+    }
+}
+
+# 8. Software Redundancy Detector (groups installed apps by category keyword clusters)
+function Get-SoftwareRedundancy {
+    $installedApps = Get-InstalledApps
+
+    # Category keyword map: category => list of name keywords (case-insensitive)
+    $categories = @{
+        "Web Browser"         = @("chrome","firefox","edge","opera","brave","vivaldi","safari","tor browser","maxthon","waterfox","librewolf","seamonkey","pale moon")
+        "PDF Reader"          = @("adobe reader","adobe acrobat","foxit","sumatra pdf","nitro pdf","pdf-xchange","pdf viewer","evince","okular","pdf24")
+        "Video Player"        = @("vlc","mpc-hc","mpc-be","potplayer","kmplayer","gom player","media player classic","kodi","plex","mpv","daum","zoom player")
+        "Audio Player"        = @("itunes","winamp","foobar2000","aimp","musicbee","groove","spotify","clementine","vox","dopamine")
+        "Compression Tool"    = @("winrar","7-zip","winzip","bandzip","peazip","izarc","hamster zip","nanazip")
+        "Screenshot / Screen" = @("snagit","greenshot","lightshot","picpick","sharex","flameshot","screenpresso","hypersnap")
+        "Antivirus / Security"= @("avast","avg","avira","bitdefender","kaspersky","norton","mcafee","malwarebytes","eset","defender","sophos","trend micro","f-secure","webroot","comodo")
+        "Download Manager"    = @("idm","internet download manager","freedownload manager","jdownloader","xtreme download","download accelerator")
+        "Note Taking"         = @("notion","obsidian","onenote","evernote","notepad++","roam research","logseq","joplin","simplenote","bear","zettlr")
+        "Remote Desktop"      = @("teamviewer","anydesk","rustdesk","chrome remote","parsec","nomachine","remote desktop","vnc","ultraviewer","zoho assist","splashtop")
+        "Code Editor / IDE"   = @("visual studio code","vscode","sublime text","atom","notepad++","brackets","eclipse","intellij","pycharm","webstorm","android studio","xcode","vim","emacs","neovim")
+        "Office Suite"        = @("microsoft office","libreoffice","openoffice","wps office","softmaker","kingsoft","google docs","onlyoffice")
+        "Image Editor"        = @("photoshop","gimp","affinity photo","paint.net","krita","lightroom","luminar","capture one","darktable","pixelmator")
+        "Virtual Machine"     = @("vmware","virtualbox","hyper-v","parallels","qemu","utm","virt-manager","virtualpc")
+    }
+
+    $groups = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($catName in $categories.Keys) {
+        $keywords  = $categories[$catName]
+        $matched   = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+        foreach ($app in $installedApps) {
+            $nameLower = $app.name.ToLower()
+            foreach ($kw in $keywords) {
+                if ($nameLower -like "*$kw*") {
+                    $matched.Add([PSCustomObject]@{
+                        id        = $app.id
+                        name      = $app.name
+                        publisher = $app.publisher
+                        version   = $app.version
+                        sizeBytes = $app.sizeBytes
+                    })
+                    break  # don't double-count an app matching multiple keywords in same category
+                }
+            }
+        }
+
+        if ($matched.Count -gt 1) {
+            $groups.Add([PSCustomObject]@{
+                category = $catName
+                count    = $matched.Count
+                apps     = $matched
+                tip      = "You have $($matched.Count) $catName applications installed. Consider keeping only one."
+            })
+        }
+    }
+
+    return @{
+        groups = $groups
+        hasRedundancy = ($groups.Count -gt 0)
+    }
+}
+
 # Command dispatching logic
 if ($Action) {
     switch ($Action) {
@@ -519,6 +774,19 @@ if ($Action) {
         }
         "purge" {
             Purge-Remnants -remnantsJson $ParamsJson
+        }
+        "check-admin" {
+            Check-AdminStatus
+        }
+        # ---- STAGE 2: AUDIT & HEALTH ADVISOR ----
+        "get-system-diagnostics" {
+            Get-SystemDiagnostics | ConvertTo-Json -Depth 6
+        }
+        "get-startup-items" {
+            Get-StartupItems | ConvertTo-Json -Depth 5
+        }
+        "get-software-redundancy" {
+            Get-SoftwareRedundancy | ConvertTo-Json -Depth 5
         }
         default {
             @{ success = $false; error = "Unknown action '$Action'" } | ConvertTo-Json

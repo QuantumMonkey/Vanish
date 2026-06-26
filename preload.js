@@ -16,6 +16,11 @@ contextBridge.exposeInMainWorld('api', {
   uninstallNative: (uninstallString) => ipcRenderer.invoke('uninstall-native', uninstallString),
   checkAdmin: () => ipcRenderer.invoke('check-admin'),
   
+  // Stage 2 — Audit & Health Advisor
+  getSystemDiagnostics: () => ipcRenderer.invoke('get-system-diagnostics'),
+  getStartupItems: () => ipcRenderer.invoke('get-startup-items'),
+  getSoftwareRedundancy: () => ipcRenderer.invoke('get-software-redundancy'),
+  
   // Titlebar / Frame Controls
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   maximizeWindow: () => ipcRenderer.send('window-maximize'),
@@ -24,3 +29,4 @@ contextBridge.exposeInMainWorld('api', {
   // Utilities
   openExternalLink: (url) => ipcRenderer.send('open-external-link', url)
 });
+

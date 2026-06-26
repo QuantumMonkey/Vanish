@@ -149,14 +149,42 @@ ipcMain.handle('uninstall-native', async (event, uninstallString) => {
   });
 });
 
-// Check Admin Status
+// Check Admin Status — uses WindowsPrincipal API via PowerShell (Promptgate Rule 13)
 ipcMain.handle('check-admin', async () => {
-  return new Promise((resolve) => {
-    exec('net session', (error) => {
-      // 'net session' returns error code 1 if not running elevated
-      resolve(!error);
-    });
-  });
+  try {
+    const result = await runPowerShell('check-admin');
+    return result.isAdmin === true;
+  } catch {
+    return false;
+  }
+});
+
+// Stage 2 — Audit & Health Advisor IPC Handlers
+ipcMain.handle('get-system-diagnostics', async () => {
+  try {
+    return await runPowerShell('get-system-diagnostics');
+  } catch (error) {
+    console.error('Error getting system diagnostics:', error);
+    return { error: error.message };
+  }
+});
+
+ipcMain.handle('get-startup-items', async () => {
+  try {
+    return await runPowerShell('get-startup-items');
+  } catch (error) {
+    console.error('Error getting startup items:', error);
+    return { items: [], total: 0, orphans: 0, error: error.message };
+  }
+});
+
+ipcMain.handle('get-software-redundancy', async () => {
+  try {
+    return await runPowerShell('get-software-redundancy');
+  } catch (error) {
+    console.error('Error getting software redundancy:', error);
+    return { groups: [], hasRedundancy: false, error: error.message };
+  }
 });
 
 // Frameless Window Control Handlers

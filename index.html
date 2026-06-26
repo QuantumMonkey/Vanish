@@ -41,6 +41,10 @@
             <i class="fa-solid fa-list-check"></i>
             <span>All Programs</span>
           </div>
+          <div class="nav-item" data-tab="audit">
+            <i class="fa-solid fa-chart-line"></i>
+            <span>Health Advisor</span>
+          </div>
           <div class="nav-item" data-tab="force-uninstall">
             <i class="fa-solid fa-bolt"></i>
             <span>Force Uninstall</span>
@@ -205,6 +209,85 @@
         </div>
 
       </div>
+
+      <!-- ===== AUDIT & HEALTH ADVISOR PANEL ===== -->
+      <div class="content-area" id="audit-panel" style="display: none;">
+
+        <!-- Audit Header -->
+        <div class="content-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 16px; margin-bottom: 0;">
+          <div style="font-family: var(--font-title); font-size: 18px; font-weight: 800; color: var(--text-primary);">
+            <i class="fa-solid fa-chart-line" style="color: var(--color-primary); margin-right: 10px;"></i>
+            Health Advisor
+          </div>
+          <button class="btn-sec" id="btn-refresh-audit" style="padding: 6px 16px; font-size: 12px;">
+            <i class="fa-solid fa-rotate-right"></i> Refresh
+          </button>
+        </div>
+
+        <!-- Audit Scroll Wrapper -->
+        <div id="audit-scroll-area" style="flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 20px;">
+
+          <!-- Loading state -->
+          <div id="audit-loading" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 14px; color: var(--text-gray);">
+            <i class="fa-solid fa-spinner fa-spin" style="font-size: 28px; color: var(--color-primary);"></i>
+            <div>Querying system via CIM... this may take a few seconds.</div>
+          </div>
+
+          <!-- Content (hidden until loaded) -->
+          <div id="audit-content" style="display: none; flex-direction: column; gap: 20px;">
+
+            <!-- Section: System Overview -->
+            <div class="audit-section">
+              <div class="audit-section-title"><i class="fa-solid fa-desktop"></i> System Overview</div>
+              <div class="audit-cards-grid" id="audit-sysinfo-grid">
+                <!-- Cards injected by renderer -->
+              </div>
+            </div>
+
+            <!-- Section: Storage -->
+            <div class="audit-section">
+              <div class="audit-section-title"><i class="fa-solid fa-hard-drive"></i> Storage</div>
+              <div id="audit-disk-list" style="display: flex; flex-direction: column; gap: 10px;">
+                <!-- Disk bars injected by renderer -->
+              </div>
+            </div>
+
+            <!-- Section: Startup Items -->
+            <div class="audit-section">
+              <div class="audit-section-title">
+                <i class="fa-solid fa-rocket"></i> Startup Items
+                <span class="audit-badge" id="audit-startup-count">0</span>
+                <span class="audit-badge danger" id="audit-orphan-count" style="display:none;">0 orphaned</span>
+              </div>
+              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 10px;">Registry Run keys, logon-triggered Scheduled Tasks, and third-party auto-start services.</div>
+              <div id="audit-startup-table-wrap" style="overflow-x: auto;">
+                <table class="apps-table" id="audit-startup-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 28%;">Name</th>
+                      <th style="width: 12%;">Source</th>
+                      <th style="width: 12%;">Status</th>
+                      <th style="width: 48%;">Command</th>
+                    </tr>
+                  </thead>
+                  <tbody id="audit-startup-tbody">
+                    <!-- rows injected by renderer -->
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <!-- Section: Redundant Software -->
+            <div class="audit-section" id="audit-redundancy-section">
+              <div class="audit-section-title"><i class="fa-solid fa-clone"></i> Redundant Software</div>
+              <div id="audit-redundancy-list" style="display: flex; flex-direction: column; gap: 10px;">
+                <!-- redundancy groups injected by renderer -->
+              </div>
+            </div>
+
+          </div><!-- /audit-content -->
+        </div><!-- /audit-scroll-area -->
+      </div><!-- /audit-panel -->
 
     </div>
   </div>
