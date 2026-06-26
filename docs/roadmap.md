@@ -59,7 +59,8 @@ graph TD
 ### Stage 5: Threat Intelligence Hunting Model
 * **Goal**: Identify and mitigate destructive, malicious, or highly suspicious application behaviors.
 * **Technical Tasks**:
-  * **Hybrid Threat Intelligence Lookup**: Implement local digital signature (Authenticode) verification and YARA scanning as the primary safety layer, with an optional, opt-in cloud lookup for file hashes utilizing open threat feeds (like abuse.ch MalwareBazaar API or user-provided VirusTotal API keys) to prevent user privacy leaks.
+  * **Keyless Threat Queries & Reporting**: Query free public threat databases (like the abuse.ch MalwareBazaar API) directly using public endpoints for file hashes, requiring no user API keys.
+  * **Community Threat Submission**: Provide a "Submit Threat Report" wizard that packages file metadata (SHA256, size, path, signature details) into a structured JSON report that users can submit directly to the FOSS project's community repository for analysis and crowdsourced rules database updates.
   * **Behavioral Heuristics (Process Spawning)**:
     * Detect suspicious process trees (e.g., Microsoft Word spawning `powershell.exe` or `cmd.exe`).
     * Flag active programs executing destructive commands, such as attempts to delete volume shadow copies (`vssadmin delete shadows`) or edit host DNS files.
