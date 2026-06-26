@@ -83,12 +83,12 @@ Vanish maintains a lightweight, non-intrusive system footprint.
 
 ---
 
-## Windows Backwards Compatibility
+## 🖥️ Windows OS Support Policy
 
-Vanish offers robust backwards compatibility across Windows OS versions:
-* **Windows 10 & 11**: 100% feature parity, including UWP uninstallation, restore point creation, and administrative registry queries.
-* **Windows 7, 8 & 8.1**: Desktop program uninstallation and registry cleaning work fully. UWP mapping is skipped automatically on these systems by checking for the existence of `Get-AppxPackage` or checking the Windows kernel version.
-* **Requirements**: Windows PowerShell 5.1 (bundled by default since Windows 7 SP1).
+Vanish exclusively targets modern, active Windows operating systems to maximize security and access advanced API sets:
+* **Supported OS Versions**: Windows 10 (1607+) and Windows 11.
+* **Legacy Systems (Windows 7 / 8 / 8.1)**: Excluded from support. Modern versions of Chromium and Electron (v23+) have dropped support for these operating systems, meaning the frontend framework will not execute. Additionally, these systems represent under 3% of active installations.
+* **Minimum PowerShell Version**: PowerShell 5.1 (bundled natively with all supported Windows 10 & 11 versions). By establishing PS 5.1 as the baseline, Vanish avoids legacy `Get-WmiObject` commands in favor of faster `Get-CimInstance` cmdlets and relies on robust, native AppX package queries.
 
 ---
 
