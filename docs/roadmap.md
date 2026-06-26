@@ -130,9 +130,12 @@ graph TD
 
 ## ⚖️ Open Source & License Assessment
 
-### 1. Is Open Source & Free a Good Idea?
-**Yes, absolutely.**
-* **Security & Administrative Trust**: Uninstallation utilities require highest administrative permissions (`requireAdministrator` privileges) to operate. Users are naturally cautious of closed-source applications requiring root access. Making Vanish open-source ensures **full code transparency**, proving to developers and security professionals that the app contains no hidden telemetry, ads, or backdoors.
+### 1. Monetization Strategy vs. FOSS Analysis
+* **Security & Administrative Trust**: Uninstallation utilities require highest administrative permissions (`requireAdministrator` privileges) to operate. Users are naturally cautious of closed-source applications requiring root access. Keeping the codebase open-source ensures **full code transparency**, proving to developers and security professionals that the app contains no hidden telemetry, ads, or backdoors.
+* **Proposed Monetization Models**:
+  1. **Microsoft Store Paid "Convenience Edition" (Recommended)**: Keep the raw source code 100% open-source and free on GitHub (compilable by developers), but charge a small, one-time convenience fee ($4.99–$9.99) on the Microsoft Store. This model (proven by NanaZip, ShareX, and Greenshot) is highly popular as users happily pay for automated background updates and single-click store deployment, while Microsoft handles payment processing completely.
+  2. **Open-Core / Dual-Licensing**: Distribute the core Uninstaller, System Diagnostics, and Cleaner modules under an open-source license (e.g., GPLv3). Bundle the advanced real-time process heuristic scanning, automated sandbox installation tracking, and corporate fleet auditing tools as a paid, proprietary "Pro" edition.
+  3. **Personal Free / Commercial Paid**: Distribute the full app for free to individual home users, but require corporate licenses for system administrators deploying the tool across enterprise workstations.
 * **Community-Driven Heuristics**: Software developers change installation structures constantly. An open-source model allows the community to contribute new scanning rules and file lock workarounds.
 * **Premium UX Competitiveness**: The existing FOSS options are visually outdated. A sleek, modern glassmorphic application will quickly capture developer attention.
 
