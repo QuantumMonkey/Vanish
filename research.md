@@ -70,3 +70,22 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: How do we scan for atypical remnants that do not match application name directories?**
   * **Report**: We integrate a community-maintained JSON rules mapping file (identifying common offsets like `.config`, `.toolcache`, `.unity3d`) to map hidden app storage directories.
 
+* **Q: How can we safely clean orphaned local MSI/MSP installer caches?**
+  * **Report**: We cross-reference files in `C:\Windows\Installer` against registry local package registries (under `HKLM\Software\Microsoft\Windows\CurrentVersion\Installer\LocalPackages`), safely moving/deleting unreferenced `.msi`/`.msp` files.
+
+* **Q: How can we prune orphaned SharedDLL registry reference counters?**
+  * **Report**: We inspect `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs` value paths, running `Test-Path` checks to delete registrations pointing to missing files.
+
+* **Q: How can we clean left-behind Jump Lists and taskbar pinned shortcut links?**
+  * **Report**: We scan pinned shortcut files (`.lnk`) in the shell folders and Jump List destination folders, identifying and deleting dead links referencing missing target paths.
+
+* **Q: How do we clean residual application AppCompat/ShimCache telemetry entries?**
+  * **Report**: We clean key values matching uninstalled executable names under AppCompat Assistant stores to prevent registry bloat and telemetry errors.
+
+* **Q: How do we remove residual Windows execution Prefetch files?**
+  * **Report**: We scan `C:\Windows\Prefetch` for `.pf` files matching uninstalled application executable names and delete them to clean system run records.
+
+* **Q: How do we clean orphaned system fonts registered in the registry?**
+  * **Report**: We check registry mappings in `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` against physical files in `C:\Windows\Fonts`, clearing registry entries for missing files.
+
+

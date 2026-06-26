@@ -17,6 +17,8 @@ graph TD
     P7 --> P8[Stage 8: Installation Sandbox]
     P8 --> P9[Stage 9: System Integration & Environment Clean]
     P9 --> P10[Stage 10: Enterprise Audits & Offset Rules]
+    P10 --> P11[Stage 11: Windows Cache & Installer Purge]
+    P11 --> P12[Stage 12: OS Telemetry & Shortcut Alignment]
 ```
 
 ### Stage 1: Core MVP (Current Status)
@@ -93,6 +95,20 @@ graph TD
   * **DCOM & WMI Namespace Cleanup**: Scan for orphaned WMI classes and DCOM app registrations referencing missing executables, cleaning the keys to prevent event log error noise.
   * **Event Log Channel Cleaner**: Clean orphaned application log channels registered under `EventLog` keys.
   * **Crowdsourced Offsets Database**: Load a community-driven JSON heuristics rules database to automatically map atypical directories that do not match application names (such as hidden `.config`, `.toolcache`, or `.unity3d` folders).
+
+### Stage 11: Windows Cache & Installer Purge
+* **Goal**: Safely clean orphaned system installer caches and SharedDLL registry value counters.
+* **Technical Tasks**:
+  * **Orphaned MSI/MSP Sweeper**: Scan `C:\Windows\Installer` for `.msi` and `.msp` local package files, cross-referencing them against active registry packages in `HKLM\Software\Microsoft\Windows\CurrentVersion\Installer\LocalPackages` to identify and safely move/delete unreferenced installers.
+  * **SharedDLLs Reference Cleaner**: Inspect paths registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs`. For any path where a `Test-Path` check fails (the DLL is physically gone), remove the registry count value to clean up dead links.
+
+### Stage 12: OS Telemetry & Shortcut Alignment
+* **Goal**: Scrub Jump Lists, AppCompat telemetry caches, Prefetch logs, and orphaned fonts.
+* **Technical Tasks**:
+  * **Jump Lists & Pin Scrub**: Locate pinning shortcuts and recent Jump List shortcut hashes (`.lnk` files) under `AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations`, deleting dead links pointing to missing application executables.
+  * **AppCompat Assistant Cleaner**: Scan registry keys under AppCompat Assistant stores (`AppCompatFlags\Compatibility Assistant\Store`) and delete telemetry values matching uninstalled executable names.
+  * **Prefetch Cache Cleaner**: Scan the `C:\Windows\Prefetch` directory, locate and delete `.pf` execution cache files matching the uninstalled app's executable names to clean OS execution history.
+  * **Orphaned Fonts Cleaner**: Match font registries under `Windows NT\CurrentVersion\Fonts` against files in `C:\Windows\Fonts`, removing registry maps for missing fonts.
 
 ---
 
