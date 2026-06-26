@@ -100,5 +100,15 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: What FOSS tool helps us find silent uninstallation arguments for thousands of desktop apps?**
   * **Report**: Windows Package Manager (winget-cli) by Microsoft, which houses an open-source manifest database detailing silent installer/uninstaller arguments and parameters.
 
+* **Q: How can we identify orphaned C++ runtimes (like Visual C++) that are no longer needed?**
+  * **Report**: We parse PE (Portable Executable) import directories of main application executables on disk, mapping their dynamic dependencies (e.g. `msvcr100.dll` to VC++ 2010), and flag runtimes that have no active app associations.
+
+* **Q: How can we identify idle/unused developer or hardware drivers (like Google USB driver)?**
+  * **Report**: We cross-reference active hardware devices from `Get-PnpDevice` against third-party driver packages from `Get-WindowsDriver`, flagging drivers that are installed but have no connected physical hardware.
+
+* **Q: How can we build a transparent, no-nonsense cleanup service comparable to commercial cleaners?**
+  * **Report**: We parse open-source BleachBit CleanerML definitions to clean temp files and caches, showing users exact paths and file counts to avoid misleading marketing performance claims.
+
+
 
 

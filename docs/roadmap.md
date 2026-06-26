@@ -19,6 +19,8 @@ graph TD
     P9 --> P10[Stage 10: Enterprise Audits & Offset Rules]
     P10 --> P11[Stage 11: Windows Cache & Installer Purge]
     P11 --> P12[Stage 12: OS Telemetry & Shortcut Alignment]
+    P12 --> P13[Stage 13: Runtime Dependency & Driver Audit]
+    P13 --> P14[Stage 14: CleanerML Cache Engine]
 ```
 
 ### Stage 1: Core MVP (Current Status)
@@ -109,6 +111,20 @@ graph TD
   * **AppCompat Assistant Cleaner**: Scan registry keys under AppCompat Assistant stores (`AppCompatFlags\Compatibility Assistant\Store`) and delete telemetry values matching uninstalled executable names.
   * **Prefetch Cache Cleaner**: Scan the `C:\Windows\Prefetch` directory, locate and delete `.pf` execution cache files matching the uninstalled app's executable names to clean OS execution history.
   * **Orphaned Fonts Cleaner**: Match font registries under `Windows NT\CurrentVersion\Fonts` against files in `C:\Windows\Fonts`, removing registry maps for missing fonts.
+
+### Stage 13: Runtime Dependency & Driver Audit
+* **Goal**: Audit dynamic linking dependencies to identify unused runtime packages (e.g. older Visual C++ redistributables) and idle hardware/developer drivers (e.g. Google USB drivers).
+* **Technical Tasks**:
+  * **PE Import Scanner**: Write a quick PE (Portable Executable) binary parser in PowerShell/C# that reads the import directory headers of installed application main executables, matching runtime references (e.g. `msvcr100.dll` imports) to map a database of active Visual C++ version dependencies.
+  * **Orphaned Runtime Detector**: Cross-reference the active dependency map against installed runtime packages. Flag any installed runtimes (e.g. Visual C++ 2005 or 2010) that have no active application references, warning that they can be uninstalled safely to reduce clutter and can be easily fetched again when required.
+  * **Idle Driver Auditor**: Cross-reference active hardware classes (`Get-PnpDevice -Status OK`) against third-party OEM drivers (`Get-WindowsDriver`), flagging installed developer or debug drivers (such as the Google USB debugging driver or Samsung Android driver) that are currently idle (no connected physical devices).
+
+### Stage 14: CleanerML Cache Engine
+* **Goal**: Provide an unpretentious, highly effective, transparent junk file cleaning service utilizing crowdsourced XML cleaning rules.
+* **Technical Tasks**:
+  * **CleanerML Engine**: Build a lightweight XML parser in Node.js to consume standard open-source **CleanerML** (BleachBit markup standard) definition files.
+  * **Folder/Registry Cleaner**: Execute CleanerML instructions (glob directory deletions, registry key wipes, MRU clearing) safely on the system.
+  * **Audit Report Details**: Display exact file paths, file sizes, and deleted counts in a transparent report, avoiding vague marketing optimization claims.
 
 ---
 
