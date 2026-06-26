@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vanish Uninstaller & Cleaner</title>
+  <link rel="stylesheet" href="index.css">
+  <!-- FontAwesome CDN for modern vector icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+
+  <!-- Background Glowing Orbs -->
+  <div class="background-glow">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="app-container">
+    <!-- Frameless Window Titlebar -->
+    <div class="titlebar">
+      <div class="titlebar-logo-area">
+        <i class="fa-solid fa-ghost" style="color: var(--color-primary);"></i>
+        <div class="titlebar-logo">VANISH<span>.</span></div>
+      </div>
+      <div class="titlebar-controls">
+        <button class="titlebar-btn" id="btn-minimize" title="Minimize"><i class="fa-solid fa-minus"></i></button>
+        <button class="titlebar-btn" id="btn-maximize" title="Maximize/Restore"><i class="fa-solid fa-expand"></i></button>
+        <button class="titlebar-btn close-btn" id="btn-close" title="Close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+    </div>
+
+    <!-- Main Workspace -->
+    <div class="main-wrapper">
+      
+      <!-- Sidebar Navigation -->
+      <div class="sidebar">
+        <div class="sidebar-nav">
+          <div class="nav-item active" data-tab="all-apps">
+            <i class="fa-solid fa-list-check"></i>
+            <span>All Programs</span>
+          </div>
+          <div class="nav-item" data-tab="force-uninstall">
+            <i class="fa-solid fa-bolt"></i>
+            <span>Force Uninstall</span>
+          </div>
+          <div class="nav-item" data-tab="settings">
+            <i class="fa-solid fa-sliders"></i>
+            <span>Settings</span>
+          </div>
+          <div class="nav-item" data-tab="about">
+            <i class="fa-solid fa-circle-info"></i>
+            <span>About</span>
+          </div>
+        </div>
+
+        <div class="sidebar-footer">
+          <div class="admin-badge unelevated" id="admin-indicator">
+            <i class="fa-solid fa-triangle-exclamation"></i>
+            <span>Standard User</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Content Area -->
+      <div class="content-area">
+        
+        <!-- Header Controls -->
+        <div class="content-header">
+          <div class="search-container">
+            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+            <input type="text" class="search-input" id="search-bar" placeholder="Search apps by name or publisher...">
+          </div>
+          
+          <div class="header-controls">
+            <!-- Desktop / UWP toggle selector -->
+            <div class="toggle-group" id="type-toggle">
+              <button class="toggle-btn active" data-type="all">All</button>
+              <button class="toggle-btn" data-type="desktop">Desktop</button>
+              <button class="toggle-btn" data-type="uwp">Windows Apps</button>
+            </div>
+
+            <!-- Sorting -->
+            <select class="select-custom" id="sort-selector">
+              <option value="name-asc">Name (A - Z)</option>
+              <option value="name-desc">Name (Z - A)</option>
+              <option value="size-desc">Size (Largest First)</option>
+              <option value="size-asc">Size (Smallest First)</option>
+              <option value="date-desc">Date Installed (Newest)</option>
+              <option value="date-asc">Date Installed (Oldest)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Dashboard Stats -->
+        <div class="dashboard-stats" id="dashboard-stats-area">
+          <div class="stat-card">
+            <div class="stat-icon blue">
+              <i class="fa-solid fa-cubes"></i>
+            </div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-total-apps">0</span>
+              <span class="stat-label">Total Installed</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon purple">
+              <i class="fa-brands fa-windows"></i>
+            </div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-uwp-apps">0</span>
+              <span class="stat-label">Store Apps</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon green">
+              <i class="fa-solid fa-hard-drive"></i>
+            </div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-total-size">0 MB</span>
+              <span class="stat-label">Total Disk Space</span>
+            </div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-icon red">
+              <i class="fa-solid fa-shield-halved"></i>
+            </div>
+            <div class="stat-info">
+              <span class="stat-value" id="stat-restore-status">Ready</span>
+              <span class="stat-label">System Safety</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Apps Workspace -->
+        <div class="apps-workspace">
+          
+          <!-- Apps List table container -->
+          <div class="apps-list-container">
+            <table class="apps-table">
+              <thead>
+                <tr>
+                  <th style="width: 45%;">Name</th>
+                  <th style="width: 25%;">Publisher</th>
+                  <th style="width: 15%;">Date</th>
+                  <th style="width: 15%;">Size</th>
+                </tr>
+              </thead>
+              <tbody id="apps-tbody">
+                <!-- App Rows generated dynamically by renderer.js -->
+                <tr id="initial-loading-row">
+                  <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
+                    <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px; color: var(--color-primary);"></i>
+                    <div>Gathering and mapping installed applications on your system...</div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- App Details Sidebar Panel -->
+          <div class="details-panel" id="details-sidebar">
+            <div class="details-header">
+              <div class="details-icon" id="det-icon">A</div>
+              <div class="details-title" id="det-title">Application Name</div>
+              <div class="details-publisher" id="det-publisher">Publisher Company</div>
+            </div>
+            
+            <div class="details-divider"></div>
+
+            <div class="details-info-list">
+              <div class="details-info-item">
+                <span class="details-label">Version</span>
+                <span class="details-value" id="det-version">1.0.0</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Install Date</span>
+                <span class="details-value" id="det-date">2026-01-01</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Estimated Size</span>
+                <span class="details-value" id="det-size">124 MB</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Installation Path</span>
+                <span class="details-value" id="det-path">C:\Program Files\App</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Registry Key Path</span>
+                <span class="details-value" id="det-reg">HKLM\Software\...</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Installer Type</span>
+                <span class="details-value" id="det-type">Desktop</span>
+              </div>
+            </div>
+
+            <button class="btn-primary" id="btn-start-uninstall">
+              <i class="fa-solid fa-trash-can"></i>
+              <span>Clean Uninstall</span>
+            </button>
+          </div>
+
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <!-- UNINSTALL WIZARD OVERLAY MODAL -->
+  <div class="modal-overlay" id="wizard-modal-overlay">
+    <div class="wizard-modal">
+      
+      <!-- Wizard Header -->
+      <div class="wizard-header">
+        <div class="wizard-title-area">
+          <div class="wizard-title" id="wiz-app-name">Uninstalling Notepad++</div>
+          <div class="wizard-subtitle" id="wiz-app-version">Version 8.5.2 • Desktop App</div>
+        </div>
+        <button class="wizard-close-btn" id="wiz-close-x" title="Cancel Uninstall"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- Steps Progress Tracker -->
+      <div class="wizard-steps">
+        <div class="step-item active" id="step1-progress">
+          <div class="step-node">1</div>
+          <span class="step-label">Configure</span>
+        </div>
+        <div class="step-item" id="step2-progress">
+          <div class="step-node">2</div>
+          <span class="step-label">Safety</span>
+        </div>
+        <div class="step-item" id="step3-progress">
+          <div class="step-node">3</div>
+          <span class="step-label">Native</span>
+        </div>
+        <div class="step-item" id="step4-progress">
+          <div class="step-node">4</div>
+          <span class="step-label">Scan</span>
+        </div>
+        <div class="step-item" id="step5-progress">
+          <div class="step-node">5</div>
+          <span class="step-label">Purge</span>
+        </div>
+      </div>
+
+      <!-- Screens Container -->
+      <div class="wizard-screens">
+        
+        <!-- Screen 1: Options / Settings -->
+        <div class="wizard-screen active" id="scr-config">
+          <div class="options-layout">
+            <h3 style="font-family: var(--font-title); font-weight: 700; margin-bottom: 12px; text-align: left;">Configure Uninstall Options</h3>
+            
+            <div class="option-toggle-row">
+              <div>
+                <div style="font-family: var(--font-title); font-weight: 600; font-size: 14px; margin-bottom: 2px;">Create System Restore Point</div>
+                <div style="font-size: 11px; color: var(--text-gray);">Backup system configurations before deleting entries.</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="chk-create-restore" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
+
+            <div class="scan-modes-box">
+              <div class="scan-modes-title">Leftover Scanning Aggressiveness</div>
+              <div class="scan-modes-grid">
+                <div class="mode-card" data-mode="Safe">
+                  <div class="mode-card-title">Safe</div>
+                  <div class="mode-card-desc">Only exact directory & installer key matches.</div>
+                </div>
+                <div class="mode-card selected" data-mode="Moderate">
+                  <div class="mode-card-title">Moderate</div>
+                  <div class="mode-card-desc">Default scans for app & publisher folders.</div>
+                </div>
+                <div class="mode-card" data-mode="Advanced">
+                  <div class="mode-card-title" style="color: var(--color-danger);">Advanced</div>
+                  <div class="mode-card-desc">Deep keyword registry & filesystem scans.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Screen 2: System Restore Loading -->
+        <div class="wizard-screen" id="scr-restore-loading">
+          <div class="loader-ring"></div>
+          <div class="loader-status">Creating System Restore Point...</div>
+          <div class="loader-substatus">This sets a fallback safety checkpoint on your Windows OS. This may take 15-30 seconds.</div>
+        </div>
+
+        <!-- Screen 3: Native Uninstaller Execute -->
+        <div class="wizard-screen" id="scr-native-run">
+          <div class="native-uninst-box">
+            <i class="fa-solid fa-gears pulse"></i>
+            <h4 style="font-family: var(--font-title); font-weight: 700; font-size: 16px; margin-bottom: 6px;">Native App Uninstaller</h4>
+            <p style="font-size: 12px; color: var(--text-gray); line-height: 1.5;" id="native-uninst-prompt-text">
+              We are ready to launch the program's native uninstaller wizard. Click the button below, then follow the instructions on your screen.
+            </p>
+          </div>
+          <button class="btn-primary" id="btn-launch-native">
+            <i class="fa-solid fa-circle-play"></i>
+            <span>Launch Native Uninstaller</span>
+          </button>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px;">Once the native wizard is finished, click Next to scan leftovers.</div>
+        </div>
+
+        <!-- Screen 4: Scanner Loading -->
+        <div class="wizard-screen" id="scr-scan-loading">
+          <div class="loader-ring" style="border-top-color: var(--color-accent);"></div>
+          <div class="loader-status" id="scan-status-text">Scanning Registry & Filesystem for leftovers...</div>
+          <div class="loader-substatus" id="scan-substatus-text">Searching common registry paths and directories.</div>
+        </div>
+
+        <!-- Screen 5: Remnants Tree Checklist -->
+        <div class="wizard-screen" id="scr-leftovers-tree" style="align-items: stretch; justify-content: flex-start; text-align: left;">
+          <div class="leftovers-layout">
+            <div class="leftovers-summary">
+              <div>
+                <span class="leftovers-count-badge" id="lbl-leftovers-summary">Discovered 0 remnants</span>
+                <span style="font-size: 12px; color: var(--text-gray); margin-left: 12px;">Review items carefully before purging.</span>
+              </div>
+              <button class="btn-sec" id="btn-select-all" style="padding: 4px 10px; font-size: 11px;">Select All</button>
+            </div>
+
+            <!-- Scrollable tree view -->
+            <div class="leftovers-tree" id="leftovers-tree-view">
+              <!-- Leftover items dynamically inserted -->
+            </div>
+          </div>
+        </div>
+
+        <!-- Screen 6: Purge Loading -->
+        <div class="wizard-screen" id="scr-purge-loading">
+          <div class="loader-ring" style="border-top-color: var(--color-danger); border-right-color: var(--color-warning);"></div>
+          <div class="loader-status">Purging Selected Leftovers...</div>
+          <div class="loader-substatus">Deleting registry keys and scrubbing directory remnants permanently from disk.</div>
+        </div>
+
+        <!-- Screen 7: Finished / Summary -->
+        <div class="wizard-screen" id="scr-complete">
+          <i class="fa-solid fa-circle-check" style="font-size: 64px; color: var(--color-success); margin-bottom: 20px;"></i>
+          <h2 style="font-family: var(--font-title); font-weight: 800; font-size: 24px; margin-bottom: 8px;">Clean Uninstall Successful!</h2>
+          <p style="font-size: 13px; color: var(--text-gray); max-width: 440px; line-height: 1.5; margin-bottom: 24px;" id="lbl-purge-result-text">
+            All selected leftover files, folders, and registry keys have been permanently removed. Your PC has been successfully cleaned.
+          </p>
+          <div style="background: var(--bg-dark-card); border: 1px solid var(--border-glass); padding: 14px 24px; border-radius: 12px; font-family: var(--font-title); font-weight: 700; font-size: 15px; color: var(--color-success);" id="lbl-space-saved">
+            Total Space Reclaimed: 124 MB
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Wizard Footer / Controls -->
+      <div class="wizard-footer">
+        <button class="btn-sec" id="btn-wiz-cancel">Cancel</button>
+        <button class="btn-sec" id="btn-wiz-back" style="display: none;">Back</button>
+        <button class="btn-primary" id="btn-wiz-next">Next <i class="fa-solid fa-chevron-right" style="font-size: 11px;"></i></button>
+        <button class="btn-danger" id="btn-wiz-purge" style="display: none;">Purge Leftovers</button>
+        <button class="btn-primary" id="btn-wiz-finish" style="display: none;">Finish</button>
+      </div>
+
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
