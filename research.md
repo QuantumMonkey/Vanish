@@ -108,7 +108,12 @@ This document logs key research findings, design questions, considerations, and 
 
 * **Q: How can we build a transparent, no-nonsense cleanup service comparable to commercial cleaners?**
   * **Report**: We parse open-source BleachBit CleanerML definitions to clean temp files and caches, showing users exact paths and file counts to avoid misleading marketing performance claims.
+* **Q: Can commercial licensing checks be deferred to a later development phase?**
+  * **Report**: Yes; implementing licensing checks early slows MVP progress and alienates early adopters. We should decouple licensing, adding it later as a wrapper module once product traction is established.
 
+* **Q: How can a Windows application programmatically detect commercial/enterprise environments?**
+  * **Report**: We check Active Directory state via `(Get-CimInstance Win32_ComputerSystem).PartOfDomain` or inspect network suffix settings, triggering commercial license requirements if true.
 
-
+* **Q: How can we implement secure, offline-compatible licensing validations?**
+  * **Report**: We verify cryptographic license keys via call-home HTTPS requests, caching digitally signed local hardware-bound tokens in encrypted storage for offline air-gapped support.
 
