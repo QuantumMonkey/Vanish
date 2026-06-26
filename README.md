@@ -29,5 +29,7 @@ npm start
 - [Roadmap](docs/roadmap.md)
 - [Development Rules](docs/promptgate.md)
 - [LLM Handoff](docs/handoff.md)
-- [Research Log](research.md)
+- [Research Log](docs/research.md)
+- [Benchmarks](docs/BENCHMARKS.md)
+- [Release Checklist](docs/RELEASING.md)
 - [Changelog](CHANGELOG.md)

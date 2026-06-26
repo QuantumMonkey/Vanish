@@ -15,12 +15,12 @@ Vanish is a modern Windows application manager and deep cleaner uninstaller. It 
 ## 📁 File Structure Map
 
 * **[package.json](../package.json)**: Scripts, configuration, and Electron (`^42.5.0`) dependency. *(Status: Complete)*
-* **[main.js](../main.js)**: Host window container. Regulates window actions (minimize, maximize, close), elevation queries (WindowsPrincipal API — see `docs/promptgate.md` Rule 13), and manages asynchronous PowerShell spawns. *(Status: Complete — MVP functional)*
-* **[preload.js](../preload.js)**: Exposes secure IPC APIs to the renderer world. *(Status: Complete — MVP functional)*
-* **[index.html](../index.html)**: Titlebar, dashboard statistics, application table workspace, details sidebar, and multi-stage uninstallation wizard overlay. *(Status: Complete — MVP functional)*
-* **[index.css](../index.css)**: Glassmorphic dark styling. Core variables, scrollbars, glowing orbit background animation, toggle switches, and threat-level color classes. *(Status: Complete — MVP functional)*
-* **[renderer.js](../renderer.js)**: Handles UI controller logic. Orchestrates app loading, sorting, detail sidebar rendering, and the step-by-step uninstallation wizard state machine. *(Status: Complete — MVP functional)*
-* **[scanner.ps1](../scanner.ps1)**: System execution engine. Decodes Base64 JSON arguments. Runs registry querying, UWP package mapping, system restore point checkpoints, remnant scans, and file/registry removals. *(Status: Complete — MVP functional)*
+* **[main.js](../main.js)**: Host window container. Regulates window actions (minimize, maximize, close), elevation queries (WindowsPrincipal API — see `docs/promptgate.md` Rule 13), and manages asynchronous PowerShell spawns. Stage 2 IPC handlers (`get-system-diagnostics`, `get-startup-items`, `get-software-redundancy`) added. *(Status: Complete — Stage 2 functional)*
+* **[preload.js](../preload.js)**: Exposes secure IPC APIs to the renderer world. Stage 2 APIs (`getSystemDiagnostics`, `getStartupItems`, `getSoftwareRedundancy`) included. *(Status: Complete — Stage 2 functional)*
+* **[index.html](../index.html)**: Titlebar, dashboard statistics, application table workspace, details sidebar, multi-stage uninstallation wizard overlay, and Health Advisor audit panel (Stage 2). *(Status: Complete — Stage 2 functional)*
+* **[index.css](../index.css)**: Glassmorphic dark styling. Core variables, scrollbars, glowing orbit background, toggle switches, threat-level color classes, and Stage 2 audit panel styles (info cards, disk bars, startup badges, redundancy boxes). *(Status: Complete — Stage 2 functional)*
+* **[renderer.js](../renderer.js)**: UI controller. App loading, sorting, detail sidebar, uninstallation wizard state machine, Health Advisor audit tab (Stage 2: `loadAuditData`, `renderSysInfoCards`, `renderDiskBars`, `renderStartupTable`, `renderRedundancyGroups`). *(Status: Complete — Stage 2 functional)*
+* **[scanner.ps1](../scanner.ps1)**: System execution engine. Base64 JSON argument decoding, registry/UWP querying, restore points, remnant scanning, file/registry removals. Stage 2: `Check-AdminStatus` (WindowsPrincipal), `Get-SystemDiagnostics` (CIM), `Get-StartupItems` (Run keys + Task Scheduler + Services), `Get-SoftwareRedundancy` (14-category clustering). *(Status: Complete — Stage 2 functional)*
 
 ---
 
@@ -44,7 +44,7 @@ Vanish must be run with administrative privileges to interact with HKLM registry
 
 **Core Tier** (complete before any public release):
 
-- `[ ]` **Stage 2 — Audit & Health Advisor Tab**: Interactive scorecard: unused software, reclaimable space, boot-up impact. *(Core)*
+- `[x]` **Stage 2 — Audit & Health Advisor Tab**: Health Advisor nav tab with system diagnostics (CIM), startup item enumeration (Registry Run hives, Task Scheduler, Services), and redundant software detection (14-category clustering). *(Core — Complete)*
 - `[ ]` **Stage 3 — Task Manager & Unlocker**: Process list with CPU/Memory/Disk, file handle inspector, Suspicious Activity Indicators display, Watchdog Suspension. *(Core)*
 - `[ ]` **Stage 6 — Orchestration & Shell Cleanup**: Bulk silent uninstaller, context menu cleaner, MSI service lockout manager, restore point frequency override. *(Core)*
 - `[ ]` **Stage 9 — System Integration & Environment Clean**: Services/drivers purge, PATH cleaner, file association repair, multi-user profile registry sweep, auto-UAC relauncher, registry redirection bypass. *(Core)*

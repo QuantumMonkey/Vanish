@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added
+* **Stage 2 — Audit & Health Advisor** (`scanner.ps1`, `main.js`, `preload.js`, `index.html`, `index.css`, `renderer.js`):
+  * `Get-SystemDiagnostics`: CIM-based OS, CPU, RAM, GPU, disk volume, and machine metadata queries.
+  * `Get-StartupItems`: Enumerates Registry Run hives (HKLM 64/32-bit, HKCU, RunOnce variants), logon-triggered Scheduled Tasks, and third-party auto-start services with orphan detection.
+  * `Get-SoftwareRedundancy`: 14-category keyword clustering to detect duplicate software installs (browsers, PDF readers, AV tools, etc.).
+  * Health Advisor nav tab with animated disk usage bars, startup item table (source badges, orphan flags), and redundancy alert groups.
+  * All three CIM queries run in parallel via `Promise.all` for minimal tab load latency.
+
+### Fixed
+* **Promptgate Rule 13 violation**: `check-admin` IPC handler in `main.js` replaced `net session` exec call with `WindowsPrincipal` API via dedicated `Check-AdminStatus` PowerShell function.
+
+### Changed
+* Moved `research.md`, `BENCHMARKS.md`, and `RELEASING.md` from repository root into `docs/` to consolidate all documentation.
+* Updated `README.md` documentation index, `docs/handoff.md` file map, and all internal cross-references to reflect new paths.
+* `docs/handoff.md` Stage 2 status marked complete with expanded function-level descriptions.
+
+---
+
 ## [1.0.0] - 2026-06-26
 
 ### Added
