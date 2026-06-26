@@ -135,4 +135,14 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: How do we optimize slow system WMI/CIM diagnostic query performance?**
   * **Report**: We request specific properties via CIM SELECT filters rather than downloading full objects, using fast registry lookups as primary caches for static hardware info.
 
+* **Q: How does Vanish automatically request UAC elevation if launched by an unelevated user?**
+  * **Report**: We check elevation status on startup via `net session`; if false, we spawn a PowerShell script using `Start-Process -Verb RunAs` to re-launch Electron with administrative rights.
+
+* **Q: How do we bypass the 24-hour rate limit when creating System Restore Points?**
+  * **Report**: We temporarily set the registry DWORD `SystemRestorePointCreationFrequency` under `HKLM\Software\Microsoft\Windows NT\CurrentVersion\SystemRestore` to `0` before checkpoint creation, reverting it afterward.
+
+* **Q: How do we bypass automatic registry redirection when querying 32-bit (Wow6432Node) keys from 64-bit host processes?**
+  * **Report**: We open registry keys explicitly using `[Microsoft.Win32.RegistryKey]::OpenBaseKey` specifying `RegistryView.Registry64` or `RegistryView.Registry32` to avoid automatic WOW64 redirection.
+
+
 
