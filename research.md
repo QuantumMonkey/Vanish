@@ -117,3 +117,22 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: How can we implement secure, offline-compatible licensing validations?**
   * **Report**: We verify cryptographic license keys via call-home HTTPS requests, caching digitally signed local hardware-bound tokens in encrypted storage for offline air-gapped support.
 
+* **Q: How do we handle Windows Installer service lockouts during bulk operations?**
+  * **Report**: We check service status (`msiserver`) before running uninstalls, temporarily enabling it via `Set-Service` if disabled, and queuing tasks to wait if another installer is active.
+
+* **Q: How do we bypass NTFS/ACL ownership blockages when deleting system remnants?**
+  * **Report**: We programmatically take folder ownership (using Windows `takeown` or modifying Access Control Rules) to elevate privileges above locked `TrustedInstaller` permissions.
+
+* **Q: How do we scan registry leftovers for all user profiles, not just the active one?**
+  * **Report**: We load individual offline user hives (`NTUSER.DAT`) under temporary registry nodes using `reg.exe load`, scan/clean them, and unload them to ensure complete multi-profile coverage.
+
+* **Q: How do we handle auto-restarting watchdog processes that re-lock files?**
+  * **Report**: We suspend process execution trees (using `NtSuspendProcess` native API binds) prior to handle closing, halting watchdog auto-starts while locks are released.
+
+* **Q: How do we mitigate the risk of corrupting Windows Installer by purging C:\Windows\Installer?**
+  * **Report**: We implement a "Backup and Move" quarantine vault instead of direct deletion, allowing users to restore quarantined `.msi`/`.msp` files if an application reports errors.
+
+* **Q: How do we optimize slow system WMI/CIM diagnostic query performance?**
+  * **Report**: We request specific properties via CIM SELECT filters rather than downloading full objects, using fast registry lookups as primary caches for static hardware info.
+
+
