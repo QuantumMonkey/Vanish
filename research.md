@@ -28,3 +28,28 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: What FOSS tool assists in detecting fileless in-memory process injection threats?**
   * **Report**: PE-sieve and HollowsHunter (by hasherezade), which inspect running processes for code hollowing, reflective DLL loading, and memory hooks, and dump anomalous regions for forensics.
 
+* **Q: How does a Force Uninstall handle corrupted or partially installed applications?**
+  * **Report**: It purges the local cached MSI files, removes product registry entries under Windows Installer UserData registry trees, and wipes remnants from the GAC/Assembly folders.
+
+* **Q: How can we implement safe bulk uninstallation orchestration on Windows?**
+  * **Report**: We queue and execute them sequentially (due to MSI service locks) using silent CLI arguments (`/qn`, `/S`) while monitoring sub-process exit codes to flag pending reboots.
+
+* **Q: How can we verify application integrity and spot corrupt files?**
+  * **Report**: We check for broken shortcuts, missing dependencies, and execute digital signature verification on internal DLL/EXE binary files to verify if they are altered or corrupted.
+
+* **Q: How can we clean left-behind Explorer shell extension context menu items?**
+  * **Report**: We scan for orphaned COM CLSIDs registered under `HKCR\*\shellex\ContextMenuHandlers` and related classes, cleaning the keys to prevent Explorer crashes.
+
+* **Q: How do we inspect and disable startup hooks and services?**
+  * **Report**: We inspect registry Run keys, scheduled tasks, active system services, and startup folders to list persistence points and allow toggling them off.
+
+* **Q: How can we monitor process network sockets and block destructive apps?**
+  * **Report**: We query active sockets to list open ports/destinations, allowing users to block target executables instantly in Windows Defender Firewall via `New-NetFirewallRule`.
+
+* **Q: How can we build a cache/junk cleaning tool to save disk space?**
+  * **Report**: We run cleaning passes scrubbing system temp directories (`$env:TEMP`), log files, dump caches, browser storage, and Windows update store remnants.
+
+* **Q: How can we monitor installations in real-time to enable 100% complete rollback?**
+  * **Report**: We compare filesystem and registry snapshots before and after installation, or hook native API calls, to log modifications and support full reversion.
+
+
