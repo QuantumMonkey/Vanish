@@ -55,6 +55,16 @@ Leftovers are located using a search heuristic based on three modes:
 
 ---
 
+## 🛡️ Counter-Malware & Threat Auditing Architecture
+
+Vanish integrates a passive threat auditing engine rather than a real-time, kernel-level antivirus (which would require complex, resource-heavy ELAM or Minifilter drivers). The threat auditing architecture focuses on:
+1. **Behavioral Heuristics (Process Spawning)**: Monitors active process trees in the Task Manager layer to flag suspicious behaviors (e.g., office applications spawning command interpreters, or programs executing shadow copy deletion commands like `vssadmin delete shadows`).
+2. **Persistence Path Auditing**: Scans known persistence hooks (Registry Run keys, Task Scheduler, AppInit_DLLs, Winlogon Shell entries) to list and alert users of unrecognized startup executables.
+3. **File Integrity & Digital Signatures**: Executes cryptographic hashing (MD5/SHA256) and verifies Authenticode digital signatures on target DLLs/EXEs to detect injection, tempering, or corrupt binaries.
+4. **Directory Pattern Scanning (YARA)**: Bundles precompiled YARA rule engines to run lightweight, on-demand signature scans over application directories during deep uninstallation scans.
+
+---
+
 ## Performance & Resource Targets
 
 Vanish maintains a lightweight, non-intrusive system footprint.
