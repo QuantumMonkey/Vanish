@@ -33,6 +33,7 @@ graph TD
   * **Asynchronous Sizing Worker**: Run a background thread to calculate physical folder sizes and cache them to disk.
   * **Boot Speed Analyzer**: Inspect registry `Run` hives (`HKCU/HKLM\Software\Microsoft\Windows\CurrentVersion\Run`), Task Scheduler (`Get-ScheduledTask`), and active Services to identify applications running on startup and calculate their startup latency impact.
   * **Consolidation Engine**: Detect redundant software (e.g. multiple web browsers, matching PDF readers) and alert the user.
+  * **Optimized Diagnostics Query**: Query hardware and system diagnostics using specific CIM SELECT filters (e.g., `Get-CimInstance -Query "SELECT Name, Caption FROM Win32_ComputerSystem"`), falling back to fast registry cache lookups to prevent thread delays.
 
 ### Stage 3: Task Manager & "Unlocker" Integration
 * **Goal**: Enable process management, resource tracking, and file/folder handle releasing (the "Unlocker" feature).
@@ -46,6 +47,7 @@ graph TD
       3. `RmGetList`: Query all processes (Process IDs and Names) currently holding locks on the registered resource.
       4. `RmShutdown`: Trigger a clean shutdown request to those processes, falling back to forceful process termination (`Stop-Process -Id <PID> -Force`) if they fail to close.
     * *Benefit*: 100% native, requires no external executables, and handles locks safely.
+  * **Watchdog Suspension System**: Integrate process suspension (using native `NtSuspendProcess` bindings) before closing handles, ensuring watchdog processes do not spawn new locking threads during remnant cleanup.
 
 ### Stage 4: Search & Destroy Keyword Purge
 * **Goal**: Allow users to enter arbitrary app names or folders to run a deep-scan cleanup, even if the application does not have a registry uninstaller entry.
@@ -69,6 +71,7 @@ graph TD
 * **Technical Tasks**:
   * **Bulk Silent Uninstaller**: Group multiple uninstallation requests and run them sequentially (using native switches like `/qn` or `/S`) while trapping exit codes to block on reboot requirements.
   * **Context Menu Cleaner**: Scan registry keys (under `HKCR\*\shellex\ContextMenuHandlers` and related classes) for orphaned CLSID associations linked to removed executables and clean them up.
+  * **Installer Lockout Manager**: Validate and configure the `msiserver` (Windows Installer) service state before executing uninstallation queues, temporarily enabling and starting it if needed, and managing concurrent locks.
 
 ### Stage 7: Network & Disk Optimization
 * **Goal**: Provide active network monitoring, firewall control, and temporary junk file cleaning.
@@ -90,6 +93,8 @@ graph TD
   * **Services & Drivers Purge**: Query registry service trees and remove leftover entries using `Remove-Service` or `sc.exe delete`, clean third-party driver store files via `pnputil /delete-driver`.
   * **PATH Environment Cleaner**: Scan user and system scope `PATH` environment variables using the `[System.Environment]` API, executing `Test-Path` check passes to filter out dead directories and remove redundant values.
   * **File Association & Protocol Repair**: Scan `Explorer\FileExts` registry hives, identifying broken CLSID handlers pointing to deleted executables, and purge dead file/protocol links.
+  * **NTFS/ACL Ownership Elevators**: Implement native `takeown.exe` or ACL modification scripts to bypass folder access restrictions when deleting leftover files in system-locked paths.
+  * **Multi-User Profile Registry Sweep**: Implement offline registry hive loading (`reg.exe load`) for `NTUSER.DAT` files of inactive users to sweep remnants from all user profiles, unloading them safely post-cleanup.
 
 ### Stage 10: Enterprise Audits & Offset Rules
 * **Goal**: Scrub advanced enterprise database relics and incorporate community mapping offsets.
@@ -101,7 +106,7 @@ graph TD
 ### Stage 11: Windows Cache & Installer Purge
 * **Goal**: Safely clean orphaned system installer caches and SharedDLL registry value counters.
 * **Technical Tasks**:
-  * **Orphaned MSI/MSP Sweeper**: Scan `C:\Windows\Installer` for `.msi` and `.msp` local package files, cross-referencing them against active registry packages in `HKLM\Software\Microsoft\Windows\CurrentVersion\Installer\LocalPackages` to identify and safely move/delete unreferenced installers.
+  * **Orphaned MSI/MSP Sweeper & Quarantine**: Scan `C:\Windows\Installer` for `.msi` and `.msp` local package files, cross-referencing them against active registry packages in `HKLM\Software\Microsoft\Windows\CurrentVersion\Installer\LocalPackages` to identify unreferenced installers. Move them to a secure quarantine directory vault instead of straight deletion to prevent registry/installer corruption.
   * **SharedDLLs Reference Cleaner**: Inspect paths registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs`. For any path where a `Test-Path` check fails (the DLL is physically gone), remove the registry count value to clean up dead links.
 
 ### Stage 12: OS Telemetry & Shortcut Alignment
