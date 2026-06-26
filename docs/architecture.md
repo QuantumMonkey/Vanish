@@ -13,6 +13,19 @@ Vanish is a modern, lightweight Windows application manager and deep-cleaning un
 
 ---
 
+## 🤖 AI, ML, Automation & Agent Integration
+
+Vanish prioritizes predictability, performance, and transparency for system-level modifications. Therefore:
+* **Machine Learning & AI Models**: No heavy local machine learning models or neural networks are bundled with the client application. Running local AI models would bloat the application package by gigabytes and spike memory/CPU utilization. Instead, Vanish uses deterministic rule-based matching, regex heuristics, YARA signatures, and structured XML databases (CleanerML). Any future AI/ML auditing features will be lightweight, optional, or delegated to an external API.
+* **Autonomous Agents**: Vanish does not employ autonomous agents inside the host OS for execution. All operations (uninstall queues, registry cleaning, handle closures) follow deterministic state machines to ensure predictable execution and prevent unauthorized filesystem modifications.
+* **Engineering & Automation**:
+  * **Automated Rollbacks**: Automated snapshot generation (filesystem and registry diffing) before/after third-party installations.
+  * **Automated Locker Resolver**: Real-time handle inspection (Restart Manager API) and automated process tree freezing (`NtSuspendProcess`) before releasing resource locks.
+  * **Silent Orchestration**: Sequential scheduling and silent parameter configuration for multiple installers with dynamic `msiserver` state management.
+  * **System Environment Cleanup**: Automated path checks, orphaned service scans, and inactive profile registry sweeps (`reg.exe load`).
+
+---
+
 ## System Architecture
 
 ```mermaid
@@ -44,11 +57,19 @@ Leftovers are located using a search heuristic based on three modes:
 
 ## Performance & Resource Targets
 
+Vanish maintains a lightweight, non-intrusive system footprint.
 * **Application Listing Startup Time**: < 1.8 seconds (Cached, non-blocking size calculation).
 * **PowerShell Execution Overhead**: < 120ms launch latency.
-* **Memory Utilization (Idle)**: < 65MB.
-* **Memory Utilization (Scanning)**: < 95MB.
+* **Memory Footprint**:
+  * **Idle**: < 65MB.
+  * **Scanning & Unlocking**: < 95MB.
+  * **Peak (Real-time sandbox tracking)**: < 110MB.
+* **CPU Utilization**:
+  * **Idle**: ~0% CPU.
+  * **Active Deep Scanning**: < 15% on modern multi-core CPUs due to non-blocking asynchronous IO.
+* **Disk I/O**: Heavy reads are throttled and restricted to designated app directories to prevent system stuttering.
 * **Registry Scan Throughput**: ~250 subkeys/second (restricted to top 2 levels under `Software` for speed).
+* **Application Package Size**: < 80MB (fully packaged Electron application).
 
 ---
 
