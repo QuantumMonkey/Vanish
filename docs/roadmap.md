@@ -131,3 +131,15 @@ Yes. We should review and leverage these notable open-source projects:
 * **YARA (VirusTotal)**:
   * *What it is*: A pattern-matching Swiss Army knife for security researchers.
   * *How to use it*: We can include the YARA DLL or node bindings to scan executable files against standard security rule files locally.
+* **Display Driver Uninstaller (DDU)**:
+  * *What it is*: The industry-standard GPU/audio driver uninstaller by Wagnard.
+  * *How to use it*: We can inspect its C# routines for driver store cleaning and Safe Mode restarts to implement driver-level cleanups.
+* **Microsoft PowerToys (File Locksmith)**:
+  * *What it is*: A native utility for auditing and unlocking file/folder handles.
+  * *How to use it*: We can study its C++ source code to optimize our native Windows Restart Manager handle mappings.
+* **BleachBit CleanerML**:
+  * *What it is*: An XML-based markup standard defining clean-up paths for hundreds of apps.
+  * *How to use it*: We can import and parse CleanerML definitions in Node.js to instantly clean junk files for hundreds of third-party programs.
+* **winget-cli (Windows Package Manager)**:
+  * *What it is*: Microsoft's official CLI package manager.
+  * *How to use it*: We can query the winget open-source manifest database to retrieve silent installation/uninstallation arguments and switches.

@@ -88,4 +88,17 @@ This document logs key research findings, design questions, considerations, and 
 * **Q: How do we clean orphaned system fonts registered in the registry?**
   * **Report**: We check registry mappings in `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts` against physical files in `C:\Windows\Fonts`, clearing registry entries for missing files.
 
+* **Q: What FOSS tool shows how to clean graphics/audio drivers deeply?**
+  * **Report**: Display Driver Uninstaller (DDU) by Wagnard, which has custom safe-mode routines to purge deep OEM driver registries, kernel device maps, and DCH setup files.
+
+* **Q: What FOSS tool shows how to programmatically audit open file handles natively?**
+  * **Report**: Microsoft PowerToys' File Locksmith tool, which shows a complete C++ framework for querying the Windows system for file handles and releasing locking holds.
+
+* **Q: What FOSS tool helps us clean cache/junk files for hundreds of apps out-of-the-box?**
+  * **Report**: BleachBit's CleanerML, an XML-based markup database containing clean-up paths and globs for hundreds of apps; we can write a parser in Node to consume CleanerML files.
+
+* **Q: What FOSS tool helps us find silent uninstallation arguments for thousands of desktop apps?**
+  * **Report**: Windows Package Manager (winget-cli) by Microsoft, which houses an open-source manifest database detailing silent installer/uninstaller arguments and parameters.
+
+
 
