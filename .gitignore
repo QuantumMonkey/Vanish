@@ -3,9 +3,16 @@ package-lock.json
 .vscode/
 dist/
 *.log
-graphify-out/cache/
 .claude/settings.local.json
 .security-reports/
+
+# Per-project tooling cruft copied in by init-project.ps1 -- belongs to
+# the operating system (D:\Claude setups), not the Vanish project repo.
+.claude/skills/
+skills-archive/
+init-project.ps1
+# Graphify knowledge-graph output (generated, re-derivable)
+graphify-out/
 .env
 .env.*
 !.env.example
