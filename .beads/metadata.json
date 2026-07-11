@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "vanish_uninstaller",
+  "project_id": "1ce62b34-c145-4cab-8904-46b44c6b3ba1"
+}

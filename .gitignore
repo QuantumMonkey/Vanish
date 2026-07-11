@@ -3,3 +3,15 @@ package-lock.json
 .vscode/
 dist/
 *.log
+graphify-out/cache/
+.claude/settings.local.json
+.security-reports/
+.env
+.env.*
+!.env.example
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
