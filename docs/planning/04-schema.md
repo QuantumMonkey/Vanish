@@ -61,7 +61,8 @@
   | meta | object | {} | rule 6 |
 
 - **ENT-03** Uninstall corrections (`corrections.json`, committed to repo,
-  read-only at runtime) -- serves REQ-10, FLOW-05, Rule 15 chain step 2
+  read-only at runtime) -- serves REQ-10, FLOW-05, Rule 15 chain step 1
+  (PRIMARY source; winget dropped per OPEN-02, amended 2026-07-11)
   | Field | Type | Default | Why |
   |---|---|---|---|
   | schemaVersion | int | 1 | rule 2 |

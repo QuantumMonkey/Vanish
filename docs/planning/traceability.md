@@ -14,9 +14,9 @@
 | REQ-05 | -- | SCR-01 | FLOW-01 | -- | 05 | covered |
 | REQ-06 | NFR-03 | SCR-03 | -- (in-tab) | ENT-02 | 06 | covered |
 | REQ-07 | TEC-04 | SCR-03 | FLOW-04 | -- | 07 | covered |
-| REQ-08 | -- | SCR-03 | FLOW-04 | -- | 09 | covered (SHOULD; OPEN-01) |
+| REQ-08 | -- | SCR-03 | FLOW-04 | -- | 09 | covered (SHOULD; OPEN-01 resolved) |
 | REQ-09 | -- | SCR-03 | -- (display-only) | -- | 08 | covered |
-| REQ-10 | NFR-05 | SCR-04 | FLOW-05 | ENT-03, ENT-04 | 10, 11 | covered (OPEN-02) |
+| REQ-10 | NFR-05 | SCR-04 | FLOW-05 | ENT-03, ENT-04 | 10, 11 | covered (OPEN-02 resolved) |
 | REQ-11 | -- | SCR-05 | FLOW-06 | ENT-01 | 14 | covered |
 | REQ-12 | -- | SCR-04 | FLOW-05 | -- | 11 | covered |
 | REQ-13 | -- | SCR-04 | FLOW-05 | -- | 12 | covered |
@@ -40,6 +40,6 @@ surface); justified, not an orphan.
 
 | OPEN | Owner | Blocks | Deadline phase |
 |---|---|---|---|
-| OPEN-01 | research (Antigravity) | TASK-09 only | before phase 2 ends |
-| OPEN-02 | research (Antigravity) | TASK-10 lookup step 1 | before phase 3 starts |
+| OPEN-01 | RESOLVED 2026-07-11 | (was TASK-09) | closed -- NtSuspendProcess, bd 2ax |
+| OPEN-02 | RESOLVED 2026-07-11 | (was TASK-10) | closed -- winget dropped, Rule 15 amended, bd 1gi |
 | OPEN-03 | phase-2 implementation (measure) | nothing | phase 2 |

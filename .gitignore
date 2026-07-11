@@ -22,3 +22,6 @@ graphify-out/
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Antigravity exploration scratch (never merged; findings return via bd)
+scratch/

@@ -164,31 +164,35 @@ release-prep task outside this pack.
 - **Implements:** REQ-08, FLOW-04 respawn branch
 - **Context manifest:**
   - Files: `scanner.ps1` (suspend/resume primitives), unlock action
-  - Doc sections: `00-prd.md` OPEN-01 resolution (from bd research
-    findings; if unresolved, this task is BLOCKED, not improvised)
-  - Do NOT read: UI files (reuses FLOW-04 dialog)
-- **Steps:** per OPEN-01 research outcome; suspend holder tree, unlock,
-  resume or terminate per user choice.
+  - Doc sections: bd `vanish-uninstaller-2ax` OPEN-01 findings (RESOLVED
+    2026-07-11: NtSuspendProcess/NtResumeProcess via Add-Type, tree
+    discovery via Win32_Process, resume guaranteed by IDisposable +
+    try/finally; scratch sketch is reference-only, reimplement per spec)
+  - Do NOT read: UI files (reuses FLOW-04 dialog); scratch/ is gitignored
+- **Steps:** per OPEN-01: NtSuspendProcess the holder tree (handles held
+  open after CIM discovery to survive PID reuse), unlock, then guaranteed
+  resume/terminate via the IDisposable finally path per user choice.
 - **Verify:** self-restarting watchdog pair script cleaned without respawn.
 - **Done when:** REQ-08 acceptance criterion passes.
 - **Est. size:** M
 
 ### TASK-10 Switch lookup chain + corrections file [phase 3]
-- **Implements:** REQ-10 (lookup), ENT-03, Rule 15
+- **Implements:** REQ-10 (lookup), ENT-03, Rule 15 (2-step, amended)
 - **Context manifest:**
   - Files: `scanner.ps1` (new `resolve-uninstall-args` action), new
     `corrections.json`
-  - Doc sections: `04-schema.md` ENT-03, promptgate Rule 15,
-    `00-prd.md` OPEN-02 resolution from bd
+  - Doc sections: `04-schema.md` ENT-03, promptgate Rule 15 (amended
+    2026-07-11), `00-prd.md` OPEN-02 (resolved)
   - Do NOT read: queue UI
-- **Steps:** implement chain: local winget data (per OPEN-02 outcome) ->
-  corrections.json -> heuristic sequence; return method used; seed
-  corrections.json with entries for the test-VM app set.
-- **Verify:** unit-style engine calls for one app per chain branch,
-  asserting method field.
-- **Done when:** chain returns correct args + method for all three
-  branches.
-- **Est. size:** M
+- **Steps:** implement the 2-step chain: corrections.json (primary) ->
+  heuristic sequence (`/qn` -> `/S` -> `--silent` -> `-quiet`); return
+  method used; seed corrections.json with the OPEN-02 verified entries
+  (Chrome, Firefox, Slack, Zoom, Steam, Notepad++, VLC) plus the test-VM
+  app set. Winget is NOT a runtime step (OPEN-02 / Rule 6).
+- **Verify:** unit-style engine calls for one app per chain branch
+  (a corrections hit and a heuristic-fallback miss), asserting method field.
+- **Done when:** chain returns correct args + method for both branches.
+- **Est. size:** S (was M -- one lookup source removed)
 
 ### TASK-11 Bulk uninstall queue engine + panel [phase 3]
 - **Implements:** REQ-10, REQ-12, ENT-04, FLOW-05, SCR-04, NFR-05

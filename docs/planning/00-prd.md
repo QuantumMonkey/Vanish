@@ -86,9 +86,9 @@ Stage 3 (Task Manager & Unlocker):
 Stage 6 (Orchestration & Shell Cleanup):
 
 - **REQ-10** [MUST] Bulk silent uninstall queue: select multiple apps, run
-  uninstallers sequentially with the Rule 15 switch lookup chain (winget
-  manifest, corrections JSON, heuristic fallback), trap exit codes, pause
-  on reboot-required.
+  uninstallers sequentially with the Rule 15 switch lookup chain (corrections
+  JSON primary, then heuristic fallback -- winget dropped, see OPEN-02),
+  trap exit codes, pause on reboot-required.
   *Accept when:* M4 scenario passes; per-app method logged.
 - **REQ-11** [MUST] Context menu cleaner: find orphaned shell extension
   handlers pointing to missing executables; removal is review-gated and
@@ -174,9 +174,11 @@ Stage 9 (System Integration & Environment Clean):
 - OPEN-01: Process suspension mechanism for REQ-08 (undocumented
   NtSuspendProcess vs documented alternatives). | Owner: research
   (Antigravity, findings to bd) | Blocks: TASK for REQ-08 only.
-- OPEN-02: Exact winget manifest query path without network at runtime
-  (Rule 6) -- local winget CLI query vs cached manifest snapshot.
-  | Owner: research (Antigravity) | Blocks: TASK for REQ-10 lookup chain.
+- OPEN-02 [RESOLVED 2026-07-11]: winget cannot be queried offline (default
+  source is a network REST API; Rule 6 forbids the call) and does not expose
+  UninstallerSwitches. Resolution: drop winget; corrections.json is the
+  primary source, heuristic fallback second. Rule 15 amended accordingly;
+  see DEVIATIONS.md. Findings in bd vanish-uninstaller-1gi.
 
 ## Gate checklist
 

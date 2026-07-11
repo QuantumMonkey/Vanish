@@ -182,14 +182,15 @@ The full release checklist lives in `RELEASING.md`.
 
 ## WINGET & UNINSTALLER ARGUMENTS
 
-### Rule 15 — winget manifests are not authoritative for uninstaller switches
+### Rule 15 -- corrections JSON is the source of truth for uninstaller switches
 The uninstaller argument lookup chain is:
 
-1. winget manifest (if `UninstallerSwitches` field is populated and has been verified)
-2. Project-maintained corrections JSON (stored in repo, community-correctable)
-3. Heuristic fallback sequence: `/qn` → `/S` → `--silent` → `-quiet`
+1. Project-maintained corrections JSON (stored in repo, community-correctable)
+2. Heuristic fallback sequence: `/qn` -> `/S` -> `--silent` -> `-quiet`
 
-Log which method succeeded per app to improve the corrections database over time. Never assume a winget manifest is correct without verification. Many enterprise and legacy apps are not in the winget database at all.
+Log which method succeeded per app to improve the corrections database over time.
+
+**winget dropped as a runtime source (amended 2026-07-11, supersedes the prior 3-step chain).** Research OPEN-02 (Antigravity, bd `vanish-uninstaller-1gi`) confirmed: winget's default source is now a REST API (`cdn.winget.microsoft.com/cache`), so `winget show`/`search` trigger a network call -- which Rule 6 permanently forbids -- and there is no full offline manifest cache. `winget show`/`export` do not even emit the `UninstallerSwitches` field. Rule 6 wins the conflict, so winget cannot be a runtime lookup step. If a bundled offline manifest snapshot is ever pursued, it must come in as a user-requested definition pack under Rule 4, never a network fetch, and would be a Standard-tier addition -- not part of this chain.
 
 ---
 
