@@ -13,16 +13,31 @@
 | 2 Task Manager | "The Task Manager tab shows live processes with passive indicators, and a locked file can be identified and freed." | TASK-06..09 |
 | 3 Orchestration | "Five queued apps uninstall silently back-to-back, each with its own restore point." | TASK-10..12 |
 | 4 System Clean | "Each cleaner finds planted orphans, purges them through the vault, and restore brings them back." | TASK-13..16 |
+| 5 Release | "A signed Core-tier build passes on clean Win10 + Win11, survives a security audit, and is submitted to the Microsoft Store." | TASK-17..22 |
 
-Each phase ends with /verify + completion-gate checklist + /code-review
-medium, THEN the cross-model gate: write
+Each code phase (1-4) ends with /verify + completion-gate checklist +
+/code-review medium, THEN the cross-model gate: write
 `docs/planning/reviews/phase-N-gemini-review.md` from the gemini-review
 template; the user runs it in Antigravity; the verdict block lands in the
 phase's bd issue. FAIL blocks the next phase. Phase 1 additionally gets
 /code-review high before merge (it touches deletion code paths).
-Rule 10 note: phase "done" in bd = code + local verify; the CHANGELOG
-"Complete" label waits for the Win10+Win11 VM pass, tracked as a separate
-release-prep task outside this pack.
+Rule 10 note: phase "done" in bd for phases 1-4 = code + local verify; the
+CHANGELOG "Complete" label and the release itself wait for Phase 5's
+Win10+Win11 VM pass. Phase 5 is the end-to-end runway from "code complete"
+to "shipped", and enforces the playbook MVP definition-of-done (below).
+
+## Phase 5 gate -- the MVP definition-of-done (playbook)
+
+The Core release ships when, and only when, all six hold. Each maps to a
+Phase 5 task:
+1. Every MUST REQ traces to a closed bd task (traceability, no orphans) -- gate of TASK-17.
+2. /verify passed on the deployed/VM environment, not just locally -- TASK-17.
+3. /code-review high on all destructive surfaces; findings fixed or waived in writing -- TASK-19.
+4. /cso run once; criticals fixed, rest ticketed -- TASK-18.
+5. Docs current via /sync-docs; a stranger can build/run from README alone; demo GIF present (Rule 22) -- TASK-20.
+6. One real user other than the operator completes the core flow -- TASK-22.
+Code signing (Rule 14) is a hard gate inside TASK-21; no unsigned binary
+ships, including beta.
 
 ## Tasks
 
@@ -292,12 +307,121 @@ others depend on it)
 - **Done when:** REQ-17 and REQ-19 acceptance criteria pass.
 - **Est. size:** M
 
+### TASK-17 VM test matrix -- Core-tier pass on clean Win10 + Win11 [phase 5]
+- **Implements:** DoD-1, DoD-2 (Rule 10); grounds all of phases 1-4
+- **Context manifest:**
+  - Files: none new; exercises the whole app. New: `docs/BENCHMARKS.md`
+    entries; a `docs/planning/reviews/vm-test-log.md` results table.
+  - Doc sections: each phase's task Verify blocks (the acceptance checks
+    become the VM test script), promptgate Rule 10, `00-prd.md` M1-M4
+  - Do NOT read: source internals -- this is black-box acceptance testing
+- **Steps:** stand up a clean Windows 10 (1607+) VM and a clean Windows 11
+  VM; run every phase's acceptance check (plant fixtures, exercise flow,
+  assert vault/restore/oplog); run M4 (five queued apps) for real; record
+  measured NFR-03 figures into BENCHMARKS.md with the Rule 9 test-condition
+  fields. A failed check is a bug ticket, not a note.
+- **Verify:** the results table shows every REQ acceptance check PASS on
+  both VMs; traceability matrix confirms every MUST REQ maps to a closed
+  task with a VM-verified row.
+- **Done when:** DoD-1 and DoD-2 hold; CHANGELOG Core stages flip to
+  "Complete" (Rule 10 satisfied).
+- **Est. size:** L -> split at claim time per phase (17a..17d).
+
+### TASK-18 Security audit (/cso full pass) [phase 5]
+- **Implements:** DoD-4; playbook security posture
+- **Context manifest:**
+  - Files: whole repo (cso is repo-wide by design); focus the fix pass on
+    the destructive surface and the vault ACLs (TRD security section
+    ASSUMED item)
+  - Doc sections: `01-trd.md` Security & data handling, promptgate Rules
+    6/13/14, the Codex INV list
+  - Do NOT read: n/a -- audit is global
+- **Steps:** run /cso (secrets archaeology over git history included since
+  this repo will go public); fix criticals; ticket the rest as bd issues;
+  resolve the vault-directory ACL ASSUMED decision (TRD) here.
+- **Verify:** /cso reports zero unresolved criticals; every non-critical
+  has a bd id; git history secrets scan clean.
+- **Done when:** DoD-4 holds.
+- **Est. size:** M
+
+### TASK-19 Security review high on destructive surfaces [phase 5]
+- **Implements:** DoD-3
+- **Context manifest:**
+  - Files: the phase 1-4 diffs touching deletion/registry/service/driver
+    removal, elevation, and the queue runner
+  - Doc sections: promptgate Rules 2/3, Codex INV-1/INV-2, `/security-review`
+  - Do NOT read: UI-only diffs with no destructive surface
+- **Steps:** /code-review high (and /security-review) across every
+  destructive path; fix findings or waive each in writing in its bd issue
+  with a reason.
+- **Verify:** no open high-severity finding without a written waiver;
+  waivers cite the accepting decision.
+- **Done when:** DoD-3 holds.
+- **Est. size:** M
+
+### TASK-20 Docs pass + demo (/sync-docs, README, GIF) [phase 5]
+- **Implements:** DoD-5 (Rule 22)
+- **Context manifest:**
+  - Files: `README.md`, `CHANGELOG.md`, `ARCHITECTURE.md`, `docs/RELEASING.md`,
+    `docs/handoff.md`; new `docs/media/vanish-demo.gif`
+  - Doc sections: promptgate Rules 18/19/20/21/22/23, `docs/RELEASING.md`
+  - Do NOT read: source internals beyond what /sync-docs needs
+- **Steps:** run /sync-docs; record the demo GIF (the README placeholder
+  block names the capture recipe); confirm a stranger can build and run
+  from README alone; per-file status indicators current (Rule 19).
+- **Verify:** fresh-clone dry run: README instructions build and launch the
+  app; GIF renders; no local paths, no lowercased JavaScript/XML, mermaid
+  tagged.
+- **Done when:** DoD-5 holds.
+- **Est. size:** S
+
+### TASK-21 Code signing + Microsoft Store submission [phase 5]
+- **Implements:** DoD (ship); promptgate Rule 14; ADR 0001 payments
+- **Context manifest:**
+  - Files: `docs/RELEASING.md` (the checklist), `package.json` (build/
+    package config)
+  - Doc sections: promptgate Rule 14, `adrs/0001-stack-override.md`,
+    `docs/roadmap.md` monetization section
+  - Do NOT read: feature source -- this is packaging/distribution
+- **Steps:** acquire OV/EV certificate (operator action -- has cost;
+  reversal condition in bd `vanish-uninstaller-22n` governs whether this
+  proceeds); sign all binaries; package the MS Store "Convenience Edition"
+  (source stays MIT on GitHub); submit. Acknowledge the SmartScreen
+  reputation build-up period.
+- **Verify:** signed binary passes signature verification; unsigned
+  artifacts absent from the release; Store package validates in the
+  Partner Center pre-submission check.
+- **Done when:** the signed build is submitted; release tag `vX.Y.Z` cut
+  with CHANGELOG updated (Rule 14 / RELEASING.md).
+- **Est. size:** M. **Gated on the operator's signing-cert decision** --
+  do not start until that is made (Codex Section VI: outward-facing,
+  irreversible, has cost).
+
+### TASK-22 One real external user completes the core flow [phase 5]
+- **Implements:** DoD-6
+- **Context manifest:**
+  - Files: none; this is a validation activity
+  - Doc sections: `00-prd.md` M1, FLOW-02 (the core proposal loop)
+  - Do NOT read: n/a
+- **Steps:** a real user other than the operator runs a scan -> uninstall
+  -> review -> quarantine -> restore on their own machine (signed build);
+  capture their unedited feedback into a bd issue.
+- **Verify:** the user completed the loop; their feedback is recorded; any
+  blocker they hit is a bd ticket.
+- **Done when:** DoD-6 holds. This is the true release gate -- if it fails,
+  the release does not ship regardless of the other five.
+- **Est. size:** S
+
 ## Dependency order
 
 Critical path: TASK-01 -> 02 -> 03/04 -> 05 (phase 1) -> 06 -> 07 -> 08
-(09 optional) -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 (16 optional).
+(09 optional) -> 10 -> 11 -> 12 -> 13 -> 14 -> 15 (16 optional) ->
+[phase 5] 17 -> 18/19/20 (parallel) -> 21 -> 22.
 Parallelizable across sessions: 03 and 04; 06 and 10; 14 sections after
-13. bd dep edges created with the issues.
+13; in phase 5, TASK-18/19/20 run in parallel once TASK-17 (VM pass) is
+green. TASK-21 gates on the operator's signing-cert decision; TASK-22
+(real-user validation) is the final gate before ship. bd dep edges created
+with the issues.
 
 ## Deviation protocol (binding)
 

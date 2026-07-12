@@ -30,6 +30,18 @@
 Engine-only note: REQ-18 has no SCR by design (scanner correctness, no UI
 surface); justified, not an orphan.
 
+## MVP definition-of-done coverage (Phase 5 gate)
+
+| DoD | Statement | TASK | bd id |
+|---|---|---|---|
+| DoD-1 | Every MUST REQ traces to a closed task (no orphans) | 17 | 0xt |
+| DoD-2 | /verify passed on VM, not just locally | 17 | 0xt |
+| DoD-3 | /code-review high on destructive surfaces; fixed/waived | 19 | 1td |
+| DoD-4 | /cso once; criticals fixed, rest ticketed | 18 | vhm |
+| DoD-5 | Docs current; stranger builds from README; demo GIF | 20 | k2o |
+| DoD-6 | One real external user completes the core flow | 22 | 442 |
+| (ship) | Signed build, Store submission (Rule 14) | 21 | 1w0 |
+
 ## Orphan check (must be empty at acceptance)
 
 | Artifact | Cites nothing upstream | Resolution |

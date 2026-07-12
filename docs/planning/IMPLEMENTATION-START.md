@@ -4,6 +4,21 @@
 > not a spec. The specs are the 6 docs in this folder; the work items are
 > bd issues. One task per session (playbook S3).
 
+## Read this first, once, ever
+
+Before your first task on Vanish, read two documents and never guess past
+them:
+1. `docs/promptgate.md` -- the 23 hard rules. Law. Wins every conflict.
+2. `docs/planning/CODEX.md` -- the doctrine: the creed, the invariants
+   (INV-1..7, check them at every completion gate), the heuristics for when
+   a spec is silent, and the cautionary tales. This is how you make the
+   call the operator would have made without asking. It also tells you the
+   few times you MUST stop and ask (Codex Section VI).
+
+Then, per task, read ONLY that task's context manifest. That is the whole
+reading list. The Codex + promptgate are the standing context; the manifest
+is the task context; nothing else.
+
 ## The rule of the session
 
 1. `bd prime` (runs on SessionStart) then `bd ready` -- claim the top
@@ -28,9 +43,18 @@ and reconcile later. >3 deviations in a phase = re-plan the remainder.
 
 ## Order of play
 
-Critical path (bd ids): oq9 -> 9e5 -> 05p -> cwp -> zwq -> 0b1 -> 1gi ->
-fp1 -> fsz -> tz3 -> r5f -> dxv. `bd ready` enforces this via dep edges;
-just claim what it offers.
+Critical path (bd ids), phases 1-4 then release:
+oq9 -> 9e5 -> 05p -> cwp -> zwq -> 0b1 -> 1gi -> fp1 -> fsz -> tz3 -> r5f
+-> dxv -> [phase 5] 0xt -> {vhm, 1td, k2o} -> 1w0 -> 442.
+`bd ready` enforces this via dep edges; just claim what it offers.
+
+Phase 5 is the end-to-end runway from "code complete" to "shipped": VM test
+matrix (0xt), /cso audit (vhm), security review high (1td), docs+demo
+(k2o), signing+Store submission (1w0), real-user validation (442). It
+enforces the playbook MVP definition-of-done -- see the Phase 5 gate in
+`05-implementation-plan.md` and the DoD coverage table in
+`traceability.md`. TASK-21 (1w0) is gated on the operator's signing-cert
+decision; TASK-22 (442) is the true ship gate.
 
 - **TASK-01 (oq9)** is the only ready task now -- start here.
 - **TASK-09 (2ax)** is BLOCKED on research OPEN-01 -- do not improvise the
