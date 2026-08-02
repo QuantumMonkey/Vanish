@@ -42,7 +42,14 @@ Do not begin Standard work until all Core stages are complete and tested on clea
 * **Technical Tasks**:
   * **Asynchronous Sizing Worker**: Run a background thread to calculate physical folder sizes and cache them to disk.
   * **Boot Speed Analyzer**: Inspect registry `Run` hives (`HKCU/HKLM\Software\Microsoft\Windows\CurrentVersion\Run`), Task Scheduler (`Get-ScheduledTask`), and active Services to identify applications running on startup and calculate their startup latency impact.
-  * **Startup Item Manager** (added 2026-08-03, gap found checking coverage against CCleaner): the Boot Speed Analyzer above only detects startup impact - nothing lets the user act on it. Add enable/disable toggles per item (Run-hive entries via registry write, Scheduled Tasks via `Disable-ScheduledTask`, Services via `Set-Service -StartupType Disabled`), each reversible (re-enable is the same action inverted, no data loss risk either direction).
+    Detection only, deliberately - a Startup Item Manager (enable/disable
+    toggles) was proposed 2026-08-03 and reverted the same day: Windows'
+    own Task Manager Startup tab already does this well for the common
+    case (Run-hive apps), and rebuilding an already-solved incumbent
+    feature isn't worth it. This analyzer stays read-only reporting; if
+    Scheduled-Task/Service-based startup items (which Task Manager's tab
+    doesn't cover) ever prove to be a real, named pain point, that is a
+    narrower, justified re-entry - not "rebuild what Task Manager does."
   * **Consolidation Engine**: Detect redundant software (e.g. multiple web browsers, matching PDF readers) and alert the user.
   * **Optimized Diagnostics Query**: Query hardware and system diagnostics using specific CIM SELECT filters (e.g., `Get-CimInstance -Query "SELECT Name, Caption FROM Win32_ComputerSystem"`), falling back to fast registry cache lookups to prevent thread delays.
 
