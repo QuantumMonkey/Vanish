@@ -42,6 +42,7 @@ Do not begin Standard work until all Core stages are complete and tested on clea
 * **Technical Tasks**:
   * **Asynchronous Sizing Worker**: Run a background thread to calculate physical folder sizes and cache them to disk.
   * **Boot Speed Analyzer**: Inspect registry `Run` hives (`HKCU/HKLM\Software\Microsoft\Windows\CurrentVersion\Run`), Task Scheduler (`Get-ScheduledTask`), and active Services to identify applications running on startup and calculate their startup latency impact.
+  * **Startup Item Manager** (added 2026-08-03, gap found checking coverage against CCleaner): the Boot Speed Analyzer above only detects startup impact - nothing lets the user act on it. Add enable/disable toggles per item (Run-hive entries via registry write, Scheduled Tasks via `Disable-ScheduledTask`, Services via `Set-Service -StartupType Disabled`), each reversible (re-enable is the same action inverted, no data loss risk either direction).
   * **Consolidation Engine**: Detect redundant software (e.g. multiple web browsers, matching PDF readers) and alert the user.
   * **Optimized Diagnostics Query**: Query hardware and system diagnostics using specific CIM SELECT filters (e.g., `Get-CimInstance -Query "SELECT Name, Caption FROM Win32_ComputerSystem"`), falling back to fast registry cache lookups to prevent thread delays.
 
@@ -76,6 +77,14 @@ Do not begin Standard work until all Core stages are complete and tested on clea
 * **Goal**: Enable bulk uninstallation and clean left-behind Windows shell context menus.
 * **Technical Tasks**:
   * **Bulk Silent Uninstaller**: Group multiple uninstallation requests and run them sequentially (using native switches like `/qn` or `/S`) while trapping exit codes to block on reboot requirements.
+  * **Forced Uninstall for broken entries** (added 2026-08-03, gap found
+    checking coverage against Revo Uninstaller): when a program's own
+    uninstaller is missing, corrupted, or exits with an error, fall back
+    to Vanish's own registry/leftover scan (already built, Stage 1) to
+    remove the orphaned uninstall entry and known leftovers directly,
+    instead of leaving a dead "can't be uninstalled" entry in Programs
+    and Features. This is the one Revo feature not already covered by
+    Vanish's existing core loop.
   * **Context Menu Cleaner**: Scan registry keys (under `HKCR\*\shellex\ContextMenuHandlers` and related classes) for orphaned CLSID associations linked to removed executables and clean them up.
   * **Installer Lockout Manager**: Validate and configure the `msiserver` (Windows Installer) service state before executing uninstallation queues, temporarily enabling and starting it if needed, and managing concurrent locks.
   * **Restore Point Frequency Override**: Temporarily set the `SystemRestorePointCreationFrequency` registry value to `0` prior to calling system checkpoint commands, restoring it immediately afterward to ensure restore points are generated successfully on consecutive uninstalls.
