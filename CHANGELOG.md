@@ -10,7 +10,26 @@ full decision rules.
 
 ## [Unreleased]
 
-Nothing pending since `0.2.1`.
+### Added
+* `LICENSE` (MIT) at repository root.
+* `ARCHITECTURE.md` at repository root: **as-built** architecture — component
+  map, approval-loop sequence diagram (both Mermaid), complete IPC surface
+  table, `scanner.ps1` function inventory, and an implemented-vs-designed
+  status table. `docs/architecture.md` remains the target-state specification.
+
+### Changed
+* `README.md` rewritten as the public-facing document: honest capability table
+  (every claim mapped to a file/function), the scan→propose→approve loop,
+  scan-mode comparison, explicit "what Vanish does NOT do" section (including
+  the not-yet-implemented quarantine vault), quickstart, and doc index.
+* `package.json` metadata aligned with repo reality: version corrected from
+  `1.0.0` to `0.2.1` per the RELEASE.MAJOR.MINOR scheme (RELEASE=1 criteria in
+  `docs/RELEASING.md` are not met), license field corrected to MIT to match the
+  new LICENSE file, description/author/repository filled in.
+
+### Known inconsistencies (deferred — docs-only change set)
+* `renderer.js` About-tab alert still says "v1.0.0"; align with CHANGELOG
+  version in the next code-touching session.
 
 ---
 

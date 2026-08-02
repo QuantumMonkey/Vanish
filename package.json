@@ -1,15 +1,25 @@
 {
   "name": "vanish-uninstaller",
-  "version": "1.0.0",
-  "description": "",
+  "version": "0.2.1",
+  "description": "On-device Windows application auditor and manager — approval-gated uninstalls, leftover scanning, and system health audits. No telemetry, no cloud.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "windows",
+    "uninstaller",
+    "audit",
+    "electron",
+    "powershell"
+  ],
+  "author": "QuantumMonkey",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/QuantumMonkey/Vanish"
+  },
   "type": "commonjs",
   "devDependencies": {
     "electron": "^42.5.0"
