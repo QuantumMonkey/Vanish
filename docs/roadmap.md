@@ -113,9 +113,25 @@ Do not begin Standard work until all Core stages are complete and tested on clea
   * **Crowdsourced Offsets Database**: Load a community-driven JSON heuristics rules database to automatically map atypical directories that do not match application names (such as hidden `.config`, `.toolcache`, or `.unity3d` folders).
 
 ### Stage 11: Windows Cache & Installer Purge
-* **Goal**: Safely clean orphaned system installer caches and SharedDLL registry value counters.
+* **Goal**: Safely clean orphaned system installer caches, superseded driver
+  packages, and SharedDLL registry value counters.
 * **Technical Tasks**:
   * **Orphaned MSI/MSP Sweeper & Quarantine**: Scan `C:\Windows\Installer` for `.msi` and `.msp` local package files, cross-referencing them against active registry packages in `HKLM\Software\Microsoft\Windows\CurrentVersion\Installer\LocalPackages` to identify unreferenced installers. Move them to a secure quarantine directory vault instead of straight deletion to prevent registry/installer corruption.
+    Real-world sizing (operator's own machine, 2026-08-02): 1.2GB in this
+    folder alone. Confirms the category is worth building, not just
+    theoretical - PatchCleaner is the reference implementation for the
+    orphan-detection logic (cross-reference against installed products
+    before offering to remove anything).
+  * **Driver Store Sweeper** (added 2026-08-03, same sizing pass): `C:\Windows\System32\DriverStore\FileRepository`
+    accumulates every driver version ever installed, not just the active
+    one - measured at 5.1GB on the operator's machine, the single largest
+    "hidden garbage" category found. Must diff against the CURRENTLY
+    ACTIVE driver per device (via `pnputil /enum-drivers` or equivalent)
+    before removing anything - only superseded versions are safe to drop.
+    Reference implementation: Windows' own Disk Cleanup "Device driver
+    packages" option already does this safely; Driver Store Explorer
+    (RAPR) is the granular-control reference if a from-scratch
+    implementation is wanted instead of shelling out to Disk Cleanup.
   * **SharedDLLs Reference Cleaner**: Inspect paths registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs`. For any path where a `Test-Path` check fails (the DLL is physically gone), remove the registry count value to clean up dead links.
 
 ### Stage 12: OS Telemetry & Shortcut Alignment
@@ -139,6 +155,34 @@ Do not begin Standard work until all Core stages are complete and tested on clea
   * **CleanerML Engine**: Build a lightweight XML parser in Node.js to consume standard open-source **CleanerML** (BleachBit markup standard) definition files.
   * **Folder/Registry Cleaner**: Execute CleanerML instructions (glob directory deletions, registry key wipes, MRU clearing) safely on the system.
   * **Audit Report Details**: Display exact file paths, file sizes, and deleted counts in a transparent report, avoiding vague marketing optimization claims.
+  * **Risk-tiered cleanup model** (added 2026-08-03, from a real audit
+    pass on the operator's machine): every category this engine touches -
+    CleanerML-defined or hardcoded (Stage 11's Installer/Driver Store
+    targets included) - gets classified into exactly one tier before it's
+    ever offered to the user, not cleaned uniformly:
+    1. **SAFE-AUTO** - regenerates on its own, no dependency risk, one-
+       click clean with no per-item review needed. Recycle Bin, browser
+       cache, User/Windows Temp, thumbnail cache, DirectX shader cache,
+       CBS/servicing logs, Windows Update download cache.
+    2. **NEEDS-ORPHAN-DETECTION** - real space, real risk if done wrong,
+       requires cross-referencing against what's still active before
+       removing anything. Installer cache (cross-ref installed products),
+       Driver Store (cross-ref currently-active driver per device),
+       SharedDLLs (cross-ref `Test-Path` per entry, already specced
+       above). Never a blind glob-delete.
+    3. **MANDATORY-REVIEW-GATE** - always show every item with a
+       checkbox, always quarantine before delete, never auto-run even if
+       "safe" in the abstract. This is already Stage 10's WMI/DCOM rule
+       (`docs/promptgate.md` Rule 17) - this tier generalizes that same
+       rule to any category where a false positive breaks something the
+       user depends on.
+    4. **LEAVE-ALONE** - measured and found empty/negligible, not worth
+       adding attack surface by offering to clean it at all. Don't build
+       a feature for a category that turns out to have nothing in it;
+       re-measure per-machine rather than assuming a fixed list.
+    Every new CleanerML rule or hardcoded category added to this engine
+    must be assigned one of these 4 tiers explicitly before it ships -
+    "it's just a cache, should be fine" is not a tier.
 
 ---
 
