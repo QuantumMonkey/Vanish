@@ -133,6 +133,25 @@ full decision rules.
   markup.
 
 ### Security
+* **Fixed: the restore destination guard was a blocklist, and a textual one (HIGH).**
+  A vault restore is a file write performed as administrator to a location the
+  manifest chooses, and the manifest is untrusted input. The guard covered the
+  Windows directory and nothing else, so a forged entry could restore an
+  attacker's binary into the all-users Startup folder — admin-level persistence
+  at the next logon. Worse, it compared paths *textually*, and `GetFullPath` does
+  not follow junctions: a directory junction pre-created at an innocent-looking
+  path defeated any check of this kind entirely. The guard now resolves a
+  destination to the path the write really lands on before judging it, and
+  refuses the narrow set of locations whose only value to an attacker is
+  privileged execution — any `Start Menu` subtree in any profile, direct children
+  of a drive root, the Windows directory, and unreadable reparse points.
+  `%ProgramFiles%`, `%ProgramData%` and other user profiles stay allowed on
+  purpose: Vanish quarantines application leftovers from all three (REQ-17 sweeps
+  other profiles by design) and a restore has to be able to put them back —
+  blocking them would break the undo path, which is the point of the vault. New
+  read-only `protected-destination-probe` engine action makes the guard testable
+  in Audit Mode as well as Full Mode. Found by a `/cso` audit
+  (bd `vanish-uninstaller-2xt`).
 * **Fixed: the data directory lock could not hold, and said it had (HIGH).**
   Vanish state lived directly in the Electron `userData` root, which is also
   Chromium's profile directory — so the ACL that stops a standard user rewriting

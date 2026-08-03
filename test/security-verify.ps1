@@ -95,6 +95,65 @@ try {
     Remove-TestTree $aclWork
 }
 
+# ======================================================================
+# SEC-2 destination guard (bd vanish-uninstaller-2xt).
+# Also tier-independent: protected-destination-probe asks the restore guard for
+# a verdict without performing a restore.
+# ======================================================================
+Write-Host ""
+Write-Host "SEC-2 - restore destination guard" -ForegroundColor Cyan
+
+function Test-Destination {
+    param([string]$path)
+    return (Invoke-Engine "protected-destination-probe" @{ path = $path })
+}
+
+# Refused: privileged execution surfaces.
+$mustRefuse = @(
+    @{ Path = (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp\evil.exe'); Why = 'the all-users Startup folder' },
+    @{ Path = (Join-Path $env:APPDATA    'Microsoft\Windows\Start Menu\Programs\Startup\evil.exe'); Why = 'a per-user Startup folder' },
+    @{ Path = 'C:\evil.exe';                                       Why = 'a direct child of the drive root' },
+    @{ Path = (Join-Path $env:SystemRoot 'System32\evil.dll');      Why = 'System32' },
+    @{ Path = (Join-Path $env:SystemRoot 'evil.exe');               Why = 'the Windows directory' }
+)
+foreach ($c in $mustRefuse) {
+    Assert-True ((Test-Destination $c.Path).protected -eq $true) ("refused: " + $c.Why)
+}
+
+# Allowed: Vanish quarantines application leftovers from all of these, so a
+# restore has to be able to put them back. Blocking them would break the undo
+# path, which is the entire point of the vault.
+$mustAllow = @(
+    @{ Path = 'C:\Program Files\SomeApp\leftover.dll';            Why = 'Program Files leftovers' },
+    @{ Path = (Join-Path $env:ProgramData 'SomeApp\leftover.dat'); Why = 'ProgramData leftovers' },
+    @{ Path = (Join-Path $env:LOCALAPPDATA 'SomeApp\leftover.dat');Why = 'LocalAppData leftovers' },
+    @{ Path = 'C:\Users\OtherUser\AppData\Roaming\App\x.dat';      Why = 'another profile (REQ-17 sweeps these by design)' }
+)
+foreach ($c in $mustAllow) {
+    Assert-True ((Test-Destination $c.Path).protected -eq $false) ("still allowed: " + $c.Why)
+}
+
+# The bypass that makes a textual path check worthless: a junction at an
+# innocent-looking path pointing into a blocked one.
+$jWork = Join-Path $env:TEMP "vanish-sec2-junction-verify"
+$jLink = Join-Path $jWork "Foo"
+if ([IO.Directory]::Exists($jLink)) { [IO.Directory]::Delete($jLink) }
+if ([IO.Directory]::Exists($jWork)) { [IO.Directory]::Delete($jWork, $true) }
+$null = [IO.Directory]::CreateDirectory($jWork)
+try {
+    $null = New-Item -ItemType Junction -Path $jLink `
+        -Target (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp') -ErrorAction Stop
+
+    $verdict = Test-Destination (Join-Path $jLink 'evil.exe')
+    Assert-True ($verdict.protected -eq $true) "refused: a junction pointing into the all-users Startup folder"
+    Assert-True ($verdict.resolved -match 'Start Menu') "the junction is resolved to its real target, not taken literally"
+} catch {
+    Write-Host ("  SKIP  junction test could not run: " + $_.Exception.Message) -ForegroundColor Yellow
+} finally {
+    if ([IO.Directory]::Exists($jLink)) { [IO.Directory]::Delete($jLink) }
+    if ([IO.Directory]::Exists($jWork)) { [IO.Directory]::Delete($jWork, $true) }
+}
+
 if (-not $isAdmin) {
     Write-Host ""
     Write-Host "The remaining tests exercise elevated code paths. Re-run from an elevated shell." -ForegroundColor Yellow

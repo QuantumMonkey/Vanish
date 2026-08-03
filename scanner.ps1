@@ -835,10 +835,68 @@ function Resolve-SafeVaultPath {
     }
 }
 
+# SEC-2: GetFullPath is a TEXTUAL normalisation - it does not follow junctions.
+# Any path-based refusal is therefore bypassable by pre-creating a directory
+# junction at an allowed path that points at a blocked one: the check sees
+# %APPDATA%\Foo, the move lands in the all-users Startup folder. Walk up to the
+# deepest ancestor that actually exists, resolve it, and re-attach the rest, so
+# the check is made against the path the write really lands on.
+function Resolve-DestinationTarget {
+    param([string]$full)
+
+    $tail  = @()
+    $probe = $full
+
+    for ($i = 0; $i -lt 64; $i++) {
+        if ([string]::IsNullOrWhiteSpace($probe)) { break }
+
+        if (Test-Path -LiteralPath $probe) {
+            try {
+                $item   = Get-Item -LiteralPath $probe -Force -ErrorAction Stop
+                $target = $item.FullName
+
+                if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+                    $link = $null
+                    try { $link = @($item.Target)[0] } catch { $link = $null }
+                    if ($link) {
+                        if (-not [System.IO.Path]::IsPathRooted($link)) {
+                            $link = Join-Path (Split-Path -Parent $probe) $link
+                        }
+                        $target = [System.IO.Path]::GetFullPath($link)
+                    } else {
+                        # A reparse point we cannot read is not one we trust.
+                        return $null
+                    }
+                }
+
+                if ($tail.Count -eq 0) { return $target }
+                return [System.IO.Path]::GetFullPath((Join-Path $target ($tail -join '\')))
+            } catch {
+                return $null
+            }
+        }
+
+        $parent = Split-Path -Parent $probe
+        if (-not $parent -or $parent -eq $probe) { break }
+        $leaf = Split-Path -Leaf $probe
+        if ($leaf) { $tail = ,$leaf + $tail }
+        $probe = $parent
+    }
+
+    return $full
+}
+
 # Restoring is a file WRITE performed as administrator to a location the
-# manifest chose. The leftover scanner never proposes anything under the
-# Windows directory, so a manifest that asks to restore there is either
-# corrupt or hostile. Refuse either way.
+# manifest chose, and the manifest is untrusted input. Refuse destinations that
+# are privileged execution surfaces.
+#
+# SEC-2 note on what is deliberately NOT blocked: %ProgramFiles%, %ProgramData%
+# and other user profiles all stay allowed, because Vanish legitimately
+# quarantines application leftovers from all three (REQ-17 sweeps other
+# profiles by design) and a restore has to be able to put them back. Blocking
+# them would break the undo path, which is the whole point of the vault. What
+# gets blocked instead is the narrow set of locations whose only use to an
+# attacker is privileged execution.
 function Test-ProtectedDestination {
     param([string]$path)
     if ([string]::IsNullOrWhiteSpace($path)) { return $true }
@@ -847,6 +905,26 @@ function Test-ProtectedDestination {
         $full = [System.IO.Path]::GetFullPath($path)
     } catch {
         return $true
+    }
+
+    $resolved = Resolve-DestinationTarget $full
+    if (-not $resolved) { return $true }   # unreadable or untrusted reparse point
+
+    # Any Start Menu subtree, in any profile or the all-users one. This is the
+    # autostart surface: a file landing here runs at logon, and for the
+    # all-users copy it runs for administrators too.
+    foreach ($candidate in @($full, $resolved)) {
+        if ($candidate -match '(^|\\)Start Menu(\\|$)') { return $true }
+    }
+
+    # A direct child of a drive root ("C:\Foo") is where bare-path and DLL
+    # search-order hijacks get planted. Restores never legitimately land there.
+    foreach ($candidate in @($full, $resolved)) {
+        $root = [System.IO.Path]::GetPathRoot($candidate)
+        if (-not $root) { continue }
+        $parent = [System.IO.Path]::GetDirectoryName($candidate)
+        if ([string]::IsNullOrEmpty($parent)) { return $true }   # the root itself
+        if ($parent.TrimEnd('\').Equals($root.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
 
     $blocked = @(
@@ -862,9 +940,12 @@ function Test-ProtectedDestination {
     foreach ($root in $blocked) {
         try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
         if (-not $rootFull.EndsWith('\')) { $rootFull += '\' }
-        # Block the directory itself and everything beneath it.
-        if ($full.Equals($rootFull.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
-        if ($full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        # Block the directory itself and everything beneath it - measured
+        # against BOTH the literal path and the junction-resolved one.
+        foreach ($candidate in @($full, $resolved)) {
+            if ($candidate.Equals($rootFull.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+            if ($candidate.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        }
     }
     return $false
 }
@@ -3101,6 +3182,17 @@ if ($Action) {
         }
         "set-path-entries" {
             Set-PathEntries -p $Params | ConvertTo-Json -Depth 4 -Compress
+        }
+        "protected-destination-probe" {
+            # SEC-2 verification hook: ask the restore guard for its verdict on a
+            # path without performing a restore. Read-only and side-effect free,
+            # so the control is testable in Audit Mode as well as Full Mode.
+            @{
+                success   = $true
+                path      = [string]$Params.path
+                protected = [bool](Test-ProtectedDestination ([string]$Params.path))
+                resolved  = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
+            } | ConvertTo-Json -Depth 4 -Compress
         }
         "registry-view-probe" {
             # TASK-13 verification hook: read one key through an explicit view.
