@@ -27,13 +27,23 @@ const vaultEntries = [
   }
 ];
 
+// SEC-1: the uninstall path can come back "blocked" when the engine judges an
+// uninstaller untrusted, which makes the renderer raise a typed acknowledgement
+// dialog. The suite needs to drive that branch, so the next response is
+// settable. Default is the happy path.
+let nextUninstallResponse = { success: true };
+
 contextBridge.exposeInMainWorld('api', {
   getDesktopApps: async () => apps,
   getUwpApps: async () => [],
   createRestorePoint: async () => ({ success: true }),
   scanLeftovers: async () => ({ files: [], registry: [] }),
   purgeRemnants: async () => ({ success: true, quarantinedCount: 0, files: [], registry: [] }),
-  uninstallNative: async () => ({ success: true }),
+  uninstallNative: async () => {
+    const queued = nextUninstallResponse;
+    nextUninstallResponse = { success: true }; // one-shot; back to the happy path
+    return queued;
+  },
   checkAdmin: async () => fullMode,
   getTier: async () => ({
     tier: fullMode ? 'full' : 'audit',
@@ -97,4 +107,11 @@ contextBridge.exposeInMainWorld('api', {
   maximizeWindow: () => {},
   closeWindow: () => {},
   openExternalLink: () => {}
+});
+
+// Test-only control surface. Never shipped: this preload is the fixture.
+contextBridge.exposeInMainWorld('__test', {
+  setNextUninstallResponse: (response) => {
+    nextUninstallResponse = response;
+  }
 });

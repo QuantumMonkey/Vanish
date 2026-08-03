@@ -158,6 +158,77 @@ app.whenReady().then(async () => {
   await win.webContents.executeJavaScript(`document.getElementById('btn-confirm-cancel').click()`);
   await new Promise((r) => setTimeout(r, 400));
 
+  // --- SEC-1 untrusted-uninstaller acknowledgement ------------------------
+  // The engine refuses an uninstaller registered under HKCU (or living
+  // somewhere a standard user can write) until the operator names it. That
+  // refusal surfaces as a typed dialog on the ELEVATED uninstall path - the
+  // exact class of control this suite exists to protect, and it shipped this
+  // morning with no UI coverage at all.
+  console.log('');
+  console.log('SEC-1 untrusted-uninstaller acknowledgement dialog');
+
+  await win.webContents.executeJavaScript(`
+    window.__test.setNextUninstallResponse({
+      success: false,
+      blocked: true,
+      trust: { risky: true, reasons: ['registered under HKCU, which any standard user can write'] }
+    });
+    runNativeUninstaller({ type: 'Desktop', name: 'Planted App', registryPath: 'HKCU:\\\\Software\\\\Planted' });
+    true;
+  `);
+  await new Promise((r) => setTimeout(r, 800));
+
+  const ackDialog = await win.webContents.executeJavaScript(`(() => {
+    const overlay = document.getElementById('confirm-modal-overlay');
+    const body = document.getElementById('confirm-body');
+    const ok = document.getElementById('btn-confirm-ok');
+    return {
+      active: overlay.classList.contains('active'),
+      namesTheApp: (body.textContent || '').includes('Planted App'),
+      givesTheReason: (body.textContent || '').includes('HKCU'),
+      startsDisabled: ok.disabled
+    };
+  })()`);
+
+  assert(ackDialog.active === true, 'a blocked uninstall raises the acknowledgement dialog');
+  assert(ackDialog.namesTheApp === true, 'the dialog names the application being run');
+  assert(ackDialog.givesTheReason === true, 'the dialog states WHY the uninstaller is untrusted');
+  assert(ackDialog.startsDisabled === true, 'the confirm button starts inert - this is a typed gate');
+
+  await assertClickable(win, '#confirm-typed-input', 'the RUN input is actually reachable, not covered');
+  await assertClickable(win, '#btn-confirm-cancel', 'the operator can always decline');
+
+  // The gate's real contract (renderer.js confirmDialog): trimmed and
+  // case-INSENSITIVE. That is deliberate - the point is a deliberate act, not a
+  // password - so pin it rather than leaving it to be discovered.
+  const ackTyped = await win.webContents.executeJavaScript(`(() => {
+    const ok = document.getElementById('btn-confirm-ok');
+    const input = document.getElementById('confirm-typed-input');
+    const attempt = (value) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      return ok.disabled;
+    };
+    return {
+      wrongWord: attempt('YES'),
+      partial:   attempt('RU'),
+      empty:     attempt(''),
+      lower:     attempt('run'),
+      padded:    attempt('  RUN  '),
+      exact:     attempt('RUN')
+    };
+  })()`);
+  assert(ackTyped.wrongWord === true, 'the gate stays shut on a different word');
+  assert(ackTyped.partial === true, 'the gate stays shut on a partial word');
+  assert(ackTyped.empty === true, 'the gate stays shut on an empty box');
+  assert(ackTyped.lower === false, 'lowercase is accepted (deliberate: a deliberate act, not a password)');
+  assert(ackTyped.padded === false, 'surrounding whitespace is trimmed');
+  assert(ackTyped.exact === false, 'the exact word opens it');
+  await assertClickable(win, '#btn-confirm-ok', 'the acknowledge button is clickable once unlocked');
+
+  await win.webContents.executeJavaScript(`document.getElementById('btn-confirm-cancel').click()`);
+  await new Promise((r) => setTimeout(r, 400));
+
   // --- Unlocker dialog ----------------------------------------------------
   console.log('');
   console.log('Unlocker dialog');
