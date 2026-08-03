@@ -8,102 +8,140 @@
 Vanish is a modern Windows application manager and deep cleaner uninstaller. It is built as an Electron desktop app executing an asynchronous PowerShell backend. It replaces outdated uninstaller utilities with a high-performance, glassmorphic UI, UWP support, automatic restore point checkpoints, three remnant scanning modes (Safe, Moderate, Advanced), and a quarantine vault that makes every removal reversible.
 
 * **Repository Location**: `https://github.com/QuantumMonkey/Vanish`
-* **Status**: **Core tier code complete, VM verification outstanding.** All of the Core roadmap (Stages 1, 2, 3, 6, 9) plus the Rule 2/3 safety retrofits are implemented and pass a 220-assertion local suite. Per Rule 10 that is **In Progress**, not Complete — see the release gate below.
+* **Version**: `0.3.0` (RELEASE.MAJOR.MINOR; RELEASE stays 0 until `docs/RELEASING.md` criteria are met)
+* **Status**: **Core tier code complete. VM verification outstanding.** Every Core roadmap stage (1, 2, 3, 6, 9) plus the Rule 2/3 safety retrofits is implemented and passes a 240-assertion local suite. Per Rule 10 that is **In Progress**, not Complete.
+
+---
+
+## 🧭 Start here
+
+1. Read `docs/promptgate.md`. It is the law and it outranks this file.
+2. Read `docs/planning/CODEX.md` for how to decide when a spec is silent.
+3. `bd ready` for available work. The remaining work is Phase 5 (release), not features.
+4. Run `test\run-all.ps1` from an elevated shell before changing anything, so you know the baseline is green on your machine.
 
 ---
 
 ## 📁 File Structure Map
 
-* **[package.json](../package.json)**: Scripts, configuration, and Electron (`^42.5.0`) dependency. *(Status: Complete)*
-* **[main.js](../main.js)**: Host window container, window controls, and the whole IPC surface. Owns the elevation tier (resolved once at startup, cached) and the `fullModeOnly()` wrapper that rejects every destructive channel in Audit Mode. Owns the queue runner wiring and the System Clean purge routing. *(Status: Complete — phases 1-4 functional)*
-* **[preload.js](../preload.js)**: Exposes the secure IPC bridge to the renderer world; one entry per channel, no raw `ipcRenderer` exposure. *(Status: Complete)*
+* **[package.json](../package.json)**: Scripts, configuration, Electron (`^42.5.0`) dependency. *(Status: Complete)*
+* **[main.js](../main.js)**: Window container, window controls, and the entire IPC surface. Owns the elevation tier (resolved once at startup, cached before any window exists) and the `fullModeOnly()` wrapper that rejects every destructive channel in Audit Mode. Wires the queue runner and routes System Clean purges through the vault. *(Status: Complete)*
+* **[preload.js](../preload.js)**: The secure IPC bridge; one named function per channel, no raw `ipcRenderer` exposure. *(Status: Complete)*
 * **[lib/store.js](../lib/store.js)**: Single writer for `manifest.json`, `settings.json`, `queue.json` and `oplog.jsonl` under the Electron userData path. Atomic writes (temp file + rename), schema defaults, oplog rotation at 5 MB. Implements ENT-01..ENT-05. *(Status: Complete)*
-* **[lib/vault.js](../lib/vault.js)**: The quarantine pipeline — quarantine, list, restore, delete-forever, and the retention auto-purge sweep. Every destructive file/registry operation in the app funnels through here (INV-1). *(Status: Complete)*
-* **[lib/queue.js](../lib/queue.js)**: Bulk uninstall state machine (FLOW-05), persisted to disk on every transition. Takes its engine runner by injection, which is how the state machine is unit-tested without uninstalling anything real. *(Status: Complete)*
-* **[index.html](../index.html)**: Titlebar, Audit Mode banner, dashboard, application table, details sidebar, uninstall wizard overlay, Health Advisor panel, and the Quarantine / Task Manager / System Clean panels plus the queue panel and shared dialogs. Carries the Content-Security-Policy. *(Status: Complete)*
-* **[index.css](../index.css)**: Glassmorphic dark styling. Core variables, the Stage 2 audit styles, and the phase 1-4 additions (tier banner, panel chrome, vault entries, process table, cleaner sections, queue panel, modals, toasts). Honours `prefers-reduced-motion`. *(Status: Complete)*
-* **[renderer.js](../renderer.js)**: UI controller. Tier state and destructive-control locking, tab routing, app list, uninstall wizard, quarantine manager, process monitor, unlocker, System Clean cleaners, and the queue panel. All interpolation is HTML-escaped. *(Status: Complete)*
-* **[scanner.ps1](../scanner.ps1)**: System execution engine, one `-Action` dispatcher (D-04). Stage 1-2 functions plus: the quarantine vault primitives, Restart Manager and `NtSuspendProcess` interop, the process/indicator sampler, the Rule 15 switch resolver, the uninstaller runner, `msiserver` management, the explicit registry-view helpers, and all six cleaners. *(Status: Complete)*
-* **[corrections.json](../corrections.json)**: ENT-03 uninstall switch corrections, read-only at runtime, community-correctable. Seeded with the OPEN-02 verified entries. *(Status: Complete — seeded, expected to grow)*
-* **[test/](../test)**: Eight verification harnesses plus `run-all.ps1`. *(Status: Complete for phases 1-4)*
+* **[lib/vault.js](../lib/vault.js)**: The quarantine pipeline - quarantine, list, restore, delete-forever, retention sweep. Every destructive file/registry operation in the app funnels through here (INV-1). *(Status: Complete)*
+* **[lib/queue.js](../lib/queue.js)**: Bulk uninstall state machine (FLOW-05), persisted on every transition. Takes its engine runner by injection, which is how the state machine is tested without uninstalling anything real. *(Status: Complete)*
+* **[index.html](../index.html)**: Titlebar, Audit Mode banner, dashboard, application table, details sidebar, uninstall wizard, and the Health Advisor / Task Manager / System Clean / Quarantine / Force Uninstall / Settings / About panels, plus the queue panel and shared dialogs. Carries the Content-Security-Policy. *(Status: Complete)*
+* **[index.css](../index.css)**: Glassmorphic dark styling. Design tokens, Stage 2 audit styles, and the phase 1-4 additions (tier banner, panel chrome, vault entries, process table, cleaner sections, queue panel, modals, toasts). Honours `prefers-reduced-motion`. *(Status: Complete)*
+* **[assets/icons.css](../assets/icons.css)**: First-party 45-glyph icon set on a 24x24 grid, 2px stroke, delivered as CSS mask images so glyphs paint in `currentColor`. Replaces the FontAwesome CDN. Add a glyph by adding a `.fa-<name>` rule that sets `--vi`. *(Status: Complete)*
+* **[renderer.js](../renderer.js)**: UI controller. Tier state and destructive-control locking, tab routing, app list, uninstall wizard, quarantine manager, process monitor, unlocker, System Clean cleaners, queue panel, Force Uninstall, Settings, About. All interpolation is HTML-escaped via `esc()`. *(Status: Complete)*
+* **[scanner.ps1](../scanner.ps1)**: System execution engine behind one `-Action` dispatcher (D-04). Stage 1-2 functions plus the quarantine vault primitives, Restart Manager and `NtSuspendProcess` interop, process/indicator sampler, Rule 15 switch resolver, uninstaller runner, `msiserver` management, explicit registry-view helpers, six cleaners, and broken-entry detection. *(Status: Complete)*
+* **[corrections.json](../corrections.json)**: ENT-03 uninstall switch corrections, read-only at runtime, community-correctable. Seeded with the OPEN-02 verified entries. *(Status: Complete - seeded, expected to grow)*
+* **[test/](../test)**: Nine verification harnesses plus `run-all.ps1`. **Not scaffolding** - `05-implementation-plan.md` TASK-17 makes these acceptance checks the VM test script, so they are the input to the release gate. *(Status: Complete for phases 1-4)*
 
 ---
 
-## 🚀 How to Run the App (Elevated)
+## 🚀 How to Run
 
-Vanish runs in either tier, but cleaning and uninstallation require administrative privileges.
+Vanish runs in either tier. Cleaning and uninstallation require administrative privileges.
 
-1. Open PowerShell or Command Prompt as **Administrator**.
-2. Run:
-   ```powershell
-   cd path\to\vanish
-   npm start
-   ```
+```powershell
+cd path\to\vanish
+npm start
+```
 
 Launching unelevated is a supported path: Vanish offers to restart as administrator once, and declining lands in Audit Mode (read-only) with a persistent banner.
 
-To run the verification suite (elevated, for the destructive paths):
+Verification suite (elevated, for the destructive paths):
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File test\run-all.ps1
 ```
 
 ---
 
-## ✅ What changed in the 2026-08-03 session
+## ✅ What the 2026-08-03 session delivered
 
-The compliance gap flagged in the previous handoff is **closed**, and the rest of the Core checklist was implemented behind it.
+The compliance gap flagged in the previous handoff is **closed**, and the rest of Core was implemented behind it.
 
-* **Rule 2 (quarantine-first)** — satisfied. `Purge-Remnants` is deleted from `scanner.ps1`; there is no direct-delete path left on a user target. Files move into `vault/<entry-id>/files/<n>/`, registry keys export to `.reg` restore manifests before removal, and the only remaining outright deletes are the vault's own "Delete Forever" and the opt-in retention sweep.
-* **Rule 3 (Audit Mode)** — satisfied and enforced in code, not just in the UI. Verified by invoking all nine destructive IPC channels directly while unelevated; every one is rejected by `main.js`.
-* **Stages 3, 6 and 9** — implemented (see CHANGELOG for the feature-level list).
+* **Rule 2 (quarantine-first)** - satisfied. `Purge-Remnants` is deleted from `scanner.ps1`; no direct-delete path on a user target remains. Files move to `vault/<entry-id>/files/<n>/`, registry keys export to `.reg` restore manifests before removal. The only outright deletes are the vault's own "Delete Forever" and the opt-in retention sweep.
+* **Rule 3 (Audit Mode)** - satisfied and enforced in code. Verified by invoking all nine destructive IPC channels directly while unelevated; every one is rejected by `main.js`.
+* **Rule 6 / NFR-06 (zero runtime network I/O)** - now actually true. The FontAwesome and Google Fonts CDNs are gone, replaced by a first-party icon set and the OS type stack. The CSP names **no external origin**: `default-src 'self'` with `connect-src 'none'`.
+* **Stages 3, 6, 9** implemented, plus REQ-20 (Force Uninstall) and real Settings/About panels.
 
-Design work produced along the way, recorded in the owning docs: the vault layout and `entry.json` durability record (`04-schema.md` D-12/D-13), and the `manifest-only` registry mode that lets the PATH cleaner rewrite a value without deleting the key it lives in.
+Design work recorded in the owning docs: vault layout and `entry.json` durability record (`04-schema.md` D-12/D-13), the `manifest-only` registry mode that lets the PATH cleaner rewrite a value without deleting the key it lives in, and REQ-20 in `00-prd.md`.
 
 ---
 
-## 🔍 Next Steps & Roadmap Checklist
+## 🔍 Roadmap Checklist
 
-> **Before planning, speccing, or implementing any feature**, run it through `docs/promptgate.md`. All decisions must pass the gate before work begins.
+> **Before planning, speccing, or implementing any feature**, run it through `docs/promptgate.md`.
 
-> **For Stages 6–14** (Orchestration, Network, Sandbox, Environment Clean, Enterprise Audits, Cache Purge, Telemetry, Runtime/Driver Audit, CleanerML Engine), refer to `docs/roadmap.md`. The checklist below covers Core tier stages only.
+> **For Stages 6-14**, refer to `docs/roadmap.md`. The checklist below covers Core tier stages only.
 
 **Core Tier** (complete before any public release):
 
-- `[x]` **Stage 2 — Audit & Health Advisor Tab**: system diagnostics (CIM), startup item enumeration, redundant software detection. *(Core — code complete)*
-- `[x]` **Quarantine vault + Audit Mode enforcement**: vault engine, Quarantine Manager tab, enforced read-only tier, startup elevation offer. *(Core — code complete; the UAC accept/decline branches still need a human at the prompt)*
-- `[x]` **Stage 3 — Task Manager & Unlocker**: process list with CPU/Memory/Disk, Restart Manager unlocker, passive Suspicious Activity Indicators, watchdog suspension. *(Core — code complete)*
-- `[x]` **Stage 6 — Orchestration & Shell Cleanup**: bulk silent uninstall queue, context menu cleaner, msiserver manager, restore point frequency override. *(Core — code complete. Forced Uninstall for broken entries is still open.)*
-- `[x]` **Stage 9 — System Integration & Environment Clean**: services purge, PATH cleaner, file association repair, multi-user profile sweep, auto-UAC relauncher, registry redirection bypass. *(Core — code complete except the driver-store removal half and the REQ-19 UI offer; both carry open bd issues.)*
+- `[x]` **Stage 2 - Audit & Health Advisor Tab** *(code complete)*
+- `[x]` **Quarantine vault + Audit Mode enforcement** *(code complete; UAC accept/decline branches need a human at the prompt)*
+- `[x]` **Stage 3 - Task Manager & Unlocker**: process list with CPU/Memory/Disk, Restart Manager unlocker, passive indicators, watchdog suspension *(code complete)*
+- `[x]` **Stage 6 - Orchestration & Shell Cleanup**: bulk queue, context menu cleaner, msiserver manager, restore point override, Forced Uninstall (REQ-20) *(code complete)*
+- `[x]` **Stage 9 - System Integration & Environment Clean**: services purge, PATH cleaner, association repair, multi-user sweep, auto-UAC relauncher, registry redirection bypass *(code complete except driver-store removal and the REQ-19 acceptance test)*
 
-Remember Rule 10: a stage is only "Complete" once manually verified on a clean Windows 10 and Windows 11 VM. Coded and passing locally is "In Progress" — this checklist and `CHANGELOG.md` say exactly that, and neither should be upgraded from code review alone.
+Rule 10: a stage is only "Complete" once manually verified on a clean Windows 10 and Windows 11 VM. Coded and passing locally is "In Progress" - this checklist and `CHANGELOG.md` say exactly that.
 
-**Standard and Extended tiers**: See `docs/roadmap.md`. Rule 16 forbids starting them until Core is VM-tested.
+**Standard and Extended tiers**: see `docs/roadmap.md`. Rule 16 forbids starting them until Core is VM-tested.
 
 ---
 
-## 🚧 The release gate — what is actually left
+## 🚧 The release gate - what is actually left
 
-Phase 5 of `docs/planning/05-implementation-plan.md` is the runway from "code complete" to "shipped". None of it is done.
-
-| # | Gate | bd issue | Blocking on |
+| # | Gate | bd issue | State |
 |---|---|---|---|
-| 1 | VM test matrix on clean Win10 (1607+) and Win11 | `vanish-uninstaller-0xt` | Needs VMs. This is the gate that turns "In Progress" into "Complete". |
-| 2 | Security audit (`/cso` full pass) | `vanish-uninstaller-vhm` | Can start now |
-| 3 | `/code-review high` on destructive surfaces | `vanish-uninstaller-1td` | Can start now |
-| 4 | Docs pass + demo GIF | `vanish-uninstaller-k2o` | Can start now |
-| 5 | Code signing + Store submission | `vanish-uninstaller-1w0` | **Operator decision — has cost.** Do not start unprompted. |
-| 6 | One real external user completes the core flow | `vanish-uninstaller-442` | Needs a signed build |
+| 1 | VM test matrix, clean Win10 (1607+) + Win11 | `vanish-uninstaller-0xt` | **Blocked - no VM available.** This is the gate that turns In Progress into Complete. |
+| 2 | Security audit (`/cso` full pass) | `vanish-uninstaller-vhm` | Approved by the operator, not yet run. Start it in a fresh session. |
+| 3 | `/code-review high` on destructive surfaces | `vanish-uninstaller-1td` | Approved by the operator, not yet run. Fresh session. |
+| 4 | Docs pass + demo GIF | `vanish-uninstaller-k2o` | Open |
+| 5 | Code signing + Store submission | `vanish-uninstaller-1w0` | **Operator decision, has cost.** Deferred until just before Store submission. Do not start unprompted. |
+| 6 | One real external user completes the core flow | `vanish-uninstaller-442` | Operator will self-test first, then hand to someone else |
 
-**Three things must be resolved before a public build regardless of the above:**
+### Known gaps that are NOT bugs to rediscover
 
-1. **The CDN dependency.** `index.html` still pulls FontAwesome from cdnjs and `index.css` still `@import`s Inter/Outfit from Google Fonts. That is runtime network I/O, which Rule 6 and NFR-06 forbid outright. A strict CSP with `connect-src 'none'` is in place so nothing else can leak, and the two origins are pinned — but this is a known, tracked violation, not a resolved one. Vendoring both locally (licences already checked: FontAwesome Free icons CC BY 4.0 with attribution, fonts SIL OFL, CSS MIT; Inter and Outfit both SIL OFL) is the recommended fix.
-2. **REQ-19's ownership elevator** has an engine but no UI offer and no passing acceptance test.
-3. **REQ-13's headline acceptance** — two back-to-back uninstalls each producing a restore point — has never actually run, because System Protection is disabled on the development machine. The assertion exists and skips loudly; it must go green on the VMs.
+1. **REQ-13's headline acceptance now passes** (two back-to-back uninstalls each producing a restore point, verified 6 -> 8 after System Protection was enabled). Do not re-open it.
+2. **REQ-19's acceptance test has never run.** The ownership elevator works in engine and UI, but quarantining a TrustedInstaller-owned file needs a fixture that is unsafe to create on a working machine. VM pass. (`vanish-uninstaller-bdi` closed with this noted; `vanish-uninstaller-1qp` tracks VM acceptance.)
+3. **Driver Store packages are listed but not removable.** Deliberate: the sweeper is Stage 11, which Rule 16 places in Standard tier, and `pnputil /delete-driver` destroys the FileRepository copy so a restore manifest would be a promise the vault cannot keep. (`vanish-uninstaller-0ng`.)
+4. **The UAC accept/decline branches** of the startup elevation offer need a human at the prompt.
+5. **`git push` and `bd dolt push` are blocked** by a credential mismatch: the Windows credential helper serves a `DepthWorks` token for a `QuantumMonkey` repository, giving HTTP 403. `git config user.name` is correct. Fix by clearing the stored credential (`cmdkey /delete:LegacyGeneric:target=git:https://github.com`) and re-authenticating, or by switching the remote to SSH.
 
 ---
 
 ## 🧪 Verification status
 
-`test/run-all.ps1`, elevated, on Windows 11 build 26200: **220 passed, 0 failed** across eight suites. Unelevated, the tier suite additionally proves all nine destructive channels are rejected at the IPC boundary.
+`test\run-all.ps1`, elevated, on Windows 11 build 26200: **240 passed, 0 failed** across nine suites.
 
-This is a development machine, not a clean VM, and it is one hardware configuration. Two real defects that a code review would not have caught were found by these tests and fixed — a `REG_MULTI_SZ` application name that emptied the whole app list, and an association cleaner that proposed deleting `exefile` — which is the argument for running the suite on the VMs rather than trusting the green number here.
+| Suite | Covers |
+|---|---|
+| `vault-verify.ps1` | TASK-01 vault primitives, REQ-01/REQ-02 |
+| `tier-verify.js` | TASK-04, INV-2 - invokes all nine destructive channels directly |
+| `vault-ipc-verify.js` | TASK-02/03, FLOW-02/FLOW-03 round trip, NFR-04 oplog |
+| `phase2-verify.ps1` | TASK-06/07/08/09, incl. a real watchdog respawn control case |
+| `phase3-verify.ps1` | TASK-10/12, REQ-12, Rule 15 both branches |
+| `queue-verify.js` | TASK-11, every FLOW-05 transition, NFR-05 resumability |
+| `phase4-verify.ps1` | TASK-13/14/15/16, plus the core-handler regression guard |
+| `phase4-ipc-verify.js` | Cleaner purge/restore round trips, INV-1 |
+| `force-verify.ps1` | REQ-20 detection, evidence, and reversible forced uninstall |
+
+Unelevated, `tier-verify.js` additionally proves all nine destructive channels are rejected at the IPC boundary.
+
+This is one development machine, not a clean VM. Three real defects were found by these tests that code review did not catch:
+
+* a `REG_MULTI_SZ` DisplayName arriving as an array, which emptied the entire application list;
+* an association cleaner that proposed deleting `exefile`, `batfile` and `cmdfile` - the handlers that let Windows launch anything - because `"%1"` placeholders were misread as missing targets;
+* shell extensions registered only in the 64-bit view reported as orphaned during the 32-bit pass.
+
+That is the argument for running the suite on the VMs rather than trusting the green number here.
+
+---
+
+## 🗂️ Repository hygiene
+
+* `scratch/` is gitignored and holds only `NtSuspendProcess-Sketch.ps1`, the Antigravity reference sketch cited by OPEN-01 in bd. Dev scaffolding built during implementation (offscreen screenshot harnesses, a stub IPC preload, icon proof sheets) has been removed; it was throwaway and is trivially rebuilt.
+* `.agent/` and `test_export.json` are tooling and research residue, now gitignored rather than deleted - `test_export.json` is the raw winget export from the OPEN-02 session, whose findings already live in bd and `corrections.json`.
+* Work is committed on branch `feat/core-tier-stages-3-6-9`, off `master`, per the `01-trd.md` git convention.

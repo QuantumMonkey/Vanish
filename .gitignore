@@ -25,3 +25,11 @@ graphify-out/
 
 # Antigravity exploration scratch (never merged; findings return via bd)
 scratch/
+
+# Agent tooling rules copied in per-project; belongs to the tooling, not Vanish
+.agent/
+
+# winget package export left over from the OPEN-02 research session (2026-07-11).
+# The findings live in bd vanish-uninstaller-1gi and corrections.json; the raw
+# export is not a project artefact.
+test_export.json
