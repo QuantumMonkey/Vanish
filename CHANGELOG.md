@@ -11,9 +11,11 @@ full decision rules.
 ## [Unreleased]
 
 > Rule 10 note: everything below is **In Progress**, not Complete. It is coded
-> and passes a 290-assertion local suite on Windows 11 build 26200, but no clean
-> Windows 10 / Windows 11 VM pass has happened yet (TASK-17). No stage flips to
-> "Complete" until it does.
+> and passes 290/290 assertions **unelevated** on Windows 11 build 26200
+> (`test\run-all.ps1`); 2 of 14 suites (Vault IPC, System Clean purges) require
+> Full Mode and have not run this session — run elevated before trusting a
+> total beyond 290. No clean Windows 10 / Windows 11 VM pass has happened yet
+> (TASK-17). No stage flips to "Complete" until it does.
 
 ### Added — safety retrofits (promptgate Rules 2 and 3)
 * **Quarantine vault.** Every removal now moves files into a versioned vault
