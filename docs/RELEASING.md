@@ -123,10 +123,34 @@ externally under any circumstances, including pre-release and beta builds.
 
 ---
 
+## Reproducible Builds
+
+Build from a verified dependency set, always:
+
+```bash
+npm ci
+```
+
+Never `npm install` for a release. `npm ci` installs exactly what
+`package-lock.json` records and verifies every package against the integrity
+hash stored there; `npm install` is free to resolve something newer and will
+rewrite the lockfile to match. `electron` is pinned to an exact version in
+`package.json` for the same reason — bump it deliberately, in its own commit,
+never as a side effect of installing.
+
+This matters more here than in most projects: Vanish ships as an application
+that runs elevated and deletes files, edits the registry and executes
+third-party binaries. A substituted dependency inherits all of that. The
+lockfile is the only artefact that makes such a substitution detectable, which
+is why it is tracked in git rather than ignored (SEC-4,
+bd `vanish-uninstaller-703`).
+
 ## Pre-Release Verification Checklist
 
 Before tagging any `1.x.x` release:
 
+- [ ] Built with `npm ci` from a committed, unmodified `package-lock.json`
+- [ ] `npm audit` reviewed and clean, or every finding explicitly accepted
 - [ ] All Core tier stages tested on clean Windows 10 VM (build 1607+)
 - [ ] All Core tier stages tested on clean Windows 11 VM
 - [ ] Performance targets validated and logged in `BENCHMARKS.md`

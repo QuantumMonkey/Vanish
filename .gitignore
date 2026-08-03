@@ -1,5 +1,8 @@
 node_modules/
-package-lock.json
+# package-lock.json is deliberately TRACKED (SEC-4). It is the only record of
+# which dependency builds a release was made from, and it carries the integrity
+# hashes that make a substituted package detectable. This is an application
+# repo, not a library.
 .vscode/
 dist/
 *.log

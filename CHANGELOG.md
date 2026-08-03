@@ -133,6 +133,15 @@ full decision rules.
   markup.
 
 ### Security
+* **Fixed: no build resolved a verified dependency set.** `package-lock.json` was
+  gitignored and `electron` was range-pinned (`^42.5.0`), so nothing in the repo
+  recorded which dependency builds a release came from. A compromised publish
+  anywhere in the install graph would have been pulled by the next `npm install`
+  and shipped inside an application that runs elevated — with no committed hash
+  to notice it against. The lockfile is now tracked (all 13 packages carry
+  integrity hashes), `electron` is pinned exactly, `docs/RELEASING.md` requires
+  `npm ci` for releases, and `npm test` runs the verification suite instead of
+  erroring out. Found by a `/cso` audit (bd `vanish-uninstaller-703`).
 * **Fixed: the restore destination guard was a blocklist, and a textual one (HIGH).**
   A vault restore is a file write performed as administrator to a location the
   manifest chooses, and the manifest is untrusted input. The guard covered the
