@@ -80,7 +80,7 @@ Design work recorded in the owning docs: vault layout and `entry.json` durabilit
 **Core Tier** (complete before any public release):
 
 - `[x]` **Stage 2 - Audit & Health Advisor Tab** *(code complete)*
-- `[x]` **Quarantine vault + Audit Mode enforcement** *(code complete; UAC accept/decline branches need a human at the prompt)*
+- `[ ]` **Quarantine vault + Audit Mode enforcement** *(vault and Audit Mode done; the elevated relaunch is BROKEN - see the open bug below, bd vanish-uninstaller-ceb)*
 - `[x]` **Stage 3 - Task Manager & Unlocker**: process list with CPU/Memory/Disk, Restart Manager unlocker, passive indicators, watchdog suspension *(code complete)*
 - `[x]` **Stage 6 - Orchestration & Shell Cleanup**: bulk queue, context menu cleaner, msiserver manager, restore point override, Forced Uninstall (REQ-20) *(code complete)*
 - `[x]` **Stage 9 - System Integration & Environment Clean**: services purge, PATH cleaner, association repair, multi-user sweep, auto-UAC relauncher, registry redirection bypass *(code complete except driver-store removal and the REQ-19 acceptance test)*
@@ -133,6 +133,58 @@ work - fold into `/cso`), renderer-supplied finding objects in `cleaner-purge`
 (needs renderer compromise; strings are escaped), and `Grant-VanishOwnership`
 argument handling (PowerShell's call operator passes arguments without shell
 re-parsing, so no injection exists).
+
+### OPEN BUG - elevated relaunch fails when the repo path contains a space
+
+Reported 2026-08-03 from a real launch. Clicking **Restart as administrator**
+(banner button or the startup offer) produces:
+
+```
+Error launching app
+Unable to find Electron app at D:\quickhelp
+Cannot find module 'D:\quickhelp'
+```
+
+**This is not a build or "compilation" problem.** It is an argument-quoting bug
+on the elevation relaunch path, and the diagnosis is certain:
+
+* `main.js`, the `relaunch-elevated` handler, sends
+  `argList = app.isPackaged ? [] : [app.getAppPath()]`. Unpackaged, that is the
+  repo path: `D:\quickhelp projects\vanish-uninstaller`.
+* `scanner.ps1`, the `relaunch-elevated` action, calls
+  `Start-Process -FilePath $Params.exePath -ArgumentList $argList -Verb RunAs`.
+  PowerShell joins an `-ArgumentList` array with spaces and **does not quote the
+  elements**, so Electron receives `D:\quickhelp` and `projects\vanish-uninstaller`
+  as two separate arguments and tries to open the first as the app.
+
+**Proposed fix** (unverified - it needs a human at the UAC prompt, which is why
+it was documented rather than committed): quote each element before passing it.
+
+```powershell
+$quoted = @($argList | ForEach-Object { '"' + $_ + '"' })
+$null = Start-Process -FilePath $Params.exePath -ArgumentList $quoted -Verb RunAs -ErrorAction Stop
+```
+
+`-FilePath` already handles a spaced path correctly; only `-ArgumentList` needs
+the quoting.
+
+**Why nothing caught it, and why it is easy to under-rate:**
+
+* It only reproduces when the project path contains a space. It would pass on a
+  checkout at `C:\vanish`.
+* It only affects the **unpackaged/dev** path. When `app.isPackaged` is true the
+  arg list is empty, so a packaged build would not reproduce it - meaning this
+  can silently "fix itself" at release and hide a latent quoting bug that would
+  return the moment any argument is added to that call.
+* No automated test covers it: the relaunch necessarily triggers UAC.
+
+**When fixing, add a regression test that does not need UAC** - assert the
+constructed argument vector, not the relaunch itself. The command construction
+can be unit-tested by exporting it, or by asserting that
+`Start-Process`-bound arguments survive a round trip through a path containing
+a space.
+
+Tracked as bd `vanish-uninstaller-ceb`.
 
 ### Known gaps that are NOT bugs to rediscover
 
