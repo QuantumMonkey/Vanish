@@ -133,6 +133,25 @@ full decision rules.
   markup.
 
 ### Security
+* **Fixed: shell command injection in the single-app uninstaller (CRITICAL).**
+  The `uninstall-native` channel took a command *string* from the renderer and
+  handed it to `exec()`, which on Windows means `cmd.exe`, as administrator. That
+  string came from the registry — including `HKCU\...\Uninstall`, which any
+  standard user can write — so an entry planted with shell metacharacters
+  (`"...uninstall.exe" /S & <payload>`) was a one-click privilege escalation: the
+  planted app just had to look like something worth uninstalling. The channel now
+  takes a *pointer* (a registry path, or a package full name for Store apps) and
+  runs the same pipeline as the bulk queue: live registry re-read, trust gate,
+  executable split from its arguments, `Start-Process`. No shell is involved at
+  any point, `exec` is gone from `main.js` entirely, and the renderer can no
+  longer supply an executable or a command line. Store package removal calls
+  `Remove-AppxPackage` as a cmdlet against a package Windows confirms is
+  installed, instead of building a `powershell.exe` command line. The engine's
+  own defence-in-depth gate now refuses on the full `risky` verdict rather than
+  `userWritable` alone, so an `HKCU` entry naming a system binary with
+  attacker-chosen arguments no longer slips past it. Found by a `/cso` audit
+  (bd `vanish-uninstaller-lwz`); regression tests in `test/security-verify.ps1`
+  and a contract probe in `test/tier-verify.js`.
 * A strict Content-Security-Policy is now set: `connect-src 'none'` makes fetch,
   XHR and WebSockets impossible from the renderer, so no scan result or path can
   leave the machine.

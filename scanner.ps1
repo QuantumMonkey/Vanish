@@ -164,7 +164,10 @@ function Get-UwpApps {
             }
 
             $id = "UWP_$($pkg.PackageFullName)"
-            $uninstallCmd = "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command Remove-AppxPackage -Package $($pkg.PackageFullName)"
+            # SEC-1: uninstallString is DISPLAY ONLY for a UWP package. Removal
+            # goes through the remove-appx action with the package full name, so
+            # nothing here is ever executed as a command line.
+            $uninstallCmd = "Remove-AppxPackage -Package $($pkg.PackageFullName)"
 
             $apps.Add([PSCustomObject]@{
                 id              = $id
@@ -172,6 +175,7 @@ function Get-UwpApps {
                 publisher       = $pkg.PublisherId
                 version         = $pkg.Version
                 installDate     = $date
+                packageFullName = [string]$pkg.PackageFullName
                 uninstallString = $uninstallCmd
                 installLocation = $pkg.InstallLocation
                 icon            = "" # Will use generic fallback in UI
@@ -2173,10 +2177,15 @@ function Invoke-Uninstaller {
     if ($p.timeoutSeconds) { $timeoutSeconds = [int]$p.timeoutSeconds }
 
     # Defence in depth for Vuln 3: even if the queue runner is bypassed, the
-    # engine refuses to launch a binary from a user-writable location with
-    # administrator rights unless the caller says the user acknowledged it.
+    # engine refuses to launch an untrusted binary with administrator rights
+    # unless the caller says the user acknowledged it.
+    #
+    # SEC-1: this gated on userWritable alone, which let an HKCU-registered entry
+    # naming a system binary (a LOLBin with attacker-chosen arguments) through the
+    # engine-level check. It gates on the full risky verdict now, matching the
+    # callers in lib/queue.js and the uninstall-native handler.
     $trust = Get-UninstallerTrust -registryPath $p.registryPath -executable $p.executable
-    if ($trust.userWritable -and $p.acknowledged -ne $true) {
+    if ($trust.risky -and $p.acknowledged -ne $true) {
         return @{
             success = $false
             blocked = $true
@@ -2227,6 +2236,50 @@ function Invoke-Uninstaller {
         interactive = $interactive
         durationMs  = [int]((Get-Date) - $started).TotalMilliseconds
         commandLine = "$($p.executable) $argString".Trim()
+    }
+}
+
+# Remove one Store (UWP) package (SEC-1).
+#
+# The old path built "powershell.exe -NoProfile ... -Command Remove-AppxPackage
+# -Package <name>" as a string in Get-UwpApps and let main.js push it through
+# cmd.exe. Nothing is assembled into a command line here: the name must match an
+# installed package exactly, and the cmdlet is called with that package object's
+# own PackageFullName.
+function Remove-AppxPackageSafely {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required. Vanish is running in Audit Mode (read-only)." }
+    }
+
+    $name = [string]$p.packageFullName
+    if ([string]::IsNullOrWhiteSpace($name)) {
+        return @{ success = $false; error = "A package full name is required." }
+    }
+
+    # Shape check first: Name_Version_Architecture__PublisherId. Cheap, and it
+    # rejects anything path-like or quoted before it reaches a cmdlet parameter.
+    if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9\.\-]*_[0-9][0-9\.]*_[A-Za-z0-9]*__[A-Za-z0-9]+$') {
+        return @{ success = $false; error = "Rejected: that is not a valid package full name." }
+    }
+
+    try {
+        # The real control: it has to be a package Windows says is installed.
+        $pkg = @(Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue |
+                 Where-Object { $_.PackageFullName -eq $name })[0]
+        if (-not $pkg) {
+            $pkg = @(Get-AppxPackage -ErrorAction SilentlyContinue |
+                     Where-Object { $_.PackageFullName -eq $name })[0]
+        }
+        if (-not $pkg) {
+            return @{ success = $false; error = "That package is not installed." }
+        }
+
+        Remove-AppxPackage -Package $pkg.PackageFullName -ErrorAction Stop
+        return @{ success = $true; packageFullName = [string]$pkg.PackageFullName }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message }
     }
 }
 
@@ -2981,6 +3034,9 @@ if ($Action) {
         }
         "run-uninstaller" {
             Invoke-Uninstaller -p $Params | ConvertTo-Json -Depth 5 -Compress
+        }
+        "remove-appx" {
+            Remove-AppxPackageSafely -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         "msiserver-state" {
             Get-MsiServerState | ConvertTo-Json -Depth 4 -Compress

@@ -832,6 +832,38 @@ function manageStepIndicators(screenId) {
   }
 }
 
+// SEC-1: the renderer names the app to uninstall; it never supplies the command.
+// If the engine reports the entry as untrusted - registered under HKCU, or with
+// its binary somewhere a standard user could have planted it - it refuses until
+// the operator types RUN, the same gate the bulk queue uses.
+async function runNativeUninstaller(app) {
+  const request =
+    app.type === 'UWP'
+      ? { type: 'UWP', packageFullName: app.packageFullName }
+      : { type: 'Desktop', registryPath: app.registryPath };
+
+  let res = await window.api.uninstallNative(request);
+
+  if (res && res.blocked) {
+    const reasons = ((res.trust && res.trust.reasons) || []).join('; ');
+    const ack = await confirmDialog({
+      title: 'This uninstaller cannot be fully trusted',
+      body:
+        `${app.name} would run with administrator rights, but it is the kind of entry ` +
+        `malware can create: ${reasons}.\n\n` +
+        'Only continue if you recognise it. Type RUN to run it anyway.',
+      confirmLabel: 'Run it anyway',
+      typed: 'RUN'
+    });
+    if (!ack) {
+      return { success: false, declined: true, error: 'Not run: the uninstaller was not acknowledged.' };
+    }
+    res = await window.api.uninstallNative({ ...request, acknowledged: true });
+  }
+
+  return res;
+}
+
 function setupWizardControls() {
   // Close / Cancel click
   elements.wizCloseX.addEventListener('click', confirmCancel);
@@ -899,7 +931,7 @@ function setupWizardControls() {
       elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Native Uninstaller Running...</span>';
     }
 
-    const res = await window.api.uninstallNative(selectedApp.uninstallString);
+    const res = await runNativeUninstaller(selectedApp);
 
     elements.btnLaunchNative.disabled = false;
     elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-circle-play"></i> <span>Launch Native Uninstaller</span>';
@@ -911,8 +943,20 @@ function setupWizardControls() {
         toast(`Package removal failed: ${res.error}. Scanning for leftovers anyway.`, 'warn');
       }
       elements.btnWizNext.click();
+    } else if (res.success) {
+      // The engine now waits for the uninstaller and traps its exit code, so
+      // this is a result rather than a "we launched something" guess.
+      toast(
+        res.rebootRequired
+          ? 'Uninstaller finished - Windows needs a reboot to complete it. Click Scan Leftovers.'
+          : 'Uninstaller finished. Click Scan Leftovers.',
+        'success',
+        7000
+      );
+    } else if (res.declined) {
+      toast(res.error, 'warn');
     } else {
-      toast('Native uninstaller launched. When it finishes, click Scan Leftovers.', 'info', 7000);
+      toast(`Uninstaller did not complete: ${res.error} You can still scan for leftovers.`, 'warn', 7000);
     }
   });
 
@@ -2679,8 +2723,18 @@ async function scanBrokenEntry(index) {
     });
     if (runIt) {
       if (!guardFullMode()) return;
-      await window.api.uninstallNative(entry.uninstallString);
-      toast('Uninstaller launched. Re-scan when it finishes to check for leftovers.', 'info', 7000);
+      const res = await runNativeUninstaller({
+        type: 'Desktop',
+        name: entry.displayName,
+        registryPath: entry.registryPath
+      });
+      toast(
+        res.success
+          ? 'Uninstaller finished. Re-scan to check for leftovers.'
+          : `Uninstaller did not complete: ${res.error}`,
+        res.success ? 'success' : 'warn',
+        7000
+      );
       return;
     }
   }

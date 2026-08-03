@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('node:path');
-const { spawn, exec } = require('node:child_process');
+// SEC-1: spawn only. Nothing in this process may hand a string to a shell.
+const { spawn } = require('node:child_process');
 
 const store = require('./lib/store');
 const vault = require('./lib/vault');
@@ -236,24 +237,157 @@ fullModeOnly('purge-remnants', async (event, payload) => {
   }
 });
 
-// Run native uninstaller
-fullModeOnly('uninstall-native', async (event, uninstallString) => {
-  return new Promise((resolve) => {
-    if (!uninstallString) {
-      resolve({ success: false, error: 'No uninstall command found for this app.' });
-      return;
+// Run the application's own uninstaller (SEC-1, vanish-uninstaller-lwz).
+//
+// This handler used to take a command STRING from the renderer and hand it to
+// exec(), i.e. to cmd.exe, as administrator. That string came from the registry,
+// including HKCU:\...\Uninstall, which any standard user can write - so a planted
+// entry carrying shell metacharacters was a one-click privilege escalation.
+//
+// The channel now takes a POINTER (a registry path, or a package full name) and
+// runs the same pipeline the bulk queue uses: live re-read -> trust gate ->
+// executable/arguments split -> Start-Process. No shell is involved at any point,
+// and the renderer can no longer supply an executable or a command line at all.
+const REBOOT_EXIT_CODES = new Set([3010, 1641]);
+
+fullModeOnly('uninstall-native', async (event, params) => {
+  const req = params && typeof params === 'object' ? params : {};
+
+  if (req.type === 'UWP') return removeAppxPackage(req);
+
+  if (!req.registryPath) {
+    return { success: false, error: 'No registry entry was supplied for this app.' };
+  }
+
+  try {
+    // Step 1: the LIVE registry is the only source of truth for what to run.
+    // Whatever the renderer is displaying may be stale or tampered with.
+    const live = await runPowerShell('read-uninstall-entry', { registryPath: req.registryPath });
+    if (!live || live.success !== true || live.found !== true) {
+      return {
+        success: false,
+        error: (live && live.error) || 'The uninstall entry no longer exists in the registry.'
+      };
     }
 
-    exec(uninstallString, (error) => {
-      if (error) {
-        // Some uninstallers exit with codes or complain, but they might still run
-        resolve({ success: false, error: error.message });
-      } else {
-        resolve({ success: true });
+    // Step 2: the same gate lib/queue.js runOne applies. An entry registered
+    // under HKCU, or one whose binary sits somewhere a standard user can write,
+    // is something malware could have planted - so it runs only if the operator
+    // acknowledged it by name.
+    const trust = live.trust || { risky: false, reasons: [] };
+    const acknowledged = req.acknowledged === true;
+    if (trust.risky && !acknowledged) {
+      store.appendOplog({
+        action: 'uninstall-native',
+        tier: currentTier,
+        items: { app: live.displayName, registryPath: req.registryPath },
+        outcome: 'blocked',
+        meta: { reason: 'unacknowledged untrusted uninstaller', trust }
+      });
+      return {
+        success: false,
+        blocked: true,
+        trust,
+        error: 'Not run: this uninstaller needs explicit confirmation because ' + trust.reasons.join('; ') + '.'
+      };
+    }
+
+    // Step 3: Rule 15 lookup, and the executable split away from its arguments.
+    const resolved = await runPowerShell('resolve-uninstall-args', {
+      displayName: live.displayName,
+      publisher: live.publisher,
+      uninstallString: live.uninstallString
+    });
+    if (!resolved || resolved.success !== true) {
+      return {
+        success: false,
+        error: (resolved && resolved.error) || 'Could not resolve uninstall arguments.'
+      };
+    }
+
+    // Step 4: Start-Process -FilePath/-ArgumentList. No shell, no re-parsing.
+    const run = await runPowerShell('run-uninstaller', {
+      executable: resolved.executable,
+      baseArgs: resolved.baseArgs,
+      arguments: resolved.arguments,
+      registryPath: req.registryPath,
+      timeoutSeconds: 600,
+      acknowledged
+    });
+
+    if (!run || run.success !== true) {
+      store.appendOplog({
+        action: 'uninstall-native',
+        tier: currentTier,
+        items: { app: live.displayName, registryPath: req.registryPath },
+        outcome: run && run.blocked ? 'blocked' : 'error',
+        meta: { error: run && run.error, method: resolved.method }
+      });
+      return {
+        success: false,
+        blocked: run && run.blocked === true,
+        trust: run && run.trust,
+        error: (run && run.error) || 'The uninstaller could not be started.'
+      };
+    }
+
+    const rebootRequired = REBOOT_EXIT_CODES.has(run.exitCode);
+    const ok = run.timedOut !== true &&
+               (run.exitCode === 0 || run.exitCode === null || rebootRequired);
+
+    store.appendOplog({
+      action: 'uninstall-native',
+      tier: currentTier,
+      items: { app: live.displayName, registryPath: req.registryPath },
+      outcome: ok ? 'success' : 'error',
+      meta: {
+        method: resolved.method,
+        exitCode: run.exitCode ?? null,
+        timedOut: run.timedOut === true,
+        interactive: run.interactive === true,
+        trust
       }
     });
-  });
+
+    return {
+      success: ok,
+      exitCode: run.exitCode ?? null,
+      timedOut: run.timedOut === true,
+      interactive: run.interactive === true,
+      rebootRequired,
+      method: resolved.method,
+      error: ok
+        ? undefined
+        : run.timedOut
+          ? 'The uninstaller was still running after 10 minutes.'
+          : `The uninstaller exited with code ${run.exitCode}.`
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
 });
+
+// The UWP branch of the same channel. It used to build a powershell.exe command
+// line and push it through the same exec() call; the engine now resolves the
+// package itself and calls Remove-AppxPackage as a cmdlet.
+async function removeAppxPackage(req) {
+  if (!req.packageFullName) {
+    return { success: false, error: 'No package name was supplied for this app.' };
+  }
+  try {
+    const res = await runPowerShell('remove-appx', { packageFullName: req.packageFullName });
+    store.appendOplog({
+      action: 'uninstall-native',
+      tier: currentTier,
+      items: { package: req.packageFullName },
+      outcome: res && res.success ? 'success' : 'error',
+      meta: { type: 'UWP', error: res && res.error }
+    });
+    return res;
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
 
 // Check Admin Status - uses WindowsPrincipal API via PowerShell (Promptgate Rule 13)
 ipcMain.handle('check-admin', async () => isFullMode());

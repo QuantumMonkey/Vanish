@@ -13,7 +13,10 @@ contextBridge.exposeInMainWorld('api', {
   purgeRemnants: (remnants) => ipcRenderer.invoke('purge-remnants', remnants),
 
   // Execution
-  uninstallNative: (uninstallString) => ipcRenderer.invoke('uninstall-native', uninstallString),
+  // SEC-1: takes a pointer, never a command. { type, registryPath } for a desktop
+  // app or { type: 'UWP', packageFullName }, plus acknowledged:true once the
+  // operator has confirmed an uninstaller the engine reported as untrusted.
+  uninstallNative: (request) => ipcRenderer.invoke('uninstall-native', request),
   checkAdmin: () => ipcRenderer.invoke('check-admin'),
 
   // Elevation tiers (REQ-04, REQ-05)

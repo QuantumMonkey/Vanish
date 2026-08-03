@@ -203,6 +203,122 @@ try {
     } finally {
         if (Test-Path -LiteralPath $hkcuKey) { Remove-Item -LiteralPath $hkcuKey -Recurse -Force -ErrorAction SilentlyContinue }
     }
+
+    # ==================================================================
+    # SEC-1: shell command injection through UninstallString
+    # (/cso audit 2026-08-03, bd vanish-uninstaller-lwz)
+    # ==================================================================
+    Write-Host ""
+    Write-Host "SEC-1 - command injection via a planted HKCU UninstallString" -ForegroundColor Cyan
+
+    # The whole vulnerability was that main.js handed this string to cmd.exe as
+    # administrator. The canary proves no shell ever saw it: if a shell did, the
+    # metacharacter payload would create the file.
+    $injCanary = Join-Path $canary "sec1-injection-canary.txt"
+    if (Test-Path -LiteralPath $injCanary) { Remove-Item -LiteralPath $injCanary -Force }
+
+    $injKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\VanishSec1TestEntry"
+    if (Test-Path -LiteralPath $injKey) { Remove-Item -LiteralPath $injKey -Recurse -Force }
+    $null = New-Item -Path $injKey -Force
+    Set-ItemProperty -LiteralPath $injKey -Name DisplayName -Value "Vanish SEC-1 Test Entry"
+    Set-ItemProperty -LiteralPath $injKey -Name UninstallString `
+        -Value "`"$env:LOCALAPPDATA\fake\uninstall.exe`" /S & echo pwned > `"$injCanary`""
+
+    $injPath = "HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\VanishSec1TestEntry"
+
+    try {
+        # 1. The entry is recognised as untrusted before anything runs.
+        $live = Invoke-Engine "read-uninstall-entry" @{ registryPath = $injPath }
+        Assert-True ($live.trust.risky -eq $true)            "a planted HKCU entry is reported untrusted"
+
+        # 2. The engine refuses it outright without an acknowledgement, even
+        #    though the executable itself is what the string names.
+        $split = Invoke-Engine "resolve-uninstall-args" @{
+            displayName     = $live.displayName
+            publisher       = $live.publisher
+            uninstallString = $live.uninstallString
+        }
+        Assert-True ($split.success -eq $true)               "the uninstall string is parsed rather than executed"
+        Assert-True ($split.executable -notmatch '&')        "the metacharacter payload is not part of the executable"
+
+        $blocked = Invoke-Engine "run-uninstaller" @{
+            executable     = $split.executable
+            baseArgs       = $split.baseArgs
+            arguments      = $split.arguments
+            registryPath   = $injPath
+            timeoutSeconds = 5
+            acknowledged   = $false
+        }
+        Assert-True ($blocked.success -eq $false)            "an unacknowledged untrusted uninstaller is refused"
+        Assert-True ($blocked.blocked -eq $true)             "the refusal is the trust gate, not an incidental failure"
+
+        # 3. Even acknowledged, the payload runs through Start-Process, so the
+        #    shell operators are inert. The executable does not exist, so this
+        #    fails to start - and the canary must still not exist.
+        $ran = Invoke-Engine "run-uninstaller" @{
+            executable     = $split.executable
+            baseArgs       = $split.baseArgs
+            arguments      = $split.arguments
+            registryPath   = $injPath
+            timeoutSeconds = 5
+            acknowledged   = $true
+        }
+        Assert-True ($ran.blocked -ne $true)                 "an acknowledged uninstaller is no longer blocked by the gate"
+
+        Start-Sleep -Milliseconds 500
+        Assert-True (-not (Test-Path -LiteralPath $injCanary)) "no shell ran the '&' payload - the injection canary is absent"
+
+        # 4. HKCU registration alone is enough to trip the engine-level gate,
+        #    even when the binary itself sits somewhere only admins can write.
+        $lolbin = Invoke-Engine "run-uninstaller" @{
+            executable     = (Join-Path $env:SystemRoot "System32\cmd.exe")
+            baseArgs       = ""
+            arguments      = "/c echo pwned > `"$injCanary`""
+            registryPath   = $injPath
+            timeoutSeconds = 5
+            acknowledged   = $false
+        }
+        Assert-True ($lolbin.blocked -eq $true)              "an HKCU entry naming a system binary is blocked, not just user-writable ones"
+        Assert-True (-not (Test-Path -LiteralPath $injCanary)) "the LOLBin attempt left no canary either"
+    } finally {
+        if (Test-Path -LiteralPath $injKey) { Remove-Item -LiteralPath $injKey -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+
+    # ==================================================================
+    # SEC-1: the UWP branch no longer builds a command line
+    # ==================================================================
+    Write-Host ""
+    Write-Host "SEC-1 - Store package removal takes a package name, not a command" -ForegroundColor Cyan
+
+    $appxCanary = Join-Path $canary "sec1-appx-canary.txt"
+    if (Test-Path -LiteralPath $appxCanary) { Remove-Item -LiteralPath $appxCanary -Force }
+
+    $bad = Invoke-Engine "remove-appx" @{ packageFullName = "Foo_1.0.0.0_x64__abc & echo pwned > `"$appxCanary`"" }
+    Assert-True ($bad.success -eq $false)                    "a package name carrying shell metacharacters is refused"
+    Assert-True ($bad.error -match 'not a valid package full name') "the refusal is the shape check, before any cmdlet call"
+
+    $missing = Invoke-Engine "remove-appx" @{ packageFullName = "NotInstalled.Vanish_1.0.0.0_x64__8wekyb3d8bbwe" }
+    Assert-True ($missing.success -eq $false)                "a well-formed but uninstalled package is refused"
+
+    $empty = Invoke-Engine "remove-appx" @{ packageFullName = "" }
+    Assert-True ($empty.success -eq $false)                  "an empty package name is refused"
+
+    Start-Sleep -Milliseconds 300
+    Assert-True (-not (Test-Path -LiteralPath $appxCanary))  "no shell ran the appx payload - the canary is absent"
+
+    # ==================================================================
+    # SEC-1: static guarantee - no shell in the main process at all
+    # ==================================================================
+    Write-Host ""
+    Write-Host "SEC-1 - the main process imports no shell-executing API" -ForegroundColor Cyan
+
+    # Comment lines are stripped so the commentary describing the old bug does
+    # not trip the check that the old bug is gone.
+    $mainCode = @(Get-Content -LiteralPath (Join-Path $root "main.js") |
+                  Where-Object { $_ -notmatch '^\s*(//|\*|/\*)' }) -join "`n"
+    Assert-True ($mainCode -notmatch 'exec\s*\(')             "main.js has no exec() call site"
+    Assert-True ($mainCode -notmatch '\bexecSync\b')          "main.js has no execSync() call site"
+    Assert-True ($mainCode -notmatch 'require\([''"]node:child_process[''"]\)[^\r\n]*\bexec\b') "main.js does not import exec from child_process"
 }
 finally {
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }

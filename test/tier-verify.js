@@ -20,7 +20,13 @@ const DESTRUCTIVE_CHANNELS = [
   ['vault-restore', { entryId: 'does-not-exist' }],
   ['vault-delete', { entryId: 'does-not-exist' }],
   ['create-restore-point', undefined],
-  ['uninstall-native', 'cmd.exe /c echo test'],
+  // SEC-1: the channel takes a registry pointer, not a command. A bare string
+  // (what the old contract accepted, and what the injection rode in on) must not
+  // be executable by any tier - see the raw-string probe below.
+  [
+    'uninstall-native',
+    { type: 'Desktop', registryPath: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VanishTierVerifyNoSuchEntry' }
+  ],
   ['kill-process', { pid: 999999 }],
   ['unlock-path', { path: 'C:\\Windows\\System32\\notepad.exe' }],
   ['queue-start', undefined],
@@ -97,6 +103,23 @@ app.whenReady().then(async () => {
       );
     }
   }
+
+  // SEC-1 contract probe: the old handler took a command string and ran it
+  // through cmd.exe. Passing one now must produce a refusal in either tier -
+  // rejected by the guard in Audit Mode, refused for want of a pointer in Full
+  // Mode - and must never be treated as something to execute.
+  console.log('');
+  console.log('SEC-1: uninstall-native refuses a raw command string');
+  const rawString = await invoke('uninstall-native', 'cmd.exe /c echo pwned');
+  assert(
+    rawString && rawString.success === false,
+    'a bare command string is refused, not executed'
+  );
+  const rawObject = await invoke('uninstall-native', { uninstallString: 'cmd.exe /c echo pwned' });
+  assert(
+    rawObject && rawObject.success === false,
+    'an object carrying only an uninstallString is refused'
+  );
 
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
