@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "_comment": [
+    "ENT-03 - uninstall switch corrections. Read-only at runtime; committed to",
+    "the repo so it is community-correctable (promptgate Rule 15 chain step 1).",
+    "This file is the PRIMARY source of truth for silent uninstall switches.",
+    "winget was dropped as a runtime source: its default source is a network",
+    "REST API, which Rule 6 forbids, and it does not expose UninstallerSwitches",
+    "(OPEN-02, resolved 2026-07-11).",
+    "",
+    "Matching: 'displayName' is a case-insensitive substring of the registry",
+    "DisplayName. 'publisher' is optional and narrows an ambiguous name match.",
+    "The most specific match (longest displayName) wins.",
+    "",
+    "'silentArgs' REPLACES the arguments in the registry UninstallString; the",
+    "executable from that string is kept. Use {UNINSTALLER} in silentArgs where",
+    "a helper executable path is required instead."
+  ],
+  "apps": [
+    {
+      "match": { "displayName": "Google Chrome", "publisher": "Google" },
+      "silentArgs": "--uninstall --system-level --force-uninstall",
+      "source": "Chrome Enterprise deployment guide (setup.exe switches)",
+      "meta": { "verified": "OPEN-02 2026-07-11", "note": "Drop --system-level for a per-user install; the machine-level key is the one that carries it." }
+    },
+    {
+      "match": { "displayName": "Mozilla Firefox", "publisher": "Mozilla" },
+      "silentArgs": "/S",
+      "source": "Mozilla enterprise documentation (helper.exe)",
+      "meta": { "verified": "OPEN-02 2026-07-11" }
+    },
+    {
+      "match": { "displayName": "Slack", "publisher": "Slack Technologies" },
+      "silentArgs": "--uninstall -s",
+      "source": "Squirrel.Windows uninstall convention",
+      "meta": { "verified": "OPEN-02 2026-07-11" }
+    },
+    {
+      "match": { "displayName": "Zoom", "publisher": "Zoom" },
+      "silentArgs": "/uninstall /silent",
+      "source": "Zoom bulk deployment guide",
+      "meta": { "verified": "OPEN-02 2026-07-11" }
+    },
+    {
+      "match": { "displayName": "Steam", "publisher": "Valve" },
+      "silentArgs": "/S",
+      "source": "NSIS uninstaller",
+      "meta": { "verified": "OPEN-02 2026-07-11" }
+    },
+    {
+      "match": { "displayName": "Notepad++", "publisher": "" },
+      "silentArgs": "/S",
+      "source": "NSIS uninstaller",
+      "meta": { "verified": "OPEN-02 2026-07-11" }
+    },
+    {
+      "match": { "displayName": "VLC media player", "publisher": "VideoLAN" },
+      "silentArgs": "/S",
+      "source": "NSIS uninstaller",
+      "meta": { "verified": "OPEN-02 2026-07-11" }
+    },
+    {
+      "match": { "displayName": "7-Zip", "publisher": "Igor Pavlov" },
+      "silentArgs": "/S",
+      "source": "NSIS uninstaller",
+      "meta": { "verified": "community", "note": "MSI builds of 7-Zip fall through to the /qn heuristic instead." }
+    },
+    {
+      "match": { "displayName": "Visual Studio Code", "publisher": "Microsoft" },
+      "silentArgs": "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+      "source": "Inno Setup uninstaller",
+      "meta": { "verified": "community" }
+    },
+    {
+      "match": { "displayName": "Git", "publisher": "The Git Development Community" },
+      "silentArgs": "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART",
+      "source": "Inno Setup uninstaller",
+      "meta": { "verified": "community" }
+    }
+  ]
+}

@@ -109,13 +109,25 @@ Wizard screens and step indicators are a declared state machine in [renderer.js]
 
 ## 5. Implemented vs. designed
 
+Status vocabulary follows promptgate Rule 10: **Implemented** means coded with a
+passing local verification suite; it does **not** mean Complete. Nothing here is
+Complete until the clean Windows 10 (1607+) and Windows 11 VM pass in TASK-17.
+
 | Area | Status |
 |---|---|
 | Stage 1 — inventory, wizard, 3-mode scan, review-gated purge | ✅ Implemented ([scanner.ps1](scanner.ps1), [renderer.js](renderer.js)) |
 | Stage 2 — Health Advisor (diagnostics, startup audit, redundancy) | ✅ Implemented (CHANGELOG 0.2.0) |
-| Quarantine-first deletion vault | 📐 Design only — purge currently deletes directly after review ([docs/architecture.md](docs/architecture.md)) |
-| Audit Mode banner (read-only fallback) | 📐 Design only — titlebar shows elevation badge; no enforced read-only tier |
-| Stage 3+ — task manager/unlocker, orchestration, definition packs, suspicious-activity indicators | 📐 Design only ([docs/roadmap.md](docs/roadmap.md)) |
-| Force Uninstall / Settings / About tabs | 🔲 Stubs — informational alerts in [renderer.js](renderer.js) `setupSidebarNavigation` |
+| Quarantine-first deletion vault | ✅ Implemented — `Invoke-QuarantineItems` / [lib/vault.js](lib/vault.js) / [lib/store.js](lib/store.js); the direct-delete purge is gone |
+| Quarantine Manager tab (restore, Delete Forever, retention) | ✅ Implemented ([renderer.js](renderer.js) SCR-02) |
+| Audit Mode enforced read-only tier + banner | ✅ Implemented — `fullModeOnly()` in [main.js](main.js) rejects every destructive channel; engine re-checks WindowsPrincipal |
+| Startup elevation offer / relaunch | ⚠️ Implemented, UAC branches unverified — needs a human at the prompt (TASK-17) |
+| Stage 3 — process monitor, unlocker, passive indicators, watchdog suspension | ✅ Implemented ([scanner.ps1](scanner.ps1) phase 2 block, SCR-03) |
+| Stage 6 — bulk uninstall queue, switch chain, msiserver, restore-point override | ✅ Implemented ([lib/queue.js](lib/queue.js), [corrections.json](corrections.json)) |
+| Stage 9 — registry views, context menus, services, PATH, associations, profile sweep | ✅ Implemented ([scanner.ps1](scanner.ps1) phase 4 block, SCR-05) |
+| Driver Store package removal | 📐 Audit only — packages are listed but not removable; the sweeper is Stage 11 (Standard tier, Rule 16) |
+| REQ-19 ownership elevator | ⚠️ Engine + UI done — per-item offer on the purge summary; acceptance test (TrustedInstaller-owned fixture) deferred to the VM pass |
+| REQ-20 Force Uninstall for broken entries | ✅ Implemented — `Find-BrokenUninstallEntries` detects entries that cannot uninstall themselves; removal (including the uninstall key) routes through the vault |
+| Settings / About tabs | ✅ Implemented — real panels ([index.html](index.html), [renderer.js](renderer.js)) |
+| Zero runtime network I/O | ✅ Enforced — CSP names no external origin (`default-src 'self'`, `connect-src 'none'`); icons are first-party ([assets/icons.css](assets/icons.css)) and type is the OS stack |
 
 *Version note: the repo follows a `RELEASE.MAJOR.MINOR` scheme defined in [docs/RELEASING.md](docs/RELEASING.md); current released state is 0.2.1 per [CHANGELOG.md](CHANGELOG.md).*

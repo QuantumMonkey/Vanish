@@ -132,6 +132,39 @@ Stage 9 (System Integration & Environment Clean):
   *Accept when:* a TrustedInstaller-owned test file is quarantined after
   the elevator step.
 
+Stage 6 addition (Forced Uninstall, operator-directed 2026-08-03):
+
+- **REQ-20** [MUST] Forced uninstall for broken and orphaned entries. Three
+  entry points, one review-gated pipeline:
+  1. **Detected broken entries.** Vanish enumerates the uninstall registry keys
+     itself and flags entries whose `UninstallString` is absent, whose
+     uninstaller executable is gone, or whose `InstallLocation` no longer
+     exists. The user does not have to know an application's name to fix it.
+  2. **By application name.** A keyword feeds the existing three-mode discovery
+     scan (Rule 1: depth stays independent of deletion policy).
+  3. **By install folder.** A path the user still has, belonging to no
+     registered application.
+
+  Behaviour: when a working uninstaller is still present Vanish offers to run
+  that first and only forces when it is missing, broken, or declined - forcing
+  is the fallback, never the default. The orphaned uninstall registry key is
+  itself included in the findings, because leaving it behind is exactly what
+  keeps a dead application listed in Programs and Features. Every removal goes
+  through the quarantine vault (Rule 2), the uninstall key included, so a
+  mistaken force is recoverable. Scanning works in Audit Mode; removal does not.
+
+  *Accept when:* an application whose uninstaller executable has been deleted is
+  detected as broken without the user naming it; its traces and its uninstall
+  key are quarantined; the entry disappears from the application list; and
+  restoring the vault entry brings back both the files and the listing.
+
+  *Why this is not Revo's forced uninstall:* Revo makes the user supply a name
+  or folder, then deletes what it finds, with a registry backup the user has to
+  go and locate. Vanish finds the broken entries itself, shows per-item evidence
+  for every proposal, routes the whole removal through the same restorable vault
+  as every other operation, and still prefers the application's own uninstaller
+  when one actually works.
+
 ## Out of scope (this release)
 
 - Stages 4, 7, 8, 11, 12, 14 (Standard tier) and 10, 13 (Extended): Rule 16

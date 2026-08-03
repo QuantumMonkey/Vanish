@@ -3,10 +3,29 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vanish Uninstaller & Cleaner</title>
+  <!--
+    NFR-06 / INV-4 (zero runtime network I/O), enforced rather than promised.
+    There is no external origin in this policy at all: no CDN, no webfont host,
+    and connect-src 'none' makes fetch, XHR and WebSockets impossible from the
+    renderer. Nothing Vanish learns about this machine can leave it.
+    Icons are first-party (assets/icons.css); type is the OS system stack.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    script-src 'self';
+    style-src 'self' 'unsafe-inline';
+    font-src 'self';
+    img-src 'self' data:;
+    connect-src 'none';
+    object-src 'none';
+    frame-src 'none';
+    media-src 'none';
+    base-uri 'none';
+    form-action 'none';
+  ">
+  <title>Vanish Uninstaller &amp; Cleaner</title>
+  <link rel="stylesheet" href="assets/icons.css">
   <link rel="stylesheet" href="index.css">
-  <!-- FontAwesome CDN for modern vector icons -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
 
@@ -31,6 +50,13 @@
       </div>
     </div>
 
+    <!-- SCR-01: Audit Mode banner (promptgate Rule 3 text, verbatim) -->
+    <div class="tier-banner" id="tier-banner" role="status" style="display: none;">
+      <i class="fa-solid fa-lock"></i>
+      <span id="tier-banner-text">Running in Audit Mode - elevate to enable cleaning and uninstallation.</span>
+      <button class="tier-banner-btn" id="btn-banner-elevate">Restart as administrator</button>
+    </div>
+
     <!-- Main Workspace -->
     <div class="main-wrapper">
       
@@ -44,6 +70,18 @@
           <div class="nav-item" data-tab="audit">
             <i class="fa-solid fa-chart-line"></i>
             <span>Health Advisor</span>
+          </div>
+          <div class="nav-item" data-tab="task-manager">
+            <i class="fa-solid fa-microchip"></i>
+            <span>Task Manager</span>
+          </div>
+          <div class="nav-item" data-tab="system-clean">
+            <i class="fa-solid fa-broom"></i>
+            <span>System Clean</span>
+          </div>
+          <div class="nav-item" data-tab="quarantine">
+            <i class="fa-solid fa-box-archive"></i>
+            <span>Quarantine</span>
           </div>
           <div class="nav-item" data-tab="force-uninstall">
             <i class="fa-solid fa-bolt"></i>
@@ -200,9 +238,13 @@
               </div>
             </div>
 
-            <button class="btn-primary" id="btn-start-uninstall">
+            <button class="btn-primary" id="btn-start-uninstall" data-destructive="true">
               <i class="fa-solid fa-trash-can"></i>
               <span>Clean Uninstall</span>
+            </button>
+            <button class="btn-sec" id="btn-queue-app" data-destructive="true">
+              <i class="fa-solid fa-layer-group"></i>
+              <span>Add to bulk queue</span>
             </button>
           </div>
 
@@ -289,8 +331,488 @@
         </div><!-- /audit-scroll-area -->
       </div><!-- /audit-panel -->
 
+      <!-- ===== SCR-02: QUARANTINE MANAGER ===== -->
+      <div class="content-area" id="quarantine-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-box-archive"></i>
+            Quarantine
+          </div>
+          <div class="header-controls">
+            <button class="btn-sec btn-compact" id="btn-open-vault-folder">
+              <i class="fa-solid fa-folder-open"></i> Open vault folder
+            </button>
+            <button class="btn-sec btn-compact" id="btn-refresh-vault">
+              <i class="fa-solid fa-rotate-right"></i> Refresh
+            </button>
+          </div>
+        </div>
+
+        <div class="panel-scroll">
+          <p class="panel-lede">
+            Nothing Vanish removes is deleted outright. Files are moved here and registry keys are
+            exported to a .reg restore manifest before removal, so every purge stays reversible until
+            you choose otherwise.
+          </p>
+
+          <!-- Retention settings row (ENT-02; auto-purge off by default) -->
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Automatic purge</div>
+              <div class="settings-row-desc">
+                When enabled, quarantined entries older than the retention period are permanently
+                deleted at app start. Off by default - deletion policy is yours, not the scanner's.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <label class="retention-field">
+                <span>Retention</span>
+                <input type="number" id="inp-retention-days" min="0" max="3650" value="30">
+                <span>days</span>
+              </label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="chk-auto-purge">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div id="vault-loading" class="panel-state">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <div>Reading the quarantine manifest...</div>
+          </div>
+
+          <div id="vault-empty" class="panel-state" style="display: none;">
+            <i class="fa-solid fa-box-open"></i>
+            <div>Nothing quarantined yet - purges land here first.</div>
+          </div>
+
+          <div id="vault-error" class="panel-state error" style="display: none;">
+            <i class="fa-solid fa-circle-xmark"></i>
+            <div id="vault-error-text"></div>
+          </div>
+
+          <div id="vault-entries" class="vault-entries"></div>
+        </div>
+      </div><!-- /quarantine-panel -->
+
+      <!-- ===== SCR-03: TASK MANAGER ===== -->
+      <div class="content-area" id="process-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-microchip"></i>
+            Task Manager
+          </div>
+          <div class="header-controls">
+            <div class="search-container compact">
+              <i class="fa-solid fa-magnifying-glass search-icon"></i>
+              <input type="text" class="search-input" id="process-search" placeholder="Filter by process name or PID...">
+            </div>
+            <label class="retention-field">
+              <span>Refresh</span>
+              <input type="number" id="inp-process-refresh" min="1" max="60" value="2">
+              <span>s</span>
+            </label>
+            <button class="btn-sec btn-compact" id="btn-toggle-process-refresh">
+              <i class="fa-solid fa-pause"></i> Pause
+            </button>
+            <button class="btn-sec btn-compact" id="btn-open-unlocker">
+              <i class="fa-solid fa-unlock"></i> Unlocker
+            </button>
+          </div>
+        </div>
+
+        <div class="process-workspace">
+          <div class="process-list-container">
+            <table class="apps-table process-table">
+              <thead>
+                <tr>
+                  <th data-sort="name" style="width: 34%;">Process</th>
+                  <th data-sort="pid" style="width: 10%;">PID</th>
+                  <th data-sort="cpu" style="width: 12%;">CPU</th>
+                  <th data-sort="memory" style="width: 14%;">Memory</th>
+                  <th data-sort="io" style="width: 14%;">Disk I/O</th>
+                  <th style="width: 16%;">Indicators</th>
+                </tr>
+              </thead>
+              <tbody id="process-tbody">
+                <tr>
+                  <td colspan="6" class="table-state">
+                    <i class="fa-solid fa-spinner fa-spin"></i> Sampling processes...
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="details-panel process-details" id="process-details">
+            <div class="details-header">
+              <div class="details-title" id="proc-det-name">Process</div>
+              <div class="details-publisher" id="proc-det-company">-</div>
+            </div>
+            <div class="details-divider"></div>
+            <div class="details-info-list">
+              <div class="details-info-item">
+                <span class="details-label">PID</span>
+                <span class="details-value" id="proc-det-pid">-</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Parent</span>
+                <span class="details-value" id="proc-det-parent">-</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Started</span>
+                <span class="details-value" id="proc-det-started">-</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Image path</span>
+                <span class="details-value mono" id="proc-det-path">-</span>
+              </div>
+              <div class="details-info-item">
+                <span class="details-label">Command line</span>
+                <span class="details-value mono" id="proc-det-cmdline">-</span>
+              </div>
+            </div>
+            <div id="proc-det-indicators" class="indicator-detail-list"></div>
+            <button class="btn-danger" id="btn-kill-process" data-destructive="true">
+              <i class="fa-solid fa-hand"></i>
+              <span>End process</span>
+            </button>
+          </div>
+        </div>
+      </div><!-- /process-panel -->
+
+      <!-- ===== SCR-05: SYSTEM CLEAN ===== -->
+      <div class="content-area" id="clean-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-broom"></i>
+            System Clean
+          </div>
+          <button class="btn-sec btn-compact" id="btn-scan-all-cleaners">
+            <i class="fa-solid fa-magnifying-glass"></i> Scan all
+          </button>
+        </div>
+        <div class="panel-scroll">
+          <p class="panel-lede">
+            Each section looks for entries whose backing file is gone. Scanning is read-only and works
+            in Audit Mode; purging moves findings into the quarantine vault, where they stay restorable.
+          </p>
+          <div id="cleaner-sections"></div>
+        </div>
+      </div><!-- /clean-panel -->
+
+      <!-- ===== REQ-20: FORCE UNINSTALL ===== -->
+      <div class="content-area" id="force-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-bolt"></i>
+            Force Uninstall
+          </div>
+          <button class="btn-sec btn-compact" id="btn-rescan-broken">
+            <i class="fa-solid fa-rotate-right"></i> Re-scan
+          </button>
+        </div>
+
+        <div class="panel-scroll">
+          <p class="panel-lede">
+            For applications that cannot uninstall themselves - the uninstaller is gone, the entry is
+            orphaned, or the folder was deleted by hand and the listing stayed behind. Vanish finds these
+            for you; you do not have to remember what the application was called. Everything found is
+            reviewed by you and moved to quarantine, never deleted outright - including the registry entry
+            that keeps it listed in Programs and Features.
+          </p>
+
+          <div class="settings-group-title">Broken entries on this machine</div>
+          <div id="broken-loading" class="panel-state">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <div>Checking every uninstall entry...</div>
+          </div>
+          <div id="broken-empty" class="panel-state" style="display: none;">
+            <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
+            <div>Every installed application can still uninstall itself. Nothing to force.</div>
+          </div>
+          <div id="broken-list" class="vault-entries"></div>
+
+          <div class="settings-group-title">Or search by name or folder</div>
+          <div class="force-manual">
+            <div class="unlock-input-row">
+              <input type="text" id="force-name-input" class="search-input"
+                     placeholder="Application name, e.g. BlueStacks">
+              <input type="text" id="force-path-input" class="search-input"
+                     placeholder="Install folder (optional), e.g. C:\Program Files\App">
+              <button class="btn-sec btn-compact" id="btn-force-scan">
+                <i class="fa-solid fa-magnifying-glass"></i> Scan
+              </button>
+            </div>
+            <div class="force-mode-row">
+              <span>Discovery depth</span>
+              <div class="toggle-group" id="force-mode-toggle">
+                <button class="toggle-btn" data-mode="Safe">Safe</button>
+                <button class="toggle-btn active" data-mode="Moderate">Moderate</button>
+                <button class="toggle-btn" data-mode="Advanced">Advanced</button>
+              </div>
+              <span class="force-mode-note">Depth changes what is found, never what is removed.</span>
+            </div>
+          </div>
+
+          <div id="force-results"></div>
+        </div>
+      </div><!-- /force-panel -->
+
+      <!-- ===== SETTINGS ===== -->
+      <div class="content-area" id="settings-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-sliders"></i>
+            Settings
+          </div>
+        </div>
+        <div class="panel-scroll">
+          <p class="panel-lede">
+            Vanish stores everything on this machine. There is no account, no sync and no telemetry,
+            so these settings are the whole configuration surface.
+          </p>
+
+          <div class="settings-group-title">Deletion policy</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Automatic purge</div>
+              <div class="settings-row-desc">
+                Permanently delete quarantined entries once they pass the retention period, at app start.
+                Off by default. How deeply Vanish searches and what it deletes are separate choices -
+                turning this on is the only way anything leaves the vault without you clicking it.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <label class="retention-field">
+                <span>Retention</span>
+                <input type="number" id="set-retention-days" min="0" max="3650" value="30">
+                <span>days</span>
+              </label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="set-auto-purge">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group-title">Scanning</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Default scan depth</div>
+              <div class="settings-row-desc">
+                Which mode the uninstall wizard starts on. This controls how far Vanish looks - never
+                what it removes. Every finding is still reviewed and ticked by you before anything moves.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <select class="select-custom" id="set-scan-mode">
+                <option value="Safe">Safe</option>
+                <option value="Moderate">Moderate</option>
+                <option value="Advanced">Advanced</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-group-title">Task Manager</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Process refresh interval</div>
+              <div class="settings-row-desc">
+                How often the process list re-samples. Each sample spawns a PowerShell query; on a busy
+                machine a very short interval simply means samples are skipped rather than stacked.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <label class="retention-field">
+                <span>Every</span>
+                <input type="number" id="set-process-refresh" min="1" max="60" value="2">
+                <span>s</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group-title">Data on this machine</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Quarantine vault</div>
+              <div class="settings-row-desc mono" id="set-vault-path">-</div>
+              <div class="settings-row-desc" id="set-vault-stats">-</div>
+            </div>
+            <div class="settings-row-controls">
+              <button class="btn-sec btn-compact" id="set-open-vault">
+                <i class="fa-solid fa-folder-open"></i> Open
+              </button>
+            </div>
+          </div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Operation log</div>
+              <div class="settings-row-desc">
+                Every destructive action, every rejected one, and every settings change is appended here
+                with a timestamp. It is the audit trail behind anything Vanish did to this machine.
+              </div>
+              <div class="settings-row-desc mono" id="set-oplog-path">-</div>
+            </div>
+            <div class="settings-row-controls">
+              <button class="btn-sec btn-compact" id="set-open-data">
+                <i class="fa-solid fa-folder-open"></i> Open
+              </button>
+            </div>
+          </div>
+        </div>
+      </div><!-- /settings-panel -->
+
+      <!-- ===== ABOUT ===== -->
+      <div class="content-area" id="about-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-circle-info"></i>
+            About
+          </div>
+        </div>
+        <div class="panel-scroll">
+          <div class="about-hero">
+            <div class="about-mark"><i class="fa-solid fa-ghost"></i></div>
+            <div>
+              <h2 id="about-name">Vanish</h2>
+              <div class="about-version" id="about-version">-</div>
+              <p>
+                An on-device Windows application auditor and deep uninstaller. It shows its work,
+                undoes its damage, and waits for your word.
+              </p>
+            </div>
+          </div>
+
+          <div class="about-grid">
+            <div class="about-card">
+              <div class="about-card-title"><i class="fa-solid fa-box-archive"></i> Nothing dies on the first blow</div>
+              <p>
+                Files are moved to a quarantine vault and registry keys are exported to a .reg restore
+                manifest before removal. Everything stays reversible until you explicitly say otherwise.
+              </p>
+            </div>
+            <div class="about-card">
+              <div class="about-card-title"><i class="fa-solid fa-eye"></i> Audit before power</div>
+              <p>
+                Unelevated, Vanish is fully useful: it lists, scans, explains and reports. It never
+                pretends it can act. Elevation is a separate, explicit step.
+              </p>
+            </div>
+            <div class="about-card">
+              <div class="about-card-title"><i class="fa-solid fa-lock"></i> The machine is a vault, not a wire</div>
+              <p>
+                Zero network activity at runtime. No telemetry, no cloud lookups, no update pings.
+                The icon set and typography are local, so nothing is fetched even for decoration.
+              </p>
+            </div>
+            <div class="about-card">
+              <div class="about-card-title"><i class="fa-solid fa-triangle-exclamation"></i> What it does not do</div>
+              <p>
+                It is not an antivirus and gives no threat verdicts. It cannot promise a complete
+                rollback: asynchronous installer side effects, first-run service registrations and
+                reboot-deferred writes fall outside the snapshot window.
+              </p>
+            </div>
+          </div>
+
+          <div class="settings-group-title">This build</div>
+          <div class="about-facts" id="about-facts"></div>
+
+          <div class="settings-group-title">Licensing</div>
+          <p class="panel-lede">
+            Vanish is MIT licensed. This build carries no third-party runtime dependencies beyond
+            Electron: the icon set is first-party and the typography is the operating system's own.
+          </p>
+        </div>
+      </div><!-- /about-panel -->
+
     </div>
   </div>
+
+  <!-- FLOW-01: one-time elevation offer -->
+  <div class="modal-overlay" id="elevation-modal-overlay">
+    <div class="small-modal">
+      <div class="small-modal-icon"><i class="fa-solid fa-shield-halved"></i></div>
+      <h3>Restart as administrator?</h3>
+      <p>
+        Vanish is running in Audit Mode. It can list applications, scan for leftovers and produce
+        reports, but it cannot uninstall, purge or restore anything until it is elevated.
+      </p>
+      <div class="small-modal-actions">
+        <button class="btn-sec" id="btn-stay-audit">Continue in Audit Mode</button>
+        <button class="btn-primary" id="btn-elevate-now">Restart as administrator</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FLOW-04: Unlocker -->
+  <div class="modal-overlay" id="unlock-modal-overlay">
+    <div class="small-modal wide">
+      <div class="small-modal-header">
+        <h3><i class="fa-solid fa-unlock"></i> Unlocker</h3>
+        <button class="wizard-close-btn" id="unlock-close-x"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <p>
+        Enter the file or folder that will not delete. Vanish asks the Windows Restart Manager which
+        processes hold it, then offers a graceful close before anything is forced.
+      </p>
+      <div class="unlock-input-row">
+        <input type="text" id="unlock-path-input" class="search-input" placeholder="C:\Program Files\App\locked.dll">
+        <button class="btn-sec btn-compact" id="btn-find-lockers">Find holders</button>
+      </div>
+      <div id="unlock-results" class="unlock-results"></div>
+      <div class="small-modal-actions">
+        <button class="btn-sec" id="btn-unlock-graceful" data-destructive="true" style="display: none;">
+          Close holders gracefully
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic confirm dialog (double-confirm for irreversible actions) -->
+  <div class="modal-overlay" id="confirm-modal-overlay">
+    <div class="small-modal">
+      <div class="small-modal-icon danger"><i class="fa-solid fa-triangle-exclamation"></i></div>
+      <h3 id="confirm-title">Are you sure?</h3>
+      <p id="confirm-body"></p>
+      <div class="confirm-typed-row" id="confirm-typed-row" style="display: none;">
+        <label for="confirm-typed-input" id="confirm-typed-label">Type DELETE to confirm</label>
+        <input type="text" id="confirm-typed-input" class="search-input" autocomplete="off">
+      </div>
+      <div class="small-modal-actions">
+        <button class="btn-sec" id="btn-confirm-cancel">Cancel</button>
+        <button class="btn-danger" id="btn-confirm-ok">Confirm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCR-04: Bulk uninstall queue panel -->
+  <div class="queue-panel" id="queue-panel">
+    <div class="queue-panel-header">
+      <div class="queue-panel-title">
+        <i class="fa-solid fa-layer-group"></i>
+        Bulk uninstall queue
+        <span class="audit-badge" id="queue-count">0</span>
+      </div>
+      <div class="queue-panel-actions">
+        <button class="btn-primary btn-compact" id="btn-queue-start" data-destructive="true">
+          <i class="fa-solid fa-play"></i> Start
+        </button>
+        <button class="btn-sec btn-compact" id="btn-queue-pause" style="display: none;">
+          <i class="fa-solid fa-pause"></i> Pause
+        </button>
+        <button class="btn-sec btn-compact" id="btn-queue-clear">Clear</button>
+        <button class="wizard-close-btn" id="btn-queue-close"><i class="fa-solid fa-chevron-down"></i></button>
+      </div>
+    </div>
+    <div class="queue-list" id="queue-list"></div>
+    <div class="queue-footer" id="queue-footer"></div>
+  </div>
+
+  <!-- Toasts -->
+  <div class="toast-stack" id="toast-stack"></div>
 
   <!-- UNINSTALL WIZARD OVERLAY MODAL -->
   <div class="modal-overlay" id="wizard-modal-overlay">
@@ -300,7 +822,7 @@
       <div class="wizard-header">
         <div class="wizard-title-area">
           <div class="wizard-title" id="wiz-app-name">Uninstalling Notepad++</div>
-          <div class="wizard-subtitle" id="wiz-app-version">Version 8.5.2 • Desktop App</div>
+          <div class="wizard-subtitle" id="wiz-app-version">Version 8.5.2 - Desktop App</div>
         </div>
         <button class="wizard-close-btn" id="wiz-close-x" title="Cancel Uninstall"><i class="fa-solid fa-xmark"></i></button>
       </div>
@@ -325,7 +847,7 @@
         </div>
         <div class="step-item" id="step5-progress">
           <div class="step-node">5</div>
-          <span class="step-label">Purge</span>
+          <span class="step-label">Quarantine</span>
         </div>
       </div>
 
@@ -419,19 +941,45 @@
         <!-- Screen 6: Purge Loading -->
         <div class="wizard-screen" id="scr-purge-loading">
           <div class="loader-ring" style="border-top-color: var(--color-danger); border-right-color: var(--color-warning);"></div>
-          <div class="loader-status">Purging Selected Leftovers...</div>
-          <div class="loader-substatus">Deleting registry keys and scrubbing directory remnants permanently from disk.</div>
+          <div class="loader-status">Moving Selected Leftovers to Quarantine...</div>
+          <div class="loader-substatus">Files are moved to the quarantine vault and registry keys are exported to a .reg restore manifest before removal.</div>
         </div>
 
-        <!-- Screen 7: Finished / Summary -->
-        <div class="wizard-screen" id="scr-complete">
-          <i class="fa-solid fa-circle-check" style="font-size: 64px; color: var(--color-success); margin-bottom: 20px;"></i>
-          <h2 style="font-family: var(--font-title); font-weight: 800; font-size: 24px; margin-bottom: 8px;">Clean Uninstall Successful!</h2>
-          <p style="font-size: 13px; color: var(--text-gray); max-width: 440px; line-height: 1.5; margin-bottom: 24px;" id="lbl-purge-result-text">
-            All selected leftover files, folders, and registry keys have been permanently removed. Your PC has been successfully cleaned.
-          </p>
-          <div style="background: var(--bg-dark-card); border: 1px solid var(--border-glass); padding: 14px 24px; border-radius: 12px; font-family: var(--font-title); font-weight: 700; font-size: 15px; color: var(--color-success);" id="lbl-space-saved">
-            Total Space Reclaimed: 124 MB
+        <!-- Screen 7: SCR-06 quarantine summary -->
+        <div class="wizard-screen" id="scr-complete" style="align-items: stretch; justify-content: flex-start; text-align: left;">
+          <div class="summary-layout">
+            <div class="summary-hero" id="summary-hero">
+              <i class="fa-solid fa-box-archive" id="summary-icon"></i>
+              <div>
+                <h2 id="summary-title">Leftovers quarantined</h2>
+                <p id="lbl-purge-result-text">
+                  Selected leftovers were moved to the quarantine vault. Nothing has been deleted.
+                </p>
+              </div>
+            </div>
+
+            <div class="summary-stats">
+              <div class="summary-stat">
+                <span class="summary-stat-value" id="lbl-space-saved">0 MB</span>
+                <span class="summary-stat-label">Reclaimed from active storage</span>
+              </div>
+              <div class="summary-stat">
+                <span class="summary-stat-value" id="lbl-quarantined-count">0</span>
+                <span class="summary-stat-label">Items in this vault entry</span>
+              </div>
+            </div>
+
+            <div class="summary-failures" id="summary-failures" style="display: none;">
+              <div class="summary-failures-title">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+                <span id="summary-failures-title-text">Left in place</span>
+              </div>
+              <div id="summary-failures-list"></div>
+            </div>
+
+            <button class="btn-sec" id="btn-review-quarantine">
+              <i class="fa-solid fa-box-archive"></i> Review in Quarantine Manager
+            </button>
           </div>
         </div>
 
@@ -442,7 +990,7 @@
         <button class="btn-sec" id="btn-wiz-cancel">Cancel</button>
         <button class="btn-sec" id="btn-wiz-back" style="display: none;">Back</button>
         <button class="btn-primary" id="btn-wiz-next">Next <i class="fa-solid fa-chevron-right" style="font-size: 11px;"></i></button>
-        <button class="btn-danger" id="btn-wiz-purge" style="display: none;">Purge Leftovers</button>
+        <button class="btn-danger" id="btn-wiz-purge" data-destructive="true" style="display: none;">Move to Quarantine</button>
         <button class="btn-primary" id="btn-wiz-finish" style="display: none;">Finish</button>
       </div>
 

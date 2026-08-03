@@ -10,6 +10,78 @@ full decision rules.
 
 ## [Unreleased]
 
+> Rule 10 note: everything below is **In Progress**, not Complete. It is coded
+> and passes a 280-assertion local suite on Windows 11 build 26200, but no clean
+> Windows 10 / Windows 11 VM pass has happened yet (TASK-17). No stage flips to
+> "Complete" until it does.
+
+### Added — safety retrofits (promptgate Rules 2 and 3)
+* **Quarantine vault.** Every removal now moves files into a versioned vault
+  and exports registry keys to a `.reg` restore manifest before deleting them.
+  New engine actions `quarantine-items`, `vault-restore`, `vault-delete`;
+  new `lib/store.js` (atomic manifest / settings / queue / oplog writes) and
+  `lib/vault.js` (the pipeline). Per-item all-or-nothing: an item that cannot be
+  moved is left exactly where it was, never half-removed.
+* **Quarantine Manager tab.** Lists vault entries with per-item detail, restores
+  them to their original locations, and permanently deletes them behind a
+  double confirmation (typed `DELETE`). Auto-purge is a setting, off by default,
+  with a retention period.
+* **Enforced Audit Mode.** Elevation is resolved once at startup and every
+  destructive IPC channel is rejected in `main.js` when unelevated — verified by
+  invoking all nine of them directly, bypassing the UI. `scanner.ps1` re-checks
+  `WindowsPrincipal` independently. The Rule 3 banner is shown verbatim and
+  every destructive control is inert with an explaining tooltip.
+* **Startup elevation offer.** A one-time "restart as administrator" dialog;
+  declining (or cancelling UAC) lands in a working Audit Mode instead of exiting.
+* **Operation log** (`oplog.jsonl`): every destructive action, rejection and
+  settings change is appended with a timestamp, tier and outcome.
+
+### Added — Stage 3 (Task Manager & Unlocker)
+* Live process monitor with CPU, working set and disk I/O per second, sortable,
+  with a detail pane and a Full-Mode-only kill.
+* Unlocker built on the Windows Restart Manager: lists the processes holding a
+  file or folder, offers a graceful close, then per-process force-end as an
+  explicit second step.
+* Watchdog suspension: the holder tree is frozen with `NtSuspendProcess` before
+  locks are released, so a watchdog cannot respawn the locker mid-cleanup. The
+  thaw is guaranteed by a `finally` path.
+* Passive suspicious-activity indicators (Rule 7): suspicious process trees,
+  destructive command lines and persistence entries, labelled
+  "Indicator -- investigate with your antivirus". Display only — no UI path acts
+  on them, and a test asserts that.
+
+### Added — Stage 6 (Orchestration)
+* Bulk uninstall queue with a resumable state machine; queue state is written to
+  disk on every transition, so a crash loses at most the in-flight application.
+  Reboot exit codes (3010/1641) pause the queue; a non-silent uninstaller is
+  marked "needs attention" and the queue carries on.
+* `corrections.json` — the Rule 15 primary switch source, seeded with the
+  OPEN-02 verified entries plus a few community ones, each with provenance.
+* Installer service manager: `msiserver` is enabled if disabled before an MSI
+  queue and restored to its prior start mode afterwards.
+* Restore point frequency override: the 24-hour rate limit is lifted around each
+  checkpoint and the prior registry value is restored in a `finally`, so every
+  application in a queue gets its own restore point.
+
+### Added — Stage 9 (System Integration & Environment Clean)
+* System Clean tab with one reusable review-list component per cleaner: orphaned
+  context-menu handlers, orphaned services, dead PATH directories, dead file
+  associations and protocol handlers, and an other-user-profile sweep. Scanning
+  is read-only and works in Audit Mode; purging routes through the vault.
+* Explicit 64-bit and 32-bit registry views for all Stage 6/9 scans, so nothing
+  hides behind WOW64 redirection.
+* Offline registry hive loading for other local profiles, with a guaranteed
+  unload in a `finally` even when the scan fails.
+
+### Added — verification
+* `test/` suite: 220 assertions across eight harnesses covering the vault round
+  trip, the privilege boundary, the process/unlock/suspend paths, the switch
+  chain, the queue state machine, and every cleaner's scan-purge-restore loop.
+  `test/run-all.ps1` runs them all and prints one summary.
+* `docs/BENCHMARKS.md` now carries measured figures with Rule 9 test conditions:
+  process refresh 1.47–1.57 s at 305 processes, and OPEN-03 resolved (Restart
+  Manager interop init is 345 ms, not the feared 1–2 s).
+
 ### Added
 * `LICENSE` (MIT) at repository root.
 * `ARCHITECTURE.md` at repository root: **as-built** architecture — component
@@ -27,9 +99,110 @@ full decision rules.
   `docs/RELEASING.md` are not met), license field corrected to MIT to match the
   new LICENSE file, description/author/repository filled in.
 
-### Known inconsistencies (deferred — docs-only change set)
-* `renderer.js` About-tab alert still says "v1.0.0"; align with CHANGELOG
-  version in the next code-touching session.
+### Fixed
+* A `DisplayName` stored as `REG_MULTI_SZ` arrived in the renderer as an array
+  and threw `app.name.toLowerCase is not a function`, which emptied the entire
+  application list. Display fields are now coerced in the engine, with a
+  defensive coercion in the renderer as well.
+* The System Clean association scan initially proposed removing `exefile`,
+  `batfile`, `cmdfile`, `comfile`, `scrfile` and `piffile` — the handlers that
+  let Windows launch anything at all — because `"%1"` placeholders and
+  extension-less commands were misread as missing targets. The command-target
+  resolver now recognises shell placeholders, walks the longest existing path
+  prefix (so unquoted paths with spaces survive), and probes for omitted
+  extensions. A permanent regression test asserts no core Windows handler is
+  ever flagged.
+* Shell extensions registered only in the 64-bit view (Defender's `EPP`,
+  `WorkFolders`, Offline Files) were reported as orphaned during the 32-bit
+  pass. The COM server lookup now checks both views before concluding anything
+  is missing.
+* `HKEY_CLASSES_ROOT` findings resolve to the physical `HKCU`/`HKLM` key that
+  backs them before quarantine. `HKCR:` is not a mounted PowerShell drive, so
+  the vault previously treated those keys as already gone.
+* All renderer HTML interpolation is escaped. Application names, registry paths
+  and process command lines all come from disk and were being injected as
+  markup.
+
+### Security
+* A strict Content-Security-Policy is now set: `connect-src 'none'` makes fetch,
+  XHR and WebSockets impossible from the renderer, so no scan result or path can
+  leave the machine.
+* **Fixed: local privilege escalation via the quarantine vault.** `manifest.json`
+  and the vault payloads live under the app data directory, which a standard
+  user can write to, but the engine acts on them with administrator rights. A
+  forged manifest entry could therefore have made the elevated engine move an
+  attacker-supplied file to any location (including `System32`), import an
+  arbitrary `.reg`, or recursively delete an arbitrary directory via a traversing
+  entry id. Entry ids are now validated as UUIDs before any path is built, every
+  manifest-supplied relative path must resolve back inside its own entry folder,
+  and restores into the Windows directory are refused outright.
+* **Fixed: the app data directory is no longer world-writable.** On every
+  elevated start Vanish now checks the directory ACL and, if a non-administrator
+  can write to it, applies an explicit DACL - Administrators and SYSTEM get full
+  control, Users keep read so Audit Mode can still list the vault - with
+  inheritance severed. This closes the `ASSUMED` item in `01-trd.md`'s security
+  section, which had shipped unresolved.
+* **Fixed: elevated execution of attacker-plantable uninstallers.** `queue.json`
+  was user-writable and its stored `uninstallString` was executed as-is. The
+  runner now re-reads each entry from the live registry at execution time, and
+  an uninstaller registered under `HKCU` or whose binary sits in a user-writable
+  location is refused unless the operator acknowledges it by name in a typed
+  confirmation. The engine enforces this independently of the queue runner.
+* New `test/security-verify.ps1` attempts each of these attacks and asserts it
+  is refused; the suite also proves legitimate operations still work and that
+  Audit Mode retains read access after the ACL change.
+
+### Added - zero network, first-party assets
+* **The last runtime network calls are gone.** The FontAwesome CDN stylesheet
+  and the Google Fonts `@import` were fetched on every launch, contradicting
+  Rule 6 / NFR-06. Replaced with:
+  * `assets/icons.css` - a first-party 45-glyph icon set drawn on a 24x24 grid
+    with a 2px stroke, delivered as CSS mask images so each glyph paints in
+    `currentColor` and scales like the font glyph it replaced. Every existing
+    `<i class="fa-solid fa-x">` keeps working unchanged. No third-party licence
+    is carried.
+  * The operating system's own type stack (Segoe UI Variable on Windows 11,
+    Segoe UI on Windows 10), which reads as more native for a Windows utility
+    and ships no font bytes.
+* The Content-Security-Policy now names **no external origin at all**:
+  `default-src 'self'` with `connect-src 'none'`.
+
+### Added - Force Uninstall (REQ-20)
+* A real Force Uninstall tab, replacing the placeholder alert. Vanish reads the
+  uninstall hives itself and reports which applications can no longer uninstall
+  themselves and why - a missing uninstaller executable, no `UninstallString`
+  at all, or a vanished install folder - so the user does not have to remember
+  what the application was called. Manual search by name or install folder is
+  still available, with the three-mode discovery depth.
+* When an entry can still uninstall itself, Vanish says so and offers to run
+  the real uninstaller instead. Forcing is the fallback, never the default.
+* The orphaned uninstall registry key is included in the proposal, because
+  leaving it is what keeps a dead application listed in Programs and Features -
+  and it goes through the vault like everything else, so a forced uninstall is
+  reversible, listing included.
+
+### Added - real Settings and About panels
+* Settings is now a real panel owning deletion policy (auto-purge + retention),
+  default scan depth, process refresh interval, and the on-disk locations of
+  the vault and the operation log with their current sizes.
+* About states plainly what Vanish is, what it refuses to do, and what it
+  cannot promise, alongside build facts including "runtime network calls: none".
+* New setting `defaultScanMode` (ENT-02, additive). Unknown values fall back to
+  `Moderate` rather than breaking the reader (schema rule 5).
+
+### Added - REQ-19 ownership elevator UI
+* The purge summary now offers "Take ownership and retry" on the specific items
+  that failed with an access error, and "Find what is holding it" on the ones
+  that failed because they were locked. Per item, Full Mode only, and the
+  manifest records that permissions were changed.
+
+### Known issues
+* Driver Store packages are listed but not removable (Stage 11, Standard tier).
+* REQ-19's acceptance test - quarantining a TrustedInstaller-owned file - still
+  needs a fixture that is awkward to create safely on a working machine; it is
+  scheduled for the VM pass.
+* The UAC accept/decline branches of the startup elevation offer still need a
+  human at the prompt.
 
 ---
 
