@@ -800,6 +800,56 @@ function Test-IsElevated {
     return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# Quote one argument for a Windows command line (TASK-05 / bd ...-ceb).
+#
+# Start-Process joins an -ArgumentList array with spaces and quotes NOTHING, so
+# an unpackaged app path like "D:\quickhelp projects\vanish-uninstaller" reached
+# Electron as two arguments and it tried to open the first as the app.
+#
+# The obvious repair - wrapping each argument in quotes - is not enough, and the
+# process being launched here is elevated, which makes getting it wrong an
+# argument-injection surface rather than a cosmetic bug:
+#   * a path ending in a backslash produces "C:\foo\", where the backslash
+#     escapes the closing quote and swallows the next argument;
+#   * an embedded quote lets a crafted path inject further arguments.
+# So follow the actual CommandLineToArgvW rules: double any run of backslashes
+# that precedes a quote (or the closing quote), and escape embedded quotes.
+function ConvertTo-ProcessArgument {
+    param([string]$value)
+
+    if ([string]::IsNullOrEmpty($value)) { return '""' }
+    # Nothing that needs protecting: pass it through untouched.
+    if ($value -notmatch '[\s"]') { return $value }
+
+    $sb = New-Object System.Text.StringBuilder
+    $null = $sb.Append('"')
+    $slashes = 0
+
+    foreach ($ch in $value.ToCharArray()) {
+        if ($ch -eq '\') { $slashes++; continue }
+        if ($ch -eq '"') {
+            # Each backslash before a quote doubles, then the quote is escaped.
+            $null = $sb.Append('\' * (($slashes * 2) + 1))
+            $null = $sb.Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { $null = $sb.Append('\' * $slashes); $slashes = 0 }
+        $null = $sb.Append($ch)
+    }
+
+    # Trailing backslashes precede the closing quote, so they double too.
+    if ($slashes -gt 0) { $null = $sb.Append('\' * ($slashes * 2)) }
+    $null = $sb.Append('"')
+    return $sb.ToString()
+}
+
+# Build the whole argument vector for Start-Process.
+function ConvertTo-ProcessArgumentList {
+    param([object[]]$values)
+    return @(@($values) | ForEach-Object { ConvertTo-ProcessArgument ([string]$_) })
+}
+
 # ---- Vault input validation (security review 2026-08-03, Vuln 1) ----------
 #
 # manifest.json and the vault payloads live under the Electron userData path,
@@ -3183,6 +3233,20 @@ if ($Action) {
         "set-path-entries" {
             Set-PathEntries -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
+        "relaunch-argv-probe" {
+            # TASK-05 verification hook: return the argument vector the elevated
+            # relaunch WOULD be launched with, without triggering UAC. The
+            # relaunch itself needs a human at the consent prompt, which is why
+            # this bug shipped uncovered.
+            $probeArgs = @()
+            if ($Params.argList) { $probeArgs = @($Params.argList) }
+            $quoted = ConvertTo-ProcessArgumentList $probeArgs
+            @{
+                success     = $true
+                argv        = @($quoted)
+                commandLine = ($quoted -join ' ')
+            } | ConvertTo-Json -Depth 4 -Compress
+        }
         "protected-destination-probe" {
             # SEC-2 verification hook: ask the restore guard for its verdict on a
             # path without performing a restore. Read-only and side-effect free,
@@ -3239,7 +3303,10 @@ if ($Action) {
                 $argList = @()
                 if ($Params.argList) { $argList = @($Params.argList) }
                 if ($argList.Count -gt 0) {
-                    $null = Start-Process -FilePath $Params.exePath -ArgumentList $argList -Verb RunAs -ErrorAction Stop
+                    # Start-Process joins -ArgumentList with spaces and quotes
+                    # nothing, so a spaced app path arrived as two arguments.
+                    $quoted = ConvertTo-ProcessArgumentList $argList
+                    $null = Start-Process -FilePath $Params.exePath -ArgumentList $quoted -Verb RunAs -ErrorAction Stop
                 } else {
                     $null = Start-Process -FilePath $Params.exePath -Verb RunAs -ErrorAction Stop
                 }

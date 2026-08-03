@@ -154,6 +154,77 @@ try {
     if ([IO.Directory]::Exists($jWork)) { [IO.Directory]::Delete($jWork, $true) }
 }
 
+# ======================================================================
+# TASK-05 elevated relaunch argument vector (bd vanish-uninstaller-ceb).
+#
+# The relaunch itself needs a human at the UAC prompt, which is exactly why the
+# bug shipped uncovered. What CAN be tested without consent is the thing that
+# was actually broken: the argument vector handed to Start-Process. Every case
+# is round-tripped through CommandLineToArgvW - the real Windows parser, the
+# one Electron's CRT uses - so this asserts what Windows does, not what the
+# quoting looks like.
+# ======================================================================
+Write-Host ""
+Write-Host "TASK-05 - elevated relaunch argument vector" -ForegroundColor Cyan
+
+Add-Type -Namespace VanishArgv -Name Native -MemberDefinition @'
+[DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+public static extern IntPtr CommandLineToArgvW(string lpCmdLine, out int pNumArgs);
+[DllImport("kernel32.dll")]
+public static extern IntPtr LocalFree(IntPtr hMem);
+'@ -ErrorAction SilentlyContinue
+
+function ConvertFrom-WindowsCommandLine {
+    param([string]$commandLine)
+    $count = 0
+    # argv[0] has its own parsing rules, so prefix a placeholder and drop it.
+    $ptr = [VanishArgv.Native]::CommandLineToArgvW("vanish-test.exe $commandLine", [ref]$count)
+    if ($ptr -eq [IntPtr]::Zero) { return @() }
+    try {
+        $parsed = @()
+        for ($i = 1; $i -lt $count; $i++) {
+            $slot = [Runtime.InteropServices.Marshal]::ReadIntPtr($ptr, $i * [IntPtr]::Size)
+            $parsed += [Runtime.InteropServices.Marshal]::PtrToStringUni($slot)
+        }
+        return $parsed
+    } finally {
+        $null = [VanishArgv.Native]::LocalFree($ptr)
+    }
+}
+
+function Test-ArgvRoundTrip {
+    param([string[]]$original, [string]$label)
+    $built  = Invoke-Engine "relaunch-argv-probe" @{ argList = $original }
+    $parsed = @(ConvertFrom-WindowsCommandLine $built.commandLine)
+
+    $same = ($parsed.Count -eq $original.Count)
+    if ($same) {
+        for ($i = 0; $i -lt $original.Count; $i++) {
+            if ($parsed[$i] -cne $original[$i]) { $same = $false; break }
+        }
+    }
+    Assert-True $same "$label (built: $($built.commandLine))"
+}
+
+# The exact failure from the bug report: Electron received "D:\quickhelp" and
+# "projects\vanish-uninstaller" as two arguments and opened the first as the app.
+Test-ArgvRoundTrip @('D:\quickhelp projects\vanish-uninstaller') 'a spaced app path survives as ONE argument'
+
+# The naive repair (wrap in quotes) produces "...\" here, where the backslash
+# escapes the closing quote and swallows whatever follows.
+Test-ArgvRoundTrip @('D:\quickhelp projects\vanish-uninstaller\', 'second-arg') 'a trailing backslash does not swallow the next argument'
+
+# An embedded quote is argument INJECTION, because this process is launched
+# elevated: --inspect-brk on an elevated Electron is a debugger port as admin.
+Test-ArgvRoundTrip @('C:\a b\app" --inspect-brk=0.0.0.0:9229 "') 'an embedded quote cannot inject a new argument'
+
+Test-ArgvRoundTrip @('D:\quickhelp\vanish-uninstaller') 'an unspaced path round-trips unchanged'
+Test-ArgvRoundTrip @('C:\one two\a', 'C:\three four\b') 'multiple spaced arguments stay separate'
+
+# And the shape of the no-op case: nothing gets quoted that does not need it.
+$plain = Invoke-Engine "relaunch-argv-probe" @{ argList = @('D:\quickhelp\vanish-uninstaller') }
+Assert-True ($plain.commandLine -eq 'D:\quickhelp\vanish-uninstaller') 'a path needing no quoting is passed through untouched'
+
 if (-not $isAdmin) {
     Write-Host ""
     Write-Host "The remaining tests exercise elevated code paths. Re-run from an elevated shell." -ForegroundColor Yellow
