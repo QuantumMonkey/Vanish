@@ -1,6 +1,7 @@
 // Test fixture: a fake window.api so index.html + renderer.js can be loaded
 // offscreen and interacted with, without a live PowerShell engine.
-// Used by test/ui-interaction-verify.js. Not shipped with the app.
+// Used by test/ui-interaction-verify.js and test/ui-interaction-full-verify.js.
+// Not shipped with the app.
 //
 // VANISH_STUB_TIER=full flips the tier; the default is Audit Mode with the
 // elevation offer pending, because that is the real first-launch state.
@@ -27,23 +28,41 @@ const vaultEntries = [
   }
 ];
 
-// SEC-1: the uninstall path can come back "blocked" when the engine judges an
-// uninstaller untrusted, which makes the renderer raise a typed acknowledgement
-// dialog. The suite needs to drive that branch, so the next response is
-// settable. Default is the happy path.
-let nextUninstallResponse = { success: true };
+// ---------------------------------------------------------------------------
+// Generic per-method response override queue (TASK for bd vanish-uninstaller-7y0).
+//
+// Real API calls return whatever the engine found: an empty list, an error, a
+// value shaped nothing like what the code was written against. A DOM-driving
+// suite needs to reach those branches too, not just the happy path every
+// method's default below represents. window.__test.queueResponse(method,
+// value) pushes a one-shot response consumed by the NEXT call to that method;
+// with nothing queued, the method falls back to its default. Queue
+// { __reject: 'message' } to make the call reject instead of resolve, which is
+// how getDesktopApps failing is distinguished from getDesktopApps returning [].
+// ---------------------------------------------------------------------------
+const responseQueues = {};
+
+function nextResponse(method, fallback) {
+  const queue = responseQueues[method];
+  if (queue && queue.length > 0) return queue.shift();
+  return fallback;
+}
+
+function stub(method, defaultValue) {
+  return async (...args) => {
+    const r = nextResponse(method, defaultValue);
+    if (r && typeof r === 'object' && '__reject' in r) throw new Error(r.__reject);
+    return typeof r === 'function' ? r(...args) : r;
+  };
+}
 
 contextBridge.exposeInMainWorld('api', {
-  getDesktopApps: async () => apps,
-  getUwpApps: async () => [],
-  createRestorePoint: async () => ({ success: true }),
-  scanLeftovers: async () => ({ files: [], registry: [] }),
-  purgeRemnants: async () => ({ success: true, quarantinedCount: 0, files: [], registry: [] }),
-  uninstallNative: async () => {
-    const queued = nextUninstallResponse;
-    nextUninstallResponse = { success: true }; // one-shot; back to the happy path
-    return queued;
-  },
+  getDesktopApps: stub('getDesktopApps', apps),
+  getUwpApps: stub('getUwpApps', []),
+  createRestorePoint: stub('createRestorePoint', { success: true }),
+  scanLeftovers: stub('scanLeftovers', { files: [], registry: [] }),
+  purgeRemnants: stub('purgeRemnants', { success: true, quarantinedCount: 0, files: [], registry: [] }),
+  uninstallNative: stub('uninstallNative', { success: true }),
   checkAdmin: async () => fullMode,
   getTier: async () => ({
     tier: fullMode ? 'full' : 'audit',
@@ -53,9 +72,9 @@ contextBridge.exposeInMainWorld('api', {
   }),
   relaunchElevated: async () => ({ success: false, declined: true }),
   dismissElevationOffer: async () => ({ success: true }),
-  vaultList: async () => ({ success: true, entries: vaultEntries, vaultRoot: 'C:\\vault' }),
-  vaultRestore: async () => ({ success: true, failed: 0, skipped: 0, files: [], registry: [] }),
-  vaultDelete: async () => ({ success: true }),
+  vaultList: stub('vaultList', { success: true, entries: vaultEntries, vaultRoot: 'C:\\vault' }),
+  vaultRestore: stub('vaultRestore', { success: true, failed: 0, skipped: 0, files: [], registry: [] }),
+  vaultDelete: stub('vaultDelete', { success: true }),
   openVaultFolder: async () => ({ success: true }),
   openDataFolder: async () => ({ success: true }),
   getSettings: async () => ({
@@ -92,17 +111,17 @@ contextBridge.exposeInMainWorld('api', {
   killProcess: async () => ({ success: true }),
   listLockers: async () => ({ success: true, holders: [] }),
   unlockPath: async () => ({ success: true, closedTargets: 0, totalTargets: 0, notes: [] }),
-  queueGet: async () => ({ items: [], running: false, paused: false, counts: {} }),
-  queueAdd: async () => ({ success: true }),
-  queueRemove: async () => ({ success: true }),
-  queueClear: async () => ({ success: true }),
-  queueRetry: async () => ({ success: true }),
-  queueStart: async () => ({ success: true }),
-  queuePause: async () => ({ success: true }),
+  queueGet: stub('queueGet', { items: [], running: false, paused: false, counts: {} }),
+  queueAdd: stub('queueAdd', { success: true }),
+  queueRemove: stub('queueRemove', { success: true }),
+  queueClear: stub('queueClear', { success: true }),
+  queueRetry: stub('queueRetry', { success: true }),
+  queueStart: stub('queueStart', { success: true }),
+  queuePause: stub('queuePause', { success: true }),
   onQueueUpdate: () => () => {},
-  findBrokenEntries: async () => ({ success: true, total: 0, findings: [] }),
-  cleanerScan: async () => ({ success: true, findings: [] }),
-  cleanerPurge: async () => ({ success: true, quarantinedCount: 1 }),
+  findBrokenEntries: stub('findBrokenEntries', { success: true, total: 0, findings: [] }),
+  cleanerScan: stub('cleanerScan', { success: true, findings: [] }),
+  cleanerPurge: stub('cleanerPurge', { success: true, quarantinedCount: 1 }),
   minimizeWindow: () => {},
   maximizeWindow: () => {},
   closeWindow: () => {},
@@ -111,7 +130,12 @@ contextBridge.exposeInMainWorld('api', {
 
 // Test-only control surface. Never shipped: this preload is the fixture.
 contextBridge.exposeInMainWorld('__test', {
+  queueResponse: (method, value) => {
+    if (!responseQueues[method]) responseQueues[method] = [];
+    responseQueues[method].push(value);
+  },
+  // Kept for the existing SEC-1 dialog test: a thin wrapper over the same queue.
   setNextUninstallResponse: (response) => {
-    nextUninstallResponse = response;
+    responseQueues.uninstallNative = [response];
   }
 });

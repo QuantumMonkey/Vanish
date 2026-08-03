@@ -96,6 +96,77 @@ app.whenReady().then(async () => {
   await assertClickable(win, '.nav-item[data-tab="quarantine"]', 'the app is usable after declining (sidebar reachable)');
   await assertClickable(win, '#btn-banner-elevate', 'the banner elevate button is clickable in Audit Mode');
 
+  // --- Application list renders every engine output shape -----------------
+  // renderTable/loadApplications never see the DOM test, only the IPC/engine
+  // ones. A scanner.ps1 comment explains why this matters: a REG_MULTI_SZ
+  // DisplayName once arrived as a String[] and broke the whole renderer list.
+  // That regression has engine-side coercion and engine-side coverage, but
+  // nothing before this asserted the LIST SURVIVES it, on screen, in the DOM.
+  console.log('');
+  console.log('Application list renders real engine output shapes');
+
+  // Odd shape: exactly what a REG_MULTI_SZ DisplayName looked like before
+  // scanner.ps1 started coercing every display field to a string.
+  await win.webContents.executeJavaScript(`
+    window.__test.queueResponse('getDesktopApps', [{
+      id: 'odd1', name: ['Weird App', 'Secondary Value'], publisher: null,
+      version: undefined, installDate: null, sizeBytes: 0,
+      installLocation: '', registryPath: 'HKLM:\\\\Software\\\\Weird', type: 'Desktop'
+    }]);
+    loadApplications();
+    true;
+  `);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const oddShape = await win.webContents.executeJavaScript(`(() => {
+    const rows = document.querySelectorAll('#apps-tbody .app-row');
+    return { rowCount: rows.length };
+  })()`);
+  assert(oddShape.rowCount === 1, 'a String[]-shaped DisplayName still renders exactly one row');
+  await assertClickable(win, '#apps-tbody .app-row', 'the odd-shaped row is clickable, not just present');
+
+  // Error: getDesktopApps rejects, exactly as it does when the engine process
+  // fails to launch or its JSON does not parse.
+  await win.webContents.executeJavaScript(`
+    window.__test.queueResponse('getDesktopApps', { __reject: 'engine did not respond' });
+    loadApplications();
+    true;
+  `);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const errorShape = await win.webContents.executeJavaScript(`(() => {
+    const cell = document.querySelector('#apps-tbody td');
+    return { text: cell ? cell.textContent : null };
+  })()`);
+  assert(
+    (errorShape.text || '').includes('engine did not respond'),
+    'a rejected getDesktopApps shows the real error, not a blank table'
+  );
+
+  // Empty: the engine ran and genuinely found nothing.
+  await win.webContents.executeJavaScript(`
+    window.__test.queueResponse('getDesktopApps', []);
+    loadApplications();
+    true;
+  `);
+  await new Promise((r) => setTimeout(r, 500));
+
+  const emptyShape = await win.webContents.executeJavaScript(`(() => {
+    const cell = document.querySelector('#apps-tbody td');
+    return { text: cell ? cell.textContent : null, rows: document.querySelectorAll('#apps-tbody .app-row').length };
+  })()`);
+  assert(emptyShape.rows === 0, 'an empty list renders no app rows');
+  assert(
+    (emptyShape.text || '').includes('No applications found'),
+    'an empty list explains itself rather than showing a blank table'
+  );
+
+  // Restore the real fixture data so every later section in this file (which
+  // was written against it) still finds "Test Application".
+  await win.webContents.executeJavaScript(`loadApplications(); true;`);
+  await new Promise((r) => setTimeout(r, 500));
+  await assertClickable(win, '#apps-tbody .app-row', 'the normal app list is back for the rest of this suite');
+
   // --- An invisible overlay must never capture clicks ---------------------
   console.log('');
   console.log('Hidden overlays do not swallow clicks (the defect this suite exists for)');

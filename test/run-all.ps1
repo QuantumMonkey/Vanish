@@ -26,7 +26,8 @@ $suites = @(
     @{ Name = "System Clean purges (4)";       Kind = "electron"; Path = "test/phase4-ipc-verify.js" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },
     @{ Name = "Security regressions";          Kind = "ps";       Path = "test\security-verify.ps1" },
-    @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" }
+    @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
+    @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" }
 )
 
 $results = @()
@@ -39,6 +40,13 @@ foreach ($suite in $suites) {
         "ps"       { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $suite.Path 2>&1 }
         "node"     { & node $suite.Path 2>&1 }
         "electron" { & ".\node_modules\.bin\electron.cmd" $suite.Path 2>&1 }
+        # Fixture-simulated Full Mode (VANISH_STUB_TIER), independent of whether
+        # THIS process is actually elevated - runs in either tier.
+        "electron-full" {
+            $env:VANISH_STUB_TIER = "full"
+            try { & ".\node_modules\.bin\electron.cmd" $suite.Path 2>&1 }
+            finally { Remove-Item Env:\VANISH_STUB_TIER -ErrorAction SilentlyContinue }
+        }
     }
 
     $summary = ($output | Select-String -Pattern '^Result: (\d+) passed, (\d+) failed' | Select-Object -Last 1)

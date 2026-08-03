@@ -132,6 +132,27 @@ full decision rules.
   and process command lines all come from disk and were being injected as
   markup.
 
+### Testing
+* **Widened DOM hit-test coverage to the main user flows.** Raised by the
+  operator: prior coverage bypassed the UI for most flows, testing the engine
+  or IPC layer directly. Extended `test/ui-interaction-verify.js` (Audit Mode)
+  with application-list rendering of real engine output shapes — an empty
+  list, a rejected call, and a `REG_MULTI_SZ`-shaped `DisplayName` that once
+  broke the whole renderer list (engine-side coercion existed; nothing
+  asserted the list survived it on screen). Added
+  `test/ui-interaction-full-verify.js` (Full Mode, fixture-simulated) driving
+  the uninstall wizard end to end, the leftovers tree (select-all and
+  per-item toggles), the Quarantine Manager restore — including the
+  overwrite-conflict branch — and Delete Forever's double-typed-confirm, the
+  bulk queue panel and its risky-uninstaller acknowledgement, and System
+  Clean scan-to-purge. Every assertion hit-tests the real clickable target
+  with `elementFromPoint`, the technique this suite exists for since an
+  invisible overlay once covered every dialog in the app. Found one
+  test-authoring bug in the process, not an app bug: the restore-point
+  checkbox is a deliberately zero-size input behind a visible toggle slider
+  (standard CSS pattern) — fixed the assertion to hit-test the slider a real
+  user clicks, and separately proved the click reaches the underlying input.
+  212 → 277 assertions. bd `vanish-uninstaller-7y0`.
 ### Security
 * **Fixed: no build resolved a verified dependency set.** `package-lock.json` was
   gitignored and `electron` was range-pinned (`^42.5.0`), so nothing in the repo
