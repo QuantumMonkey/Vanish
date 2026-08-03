@@ -173,6 +173,15 @@ full decision rules.
   integrity hashes), `electron` is pinned exactly, `docs/RELEASING.md` requires
   `npm ci` for releases, and `npm test` runs the verification suite instead of
   erroring out. Found by a `/cso` audit (bd `vanish-uninstaller-703`).
+* **Fixed: the destination-guard junction resolver only followed one hop (HIGH, found on re-review of the SEC-2 fix itself).**
+  `Resolve-DestinationTarget` resolved a single reparse point and returned —
+  correct for a lone junction, but a chain (`A → B → the real blocked
+  location`) resolved only to `B`. If `B` didn't itself match anything on the
+  blocklist, the destination was allowed even though Windows follows the whole
+  chain transparently at write time, landing the file at the real target
+  anyway. Now iterates to a fixed point (or refuses past 32 hops, which is not
+  a real filesystem configuration) instead of stopping after one. Verified
+  with a real two-hop junction chain into the all-users Startup folder.
 * **Fixed: the restore destination guard was a blocklist, and a textual one (HIGH).**
   A vault restore is a file write performed as administrator to a location the
   manifest chooses, and the manifest is untrusted input. The guard covered the

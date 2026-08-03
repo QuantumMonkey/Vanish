@@ -891,7 +891,11 @@ function Resolve-SafeVaultPath {
 # %APPDATA%\Foo, the move lands in the all-users Startup folder. Walk up to the
 # deepest ancestor that actually exists, resolve it, and re-attach the rest, so
 # the check is made against the path the write really lands on.
-function Resolve-DestinationTarget {
+# Resolve ONE hop: walk up from $full to the deepest existing ancestor, follow
+# that ancestor's reparse point if it has one, and re-attach whatever tail
+# didn't exist yet. Returns $null on an unreadable reparse point, $full
+# unchanged if nothing on the path exists or nothing is a reparse point.
+function Resolve-DestinationHop {
     param([string]$full)
 
     $tail  = @()
@@ -934,6 +938,26 @@ function Resolve-DestinationTarget {
     }
 
     return $full
+}
+
+# A junction can point at another junction (A -> B -> C). Resolving only one
+# hop would compare the guard against B while the write physically lands in
+# C - Windows follows the whole chain transparently at write time. Keep
+# re-resolving until the result stops changing (a fixed point) or the hop cap
+# is hit, so the check runs against where the write actually lands.
+function Resolve-DestinationTarget {
+    param([string]$full)
+
+    $current = $full
+    for ($hop = 0; $hop -lt 32; $hop++) {
+        $next = Resolve-DestinationHop $current
+        if (-not $next) { return $null }              # unreadable reparse point along the chain
+        if ($next -eq $current) { return $next }        # fixed point: nothing left to follow
+        $current = $next
+    }
+    # 32 hops without stabilising is not a real filesystem configuration -
+    # refuse rather than trust a result we could not pin down.
+    return $null
 }
 
 # Restoring is a file WRITE performed as administrator to a location the

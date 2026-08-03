@@ -154,6 +154,34 @@ try {
     if ([IO.Directory]::Exists($jWork)) { [IO.Directory]::Delete($jWork, $true) }
 }
 
+# The follow-up gap, found on a fresh re-review of this same fix: resolving
+# only ONE hop leaves a chain (A -> B -> blocked) comparing against B, which is
+# not itself blocked, while Windows follows the whole chain transparently at
+# write time. A -> B -> the real Startup folder must resolve all the way
+# through, not stop at the first hop.
+$jChainWork = Join-Path $env:TEMP "vanish-sec2-chain-verify"
+$jChainA = Join-Path $jChainWork "A"
+$jChainB = Join-Path $jChainWork "B"
+if ([IO.Directory]::Exists($jChainA)) { [IO.Directory]::Delete($jChainA) }
+if ([IO.Directory]::Exists($jChainB)) { [IO.Directory]::Delete($jChainB) }
+if ([IO.Directory]::Exists($jChainWork)) { [IO.Directory]::Delete($jChainWork, $true) }
+$null = [IO.Directory]::CreateDirectory($jChainWork)
+try {
+    $null = New-Item -ItemType Junction -Path $jChainB `
+        -Target (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp') -ErrorAction Stop
+    $null = New-Item -ItemType Junction -Path $jChainA -Target $jChainB -ErrorAction Stop
+
+    $chainVerdict = Test-Destination (Join-Path $jChainA 'evil.exe')
+    Assert-True ($chainVerdict.protected -eq $true) "refused: a two-hop junction chain (A -> B -> the all-users Startup folder)"
+    Assert-True ($chainVerdict.resolved -match 'Start Menu') "the chain resolves all the way through, not just the first hop"
+} catch {
+    Write-Host ("  SKIP  chained junction test could not run: " + $_.Exception.Message) -ForegroundColor Yellow
+} finally {
+    if ([IO.Directory]::Exists($jChainA)) { [IO.Directory]::Delete($jChainA) }
+    if ([IO.Directory]::Exists($jChainB)) { [IO.Directory]::Delete($jChainB) }
+    if ([IO.Directory]::Exists($jChainWork)) { [IO.Directory]::Delete($jChainWork, $true) }
+}
+
 # ======================================================================
 # TASK-05 elevated relaunch argument vector (bd vanish-uninstaller-ceb).
 #
