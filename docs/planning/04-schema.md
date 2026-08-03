@@ -47,9 +47,17 @@
   | entries[].registry[] | array | [] | key path + .reg file name pairs |
   | entries[].meta | object | {} | rule 6 |
 
-  Vault layout: `vault/<entry-id>/files/...` (mirrored structure) and
-  `vault/<entry-id>/registry/<n>.reg`. Manifest is the index; folders are
-  the payload.
+  Vault layout: `vault/<entry-id>/files/<n>/<leaf-name>` (indexed slots, see
+  D-12) and `vault/<entry-id>/registry/<n>.reg`. Manifest is the index;
+  folders are the payload. Each entry folder also holds an engine-written
+  `entry.json` (D-13).
+
+- **ENT-01b** Entry record (`vault/<entry-id>/entry.json`) -- serves REQ-01,
+  NFR-01, NFR-04. Same shape as one `entries[]` row. Written by the engine
+  (scanner.ps1) as the payload lands, so a purge interrupted between the
+  move and the manifest write is still self-describing and recoverable.
+  Single writer: the engine (rule 7 holds -- main.js never writes this file,
+  the engine never writes `manifest.json`).
 
 - **ENT-02** Settings (`settings.json`) -- serves REQ-03, FLOW-03
   | Field | Type | Default | Why |
@@ -128,6 +136,23 @@ manifest read is a single JSON parse per tab open.
   manifests. | Because: SCR-02 listing needs one read; entry folders keep
   payloads isolated and Delete Forever is a folder remove. | Rejected:
   manifest per entry -- N file reads to list the vault.
+- D-12: Vault file payloads live in indexed slots (`files/<n>/<leaf>`) with
+  the original absolute path recorded in the manifest row, NOT a mirrored
+  directory tree. | Because: mirroring `C:\Program Files\<publisher>\<app>\...`
+  under `%APPDATA%\vanish\vault\<uuid>\files\` routinely exceeds the 260-char
+  MAX_PATH that PowerShell 5.1 file APIs enforce, which would fail exactly the
+  deep-nested leftovers the tool exists to remove. Restore is manifest-driven,
+  so the mirror bought nothing but browsability. | Rejected: mirrored tree with
+  `\\?\` long-path prefixes -- infects every path operation in the engine for
+  cosmetic gain.
+- D-13: The engine writes `entry.json` inside each entry folder; main.js
+  writes `manifest.json`. | Because: NFR-01 requires no half-moved state, but
+  the move happens in PowerShell and the manifest write in Node -- a crash
+  between them would orphan a payload with no record of where it came from.
+  A self-describing entry folder makes that recoverable. Rule 7 is preserved:
+  one writer per file, not one writer per directory. | Rejected: manifest
+  written by the engine -- two writers on the index file, the exact corruption
+  rule 7 exists to prevent.
 - D-11: oplog is JSONL, everything else is single-document JSON.
   | Because: the log is append-only and unbounded; documents are small and
   rewritten atomically. | Rejected: everything JSONL -- makes
