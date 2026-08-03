@@ -88,6 +88,37 @@ app.whenReady().then(async () => {
   } catch {
     currentTier = TIER_AUDIT;
   }
+
+  // Settings > "Start Vanish as administrator" (operator request 2026-08-03).
+  // Ask Windows for elevation automatically, before any window exists, instead
+  // of waiting for a manual click on the FLOW-01 offer. This does NOT bypass
+  // UAC - the real Windows consent prompt still appears every launch; that is
+  // by design and this project does not attempt to route around it (promptgate
+  // Rule 13). The setting only changes WHEN Vanish asks, not whether Windows
+  // asks. No new privilege: relaunch-elevated has always been reachable from
+  // the renderer unconditionally, so this changes ordering, not attack surface.
+  //
+  // VANISH_DISABLE_AUTO_ELEVATE is a test/CI escape hatch, never set in the
+  // packaged app. It skips only this automatic attempt - isFullMode() still
+  // reflects the real WindowsPrincipal check either way. Without it, an
+  // automated suite that loads this file directly (test/tier-verify.js and
+  // its siblings) would hang an unattended run on a live UAC prompt if this
+  // setting were ever left 'full' on the machine from real use.
+  const autoElevateDisabled = process.env.VANISH_DISABLE_AUTO_ELEVATE === '1';
+  if (!autoElevateDisabled && !isFullMode() && store.readSettings().startupMode === 'full') {
+    const relaunch = await attemptElevatedRelaunch('startup-auto');
+    if (relaunch.success) {
+      // D-09: the elevated instance replaces this one. No window was ever
+      // created here, so there is nothing to tear down.
+      app.quit();
+      return;
+    }
+    // Declined, UAC cancelled, or the engine could not be reached: Rule 3 -
+    // never exit or crash on a declined elevation. Fall through exactly as an
+    // unelevated launch always has; the FLOW-01 offer below still gives the
+    // operator a second, visible way to retry rather than a silent failure.
+  }
+
   elevationOfferPending = !isFullMode();
 
   store.appendOplog({
@@ -401,10 +432,11 @@ ipcMain.handle('get-tier', async () => ({
   bannerText: 'Running in Audit Mode - elevate to enable cleaning and uninstallation.'
 }));
 
-// FLOW-01: one-time relaunch offer. Declining (or cancelling UAC) stays in
-// Audit Mode; the app never exits or crashes on a declined elevation.
-ipcMain.handle('relaunch-elevated', async () => {
-  elevationOfferPending = false;
+// Shared by the FLOW-01 manual offer/banner AND the automatic startup
+// elevation setting. Never throws; always resolves to {success, declined?,
+// alreadyElevated?, error?} so both callers can apply Rule 3 (never crash or
+// exit on a declined elevation) without duplicating the relaunch plumbing.
+async function attemptElevatedRelaunch(trigger) {
   if (isFullMode()) return { success: true, alreadyElevated: true };
 
   const argList = app.isPackaged ? [] : [app.getAppPath()];
@@ -417,17 +449,26 @@ ipcMain.handle('relaunch-elevated', async () => {
       action: 'relaunch-elevated',
       tier: currentTier,
       items: {},
-      outcome: res && res.success ? 'success' : 'declined'
+      outcome: res && res.success ? 'success' : 'declined',
+      meta: { trigger }
     });
-    if (res && res.success) {
-      // D-09: the elevated instance replaces this one - never run two writers.
-      setTimeout(() => app.quit(), 400);
-      return { success: true };
-    }
+    if (res && res.success) return { success: true };
     return { success: false, declined: true, error: (res && res.error) || 'Elevation was declined.' };
   } catch (error) {
     return { success: false, declined: true, error: error.message };
   }
+}
+
+// FLOW-01: one-time relaunch offer. Declining (or cancelling UAC) stays in
+// Audit Mode; the app never exits or crashes on a declined elevation.
+ipcMain.handle('relaunch-elevated', async () => {
+  elevationOfferPending = false;
+  const res = await attemptElevatedRelaunch('user-click');
+  if (res.success && !res.alreadyElevated) {
+    // D-09: the elevated instance replaces this one - never run two writers.
+    setTimeout(() => app.quit(), 400);
+  }
+  return res;
 });
 
 ipcMain.handle('dismiss-elevation-offer', async () => {

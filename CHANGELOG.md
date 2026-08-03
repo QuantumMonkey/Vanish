@@ -11,7 +11,7 @@ full decision rules.
 ## [Unreleased]
 
 > Rule 10 note: everything below is **In Progress**, not Complete. It is coded
-> and passes a 310-assertion local suite on Windows 11 build 26200, but no clean
+> and passes a 290-assertion local suite on Windows 11 build 26200, but no clean
 > Windows 10 / Windows 11 VM pass has happened yet (TASK-17). No stage flips to
 > "Complete" until it does.
 
@@ -33,6 +33,14 @@ full decision rules.
   every destructive control is inert with an explaining tooltip.
 * **Startup elevation offer.** A one-time "restart as administrator" dialog;
   declining (or cancelling UAC) lands in a working Audit Mode instead of exiting.
+* **Startup elevation toggle (operator request 2026-08-03).** Settings >
+  "Start Vanish as administrator" lets a trusted machine skip the manual click:
+  when enabled, `main.js` requests elevation automatically before any window
+  exists, instead of waiting for FLOW-01. Off by default — everyone else's
+  first launch is unchanged. This does **not** bypass UAC; Windows' own consent
+  prompt still appears on every launch while the setting is on, by design. A
+  declined or cancelled elevation falls through to a working Audit Mode exactly
+  as an unelevated launch always has (Rule 3). bd `vanish-uninstaller-kt0`.
 * **Operation log** (`oplog.jsonl`): every destructive action, rejection and
   settings change is appended with a timestamp, tier and outcome.
 

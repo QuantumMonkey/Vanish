@@ -12,6 +12,11 @@ const path = require('node:path');
 const os = require('node:os');
 const { execFileSync } = require('node:child_process');
 
+// This loads the REAL main.js below, including its startup elevation logic.
+// Never let a startupMode:'full' setting left on this machine from real use
+// spawn a live UAC prompt and hang an unattended run.
+process.env.VANISH_DISABLE_AUTO_ELEVATE = '1';
+
 require('../main.js');
 
 let pass = 0;

@@ -79,11 +79,11 @@ contextBridge.exposeInMainWorld('api', {
   openDataFolder: async () => ({ success: true }),
   getSettings: async () => ({
     autoPurgeEnabled: false, autoPurgeRetentionDays: 30,
-    processRefreshSeconds: 2, defaultScanMode: 'Moderate'
+    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit'
   }),
   setSettings: async (p) => ({
     autoPurgeEnabled: false, autoPurgeRetentionDays: 30,
-    processRefreshSeconds: 2, defaultScanMode: 'Moderate', ...p
+    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit', ...p
   }),
   getAppInfo: async () => ({
     name: 'vanish-uninstaller', version: '0.3.0', tier: fullMode ? 'full' : 'audit',

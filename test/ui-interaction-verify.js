@@ -300,6 +300,33 @@ app.whenReady().then(async () => {
   await win.webContents.executeJavaScript(`document.getElementById('btn-confirm-cancel').click()`);
   await new Promise((r) => setTimeout(r, 400));
 
+  // --- Startup elevation toggle --------------------------------------------
+  // Deliberately usable in Audit Mode, unlike autoPurge below - the person who
+  // wants "start elevated next time" is, by definition, usually not elevated
+  // right now (operator request 2026-08-03). Verify it is reachable exactly in
+  // the tier where it matters, and that it round-trips through setSettings.
+  console.log('');
+  console.log('Settings - startup elevation toggle');
+  await win.webContents.executeJavaScript(`document.querySelector('.nav-item[data-tab="settings"]').click()`);
+  await new Promise((r) => setTimeout(r, 700));
+  // #set-startup-elevated is the same zero-size-input-behind-a-slider pattern
+  // as the wizard's restore-point toggle - hit-test the slider a user clicks.
+  await assertClickable(
+    win,
+    '.settings-row-controls .toggle-switch:has(#set-startup-elevated) .slider',
+    'the startup-elevation toggle slider is clickable in Audit Mode'
+  );
+
+  const startupToggle = await win.webContents.executeJavaScript(`(async () => {
+    const box = document.getElementById('set-startup-elevated');
+    const before = box.checked;
+    document.querySelector('.settings-row-controls .toggle-switch:has(#set-startup-elevated) .slider').click();
+    await new Promise((r) => setTimeout(r, 400));
+    return { before, afterClick: box.checked };
+  })()`);
+  assert(startupToggle.before === false, 'it starts unchecked (startupMode defaults to "audit")');
+  assert(startupToggle.afterClick === true, 'clicking the visible slider actually flips the underlying checkbox');
+
   // --- Unlocker dialog ----------------------------------------------------
   console.log('');
   console.log('Unlocker dialog');

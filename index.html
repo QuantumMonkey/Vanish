@@ -574,6 +574,26 @@
             so these settings are the whole configuration surface.
           </p>
 
+          <div class="settings-group-title">Startup</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Start Vanish as administrator</div>
+              <div class="settings-row-desc">
+                Ask Windows to elevate automatically the next time Vanish starts, instead of waiting for you
+                to click Elevate. Windows still shows its own permission prompt on every launch - this only
+                decides who asks, not whether Windows asks. Changing this affects the <em>next</em> start,
+                not this session. Available in either mode, since the person who needs it is usually not
+                elevated yet.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <label class="toggle-switch">
+                <input type="checkbox" id="set-startup-elevated">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
+
           <div class="settings-group-title">Deletion policy</div>
           <div class="settings-row">
             <div class="settings-row-main">

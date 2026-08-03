@@ -12,7 +12,7 @@ let isAdmin = false;
 // SCR-01: one flag drives the banner and every destructive control's state.
 // The real boundary is main.js/scanner.ps1 (NFR-02) - this is presentation.
 let tierState = { tier: 'audit', isFullMode: false, offerElevation: false, bannerText: '' };
-let appSettings = { autoPurgeEnabled: false, autoPurgeRetentionDays: 30, processRefreshSeconds: 2 };
+let appSettings = { autoPurgeEnabled: false, autoPurgeRetentionDays: 30, processRefreshSeconds: 2, startupMode: 'audit' };
 
 const TIER_TOOLTIP = 'Requires Full Mode - restart as administrator';
 
@@ -597,6 +597,16 @@ function setupSettingsTab() {
   const retention = document.getElementById('set-retention-days');
   const scanMode = document.getElementById('set-scan-mode');
   const refresh = document.getElementById('set-process-refresh');
+  const startupElevated = document.getElementById('set-startup-elevated');
+
+  // Deliberately NOT gated on isAdmin (unlike autoPurge below): the person who
+  // needs this setting is, by definition, usually the one currently NOT
+  // elevated. Does not itself do anything destructive - it only changes when
+  // Vanish asks Windows for elevation, not whether Windows asks - so it gets
+  // no confirmDialog, matching the other non-destructive settings here.
+  startupElevated.addEventListener('change', () =>
+    saveSettings({ startupMode: startupElevated.checked ? 'full' : 'audit' })
+  );
 
   autoPurge.addEventListener('change', async () => {
     if (autoPurge.checked) {
@@ -645,6 +655,7 @@ function syncSettingsPanel() {
   document.getElementById('set-retention-days').value = appSettings.autoPurgeRetentionDays;
   document.getElementById('set-scan-mode').value = appSettings.defaultScanMode || 'Moderate';
   document.getElementById('set-process-refresh').value = appSettings.processRefreshSeconds;
+  document.getElementById('set-startup-elevated').checked = appSettings.startupMode === 'full';
 
   // Audit Mode can read the configuration but not change deletion policy.
   autoPurge.disabled = !isAdmin;
