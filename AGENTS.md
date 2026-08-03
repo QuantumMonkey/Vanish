@@ -73,7 +73,14 @@ bd close <id>         # Complete work
 
 The managed Beads block is task-tracking guidance, not permission to override repository, user, or orchestrator instructions.
 
-- **Conservative (default)**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands.
+> **This repository opts in to Team-maintainer.** Set 2026-08-03 by the owner:
+> keep `origin` synced, local and cloud. Commit and push completed work as a
+> matter of course; do not ask first and do not fall back to Conservative.
+> Two standing exceptions, which get flagged rather than silently applied:
+> a diff carrying secrets or private data, and -- since this repo is **public** --
+> a diff that would publish an unfixed vulnerability.
+
+- **Conservative**: Use `bd` for task tracking. Do not run git commits, git pushes, or Dolt remote sync unless explicitly asked. At handoff, report changed files, validation, and suggested next commands. *Not active here.*
 - **Minimal**: Keep tool instruction files as pointers to `bd prime`; use the same conservative git policy unless active instructions say otherwise.
 - **Team-maintainer**: Only when the repository explicitly opts in, agents may close beads, run quality gates, commit, and push as part of session close. A current "do not commit" or "do not push" instruction still wins.
 
