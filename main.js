@@ -115,6 +115,7 @@ app.whenReady().then(async () => {
           meta: {
             wasInherited: before.inherited === true,
             nonAdminWriters: before.nonAdminWriters || [],
+            foreignOwners: before.foreignOwners || [],
             error: applied && applied.error
           }
         });

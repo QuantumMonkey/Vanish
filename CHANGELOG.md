@@ -133,6 +133,22 @@ full decision rules.
   markup.
 
 ### Security
+* **Fixed: the data directory lock could not hold, and said it had (HIGH).**
+  Vanish state lived directly in the Electron `userData` root, which is also
+  Chromium's profile directory — so the ACL that stops a standard user rewriting
+  `manifest.json` (which the engine reads as *elevated instructions*) was the
+  same ACL that would stop Chromium writing `Preferences` and `Cache` on the next
+  Audit Mode run. The lock was therefore unfixable in place. State now lives in a
+  `vanish-state` subdirectory that nothing but Vanish writes; existing installs
+  are migrated once, per item, never clobbering and never deleting what it could
+  not move. Two further gaps closed with it: ownership is now reassigned across
+  the whole subtree rather than the root alone (an object's owner keeps
+  `WRITE_DAC` and can hand itself write access back whatever the DACL says), and
+  the health check now inspects owners as well as the DACL. That last one was the
+  load-bearing bug — `main.js` only re-applies the ACL when the check reports
+  `protected: false`, so a directory with a perfect DACL and user-owned children
+  was declared safe and never revisited. Found by a `/cso` audit
+  (bd `vanish-uninstaller-z2a`).
 * **Fixed: shell command injection in the single-app uninstaller (CRITICAL).**
   The `uninstall-native` channel took a command *string* from the renderer and
   handed it to `exec()`, which on Windows means `cmd.exe`, as administrator. That

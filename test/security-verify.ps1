@@ -25,6 +25,17 @@ function Invoke-Engine {
     return ($out -join "`n") | ConvertFrom-Json
 }
 
+# The SEC-3 block deliberately applies a restrictive DACL to a scratch
+# directory, which then denies the test its own cleanup. Un-protecting alone is
+# not enough - the explicit ACEs survive it - so grant this account full control
+# back across the tree before removing anything.
+function Remove-TestTree {
+    param([string]$path)
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    $null = & icacls.exe "$path" /grant "$($env:USERNAME):(OI)(CI)F" /T /C /Q 2>&1
+    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 Write-Host ""
@@ -32,11 +43,63 @@ Write-Host "Vanish security regression suite" -ForegroundColor Cyan
 Write-Host "================================"
 Write-Host ("Elevation: {0}" -f $(if ($isAdmin) { "Full Mode" } else { "Audit Mode" }))
 
+# ======================================================================
+# SEC-3 detection half (bd vanish-uninstaller-z2a).
+# Runs in BOTH tiers: Test-VanishDataDirAcl is a read-only check with no
+# elevation gate, and the bug being regressed is that it answered "protected"
+# from the DACL alone. main.js only re-applies the ACL when this returns
+# protected:false, so a wrong "true" is never revisited - which makes this
+# check, not the remediation, the load-bearing part.
+# ======================================================================
+Write-Host ""
+Write-Host "SEC-3 - data directory protection check reads owners, not just the DACL" -ForegroundColor Cyan
+
+$aclWork = Join-Path $env:TEMP "vanish-sec3-verify"
+Remove-TestTree $aclWork
+$null = New-Item -ItemType Directory -Path $aclWork -Force
+$null = New-Item -ItemType Directory -Path (Join-Path $aclWork "vault") -Force
+Set-Content -LiteralPath (Join-Path $aclWork "vault\manifest.json") -Value '{"schemaVersion":1,"entries":[]}' -Encoding ASCII
+
+try {
+    # An inherited ACL is unprotected on the old rule as well as the new one.
+    $inheritedVerdict = Invoke-Engine "check-data-dir" @{ path = $aclWork }
+    Assert-True ($inheritedVerdict.protected -eq $false)  "an inherited data directory ACL is reported unprotected"
+    Assert-True ($inheritedVerdict.inherited -eq $true)   "inheritance is reported"
+
+    # The regression itself: a DACL that looks perfect - protected, with no
+    # non-administrator writer - on objects still OWNED by the interactive user.
+    # The owner keeps WRITE_DAC, so this is not protected, and the old
+    # DACL-only check called it protected anyway.
+    $admins = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+    $system = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+    $users  = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null)
+    $inh    = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
+              [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+    $none   = [System.Security.AccessControl.PropagationFlags]::None
+    $allow  = [System.Security.AccessControl.AccessControlType]::Allow
+
+    $acl = Get-Acl -LiteralPath $aclWork
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @($acl.Access)) { $null = $acl.RemoveAccessRule($rule) }
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins, [System.Security.AccessControl.FileSystemRights]::FullControl, $inh, $none, $allow)))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system, [System.Security.AccessControl.FileSystemRights]::FullControl, $inh, $none, $allow)))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($users,  [System.Security.AccessControl.FileSystemRights]::ReadAndExecute, $inh, $none, $allow)))
+    Set-Acl -LiteralPath $aclWork -AclObject $acl -ErrorAction Stop
+
+    $ownerVerdict = Invoke-Engine "check-data-dir" @{ path = $aclWork }
+    Assert-True (@($ownerVerdict.nonAdminWriters).Count -eq 0) "the DACL alone shows no non-administrator writer"
+    Assert-True ($ownerVerdict.inherited -eq $false)           "the DACL alone looks protected"
+    Assert-True (@($ownerVerdict.foreignOwners).Count -gt 0)   "a child still owned by the interactive user is reported"
+    Assert-True ($ownerVerdict.protected -eq $false)           "a user-owned subtree is NOT called protected (the SEC-3 false positive)"
+} finally {
+    Remove-TestTree $aclWork
+}
+
 if (-not $isAdmin) {
     Write-Host ""
-    Write-Host "These tests exercise elevated code paths. Re-run from an elevated shell." -ForegroundColor Yellow
+    Write-Host "The remaining tests exercise elevated code paths. Re-run from an elevated shell." -ForegroundColor Yellow
     Write-Host ("Result: {0} passed, {1} failed" -f $script:pass, $script:fail)
-    exit 0
+    exit ([int]($script:fail -gt 0))
 }
 
 $work      = Join-Path $env:TEMP "vanish-security-verify"

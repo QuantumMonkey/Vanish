@@ -1257,6 +1257,17 @@ function Set-VanishDataDirAcl {
         $none    = [System.Security.AccessControl.PropagationFlags]::None
         $allow   = [System.Security.AccessControl.AccessControlType]::Allow
 
+        # SEC-3: the DACL alone is not enough. A child object created before the
+        # first elevated run keeps its original owner, and on Windows an owner
+        # always retains WRITE_DAC - it can hand itself write access back
+        # whatever the DACL says. Ownership has to be reassigned through the
+        # whole subtree. This is the Vanish state directory, not the Chromium
+        # profile root, so the recursion is small and runs once.
+        $null = & icacls.exe "$($p.path)" /setowner "*S-1-5-32-544" /T /C /Q 2>&1
+        # Drop any explicit ACE a child picked up while the directory was still
+        # unprotected, so everything below inherits the DACL applied next.
+        $null = & icacls.exe "$($p.path)" /reset /T /C /Q 2>&1
+
         $acl = Get-Acl -LiteralPath $p.path
         $acl.SetAccessRuleProtection($true, $false)   # disable inheritance, drop inherited rules
 
@@ -1316,12 +1327,40 @@ function Test-VanishDataDirAcl {
             $writers.Add([string]$rule.IdentityReference)
         }
 
+        # SEC-3: a DACL-only verdict is a false positive waiting to happen. An
+        # object's owner keeps WRITE_DAC regardless of the DACL, so a child left
+        # owned by the interactive user can be re-opened for writing at will.
+        # Check the owner of the directory AND of the files the engine reads as
+        # elevated instructions - main.js only re-applies the ACL when this
+        # returns protected:false, so a wrong "true" here is never revisited.
+        $trustedOwners = @('S-1-5-32-544', 'S-1-5-18')
+        $foreignOwners = [System.Collections.Generic.List[string]]::new()
+
+        $stateObjects = @($p.path)
+        foreach ($rel in @('vault', 'vault\manifest.json', 'settings.json', 'queue.json', 'oplog.jsonl')) {
+            $stateObjects += (Join-Path $p.path $rel)
+        }
+
+        foreach ($obj in $stateObjects) {
+            if (-not (Test-Path -LiteralPath $obj)) { continue }
+            try {
+                $ownerSid = (Get-Acl -LiteralPath $obj).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+            } catch {
+                continue
+            }
+            if ($trustedOwners -contains $ownerSid) { continue }
+            $foreignOwners.Add("$obj is owned by $ownerSid")
+        }
+
         return @{
-            success       = $true
-            exists        = $true
-            protected     = ($writers.Count -eq 0 -and $acl.AreAccessRulesProtected)
-            inherited     = (-not $acl.AreAccessRulesProtected)
+            success         = $true
+            exists          = $true
+            protected       = ($writers.Count -eq 0 -and
+                               $acl.AreAccessRulesProtected -and
+                               $foreignOwners.Count -eq 0)
+            inherited       = (-not $acl.AreAccessRulesProtected)
             nonAdminWriters = @($writers)
+            foreignOwners   = @($foreignOwners)
         }
     } catch {
         return @{ success = $false; error = $_.Exception.Message }

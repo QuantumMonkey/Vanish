@@ -153,9 +153,11 @@ function itemFor(name) {
   assert(state.items.length === 5, '5 items queued');
   assert(state.items.every((i) => i.state === 'pending'), 'every new item starts pending');
   assert(state.items.every((i) => typeof i.id === 'string' && i.id.includes('-')), 'items carry UUID identity (schema rule 4)');
-  assert(fs.existsSync(path.join(dataDir, 'queue.json')), 'queue.json persisted to disk on build');
+  // SEC-3: ask the store where state lives rather than assuming a layout.
+  // State moved out of the Electron userData root into its own subdirectory.
+  assert(fs.existsSync(store.queuePath()), 'queue.json persisted to disk on build');
 
-  const persisted = JSON.parse(fs.readFileSync(path.join(dataDir, 'queue.json'), 'utf8'));
+  const persisted = JSON.parse(fs.readFileSync(store.queuePath(), 'utf8'));
   assert(persisted.schemaVersion === 1, 'queue.json carries schemaVersion');
 
   console.log('');
@@ -271,7 +273,7 @@ function itemFor(name) {
   console.log('');
   console.log('NFR-04 audit trail');
   const oplog = fs
-    .readFileSync(path.join(dataDir, 'oplog.jsonl'), 'utf8')
+    .readFileSync(store.oplogPath(), 'utf8')
     .trim()
     .split('\n')
     .map((l) => JSON.parse(l));
