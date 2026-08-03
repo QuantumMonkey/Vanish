@@ -736,13 +736,28 @@ body {
   justify-content: center;
   opacity: 0;
   pointer-events: none;
+  /* visibility, not just opacity/pointer-events. A child that sets its own
+     pointer-events (.wizard-screen.active does) stays hit-testable even when
+     its parent is pointer-events:none, so an invisible overlay could sit on
+     top of a visible one and swallow every click. visibility:hidden cascades
+     and removes the whole subtree from hit testing. */
+  visibility: hidden;
   transition: opacity 0.3s ease;
 }
 
 .modal-overlay.active {
   opacity: 1;
   pointer-events: all;
+  visibility: visible;
 }
+
+/* Explicit stacking. Dialogs can be opened from inside other dialogs - the
+   uninstall wizard raises confirmDialog to cancel - so the order matters and
+   must not depend on DOM position. */
+#wizard-modal-overlay  { z-index: 100; }
+#elevation-modal-overlay { z-index: 140; }
+#unlock-modal-overlay    { z-index: 150; }
+#confirm-modal-overlay   { z-index: 160; }
 
 .wizard-modal {
   width: 680px;

@@ -9,7 +9,7 @@ Vanish is a modern Windows application manager and deep cleaner uninstaller. It 
 
 * **Repository Location**: `https://github.com/QuantumMonkey/Vanish`
 * **Version**: `0.3.0` (RELEASE.MAJOR.MINOR; RELEASE stays 0 until `docs/RELEASING.md` criteria are met)
-* **Status**: **Core tier code complete. VM verification outstanding.** Every Core roadmap stage (1, 2, 3, 6, 9) plus the Rule 2/3 safety retrofits is implemented and passes a 240-assertion local suite. Per Rule 10 that is **In Progress**, not Complete.
+* **Status**: **Core tier code complete. VM verification outstanding.** Every Core roadmap stage (1, 2, 3, 6, 9) plus the Rule 2/3 safety retrofits is implemented and passes a 310-assertion local suite. Per Rule 10 that is **In Progress**, not Complete.
 
 ---
 
@@ -36,7 +36,7 @@ Vanish is a modern Windows application manager and deep cleaner uninstaller. It 
 * **[renderer.js](../renderer.js)**: UI controller. Tier state and destructive-control locking, tab routing, app list, uninstall wizard, quarantine manager, process monitor, unlocker, System Clean cleaners, queue panel, Force Uninstall, Settings, About. All interpolation is HTML-escaped via `esc()`. *(Status: Complete)*
 * **[scanner.ps1](../scanner.ps1)**: System execution engine behind one `-Action` dispatcher (D-04). Stage 1-2 functions plus the quarantine vault primitives, Restart Manager and `NtSuspendProcess` interop, process/indicator sampler, Rule 15 switch resolver, uninstaller runner, `msiserver` management, explicit registry-view helpers, six cleaners, and broken-entry detection. *(Status: Complete)*
 * **[corrections.json](../corrections.json)**: ENT-03 uninstall switch corrections, read-only at runtime, community-correctable. Seeded with the OPEN-02 verified entries. *(Status: Complete - seeded, expected to grow)*
-* **[test/](../test)**: Nine verification harnesses plus `run-all.ps1`. **Not scaffolding** - `05-implementation-plan.md` TASK-17 makes these acceptance checks the VM test script, so they are the input to the release gate. *(Status: Complete for phases 1-4)*
+* **[test/](../test)**: Eleven verification harnesses plus `run-all.ps1`. **Not scaffolding** - `05-implementation-plan.md` TASK-17 makes these acceptance checks the VM test script, so they are the input to the release gate. *(Status: Complete for phases 1-4)*
 
 ---
 
@@ -146,7 +146,7 @@ re-parsing, so no injection exists).
 
 ## 🧪 Verification status
 
-`test\run-all.ps1`, elevated, on Windows 11 build 26200: **280 passed, 0 failed** across ten suites.
+`test\run-all.ps1`, elevated, on Windows 11 build 26200: **310 passed, 0 failed** across eleven suites.
 
 | Suite | Covers |
 |---|---|
@@ -160,8 +160,17 @@ re-parsing, so no injection exists).
 | `phase4-ipc-verify.js` | Cleaner purge/restore round trips, INV-1 |
 | `force-verify.ps1` | REQ-20 detection, evidence, and reversible forced uninstall |
 | `security-verify.ps1` | The three 2026-08-03 review findings, attempted as real attacks |
+| `ui-interaction-verify.js` | Every dialog control hit-tested with elementFromPoint |
 
 Unelevated, `tier-verify.js` additionally proves all nine destructive channels are rejected at the IPC boundary.
+
+**Lesson worth carrying:** the first ten harnesses all talk to the engine or the
+IPC layer and bypass the DOM. A defect that made *every dialog in the app
+unclickable* - the invisible wizard overlay covering the elevation offer, the
+unlocker and every confirmation - shipped past 280 green assertions and was
+found by a human opening the app for the first time. `ui-interaction-verify.js`
+exists to close that class: it hit-tests real controls rather than checking that
+markup exists. When adding UI, add a hit test, not a render check.
 
 This is one development machine, not a clean VM. Three real defects were found by these tests that code review did not catch:
 

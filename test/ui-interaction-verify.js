@@ -1,0 +1,195 @@
+// UI interaction regression suite.
+//
+// WHY THIS EXISTS: every other harness talks to the engine or the IPC layer and
+// bypasses the DOM entirely. That let a real defect ship - the uninstall
+// wizard's overlay is invisible but its active screen kept `pointer-events:
+// all`, and sitting later in the DOM at the same z-index it covered every other
+// dialog in the app. The buttons rendered perfectly and did nothing.
+//
+// So this suite does not check that a dialog is *visible*. It hit-tests the
+// actual clickable target with document.elementFromPoint and asserts the top
+// element at that coordinate IS the control the user is aiming at.
+//
+//   npx electron test/ui-interaction-verify.js
+
+const { app, BrowserWindow } = require('electron');
+const path = require('node:path');
+
+app.disableHardwareAcceleration();
+
+let pass = 0;
+let fail = 0;
+
+function assert(condition, label) {
+  if (condition) {
+    console.log(`  PASS  ${label}`);
+    pass += 1;
+  } else {
+    console.log(`  FAIL  ${label}`);
+    fail += 1;
+  }
+}
+
+// Runs in the page: is `selector` the topmost element at its own centre?
+const HIT_TEST = `(selector) => {
+  const el = document.querySelector(selector);
+  if (!el) return { found: false };
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return { found: true, visible: false };
+  const cx = Math.round(r.x + r.width / 2);
+  const cy = Math.round(r.y + r.height / 2);
+  const top = document.elementFromPoint(cx, cy);
+  return {
+    found: true,
+    visible: true,
+    hit: el === top || el.contains(top),
+    blockedBy: (el === top || el.contains(top)) ? null :
+      (top ? top.tagName + '#' + (top.id || '') + '.' + (typeof top.className === 'string' ? top.className : '') : 'nothing')
+  };
+}`;
+
+async function hitTest(win, selector) {
+  return win.webContents.executeJavaScript(`(${HIT_TEST})(${JSON.stringify(selector)})`);
+}
+
+async function assertClickable(win, selector, label) {
+  const r = await hitTest(win, selector);
+  if (!r.found) return assert(false, `${label} - element ${selector} not found`);
+  if (!r.visible) return assert(false, `${label} - element has no box`);
+  assert(r.hit, `${label}${r.hit ? '' : ` (blocked by ${r.blockedBy})`}`);
+}
+
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({
+    width: 1280, height: 860, show: false, frame: false, backgroundColor: '#0b0f19',
+    webPreferences: {
+      preload: path.join(__dirname, 'fixtures', 'stub-preload.js'),
+      contextIsolation: true, nodeIntegration: false, offscreen: true
+    }
+  });
+
+  await win.loadFile(path.join(__dirname, '..', 'index.html'));
+  await new Promise((r) => setTimeout(r, 3500));
+
+  console.log('');
+  console.log('Vanish UI interaction verification');
+  console.log('==================================');
+
+  // --- FLOW-01 elevation offer, the real first-launch state ---------------
+  console.log('');
+  console.log('FLOW-01 elevation offer (shown automatically on an unelevated start)');
+
+  const overlayActive = await win.webContents.executeJavaScript(
+    `document.getElementById('elevation-modal-overlay').classList.contains('active')`
+  );
+  assert(overlayActive === true, 'the offer appears by itself on an unelevated launch');
+  await assertClickable(win, '#btn-elevate-now', 'the "Restart as administrator" button is actually clickable');
+  await assertClickable(win, '#btn-stay-audit', 'the "Continue in Audit Mode" button is actually clickable');
+
+  // Declining must dismiss it and hand the app back.
+  await win.webContents.executeJavaScript(`document.getElementById('btn-stay-audit').click()`);
+  await new Promise((r) => setTimeout(r, 600));
+  const dismissed = await win.webContents.executeJavaScript(
+    `!document.getElementById('elevation-modal-overlay').classList.contains('active')`
+  );
+  assert(dismissed, 'declining dismisses the dialog');
+  await assertClickable(win, '.nav-item[data-tab="quarantine"]', 'the app is usable after declining (sidebar reachable)');
+  await assertClickable(win, '#btn-banner-elevate', 'the banner elevate button is clickable in Audit Mode');
+
+  // --- An invisible overlay must never capture clicks ---------------------
+  console.log('');
+  console.log('Hidden overlays do not swallow clicks (the defect this suite exists for)');
+
+  const hiddenState = await win.webContents.executeJavaScript(`(() => {
+    const ids = ['wizard-modal-overlay','elevation-modal-overlay','unlock-modal-overlay','confirm-modal-overlay'];
+    return ids.map((id) => {
+      const el = document.getElementById(id);
+      const cs = getComputedStyle(el);
+      return { id, active: el.classList.contains('active'), visibility: cs.visibility, pointerEvents: cs.pointerEvents };
+    });
+  })()`);
+
+  for (const o of hiddenState) {
+    if (o.active) continue;
+    assert(o.visibility === 'hidden', `${o.id} is visibility:hidden while inactive`);
+  }
+
+  const wizardScreenBlocks = await hitTest(win, '#scr-config .scan-modes-box');
+  assert(
+    wizardScreenBlocks.visible === false || wizardScreenBlocks.hit === false,
+    'the inactive wizard screen is not hit-testable'
+  );
+
+  // --- confirmDialog, raised from the Quarantine tab ----------------------
+  console.log('');
+  console.log('Confirmation dialogs are reachable (Delete Forever double-confirm)');
+
+  await win.webContents.executeJavaScript(`document.querySelector('.nav-item[data-tab="quarantine"]').click()`);
+  await new Promise((r) => setTimeout(r, 1200));
+  await assertClickable(win, '#vault-entries .vault-entry-header', 'a vault entry row is clickable');
+
+  // Raise the confirm dialog directly - the same call every destructive path makes.
+  win.webContents.executeJavaScript(
+    `confirmDialog({ title: 'T', body: 'B', confirmLabel: 'Yes' }); true;`
+  );
+  await new Promise((r) => setTimeout(r, 600));
+  await assertClickable(win, '#btn-confirm-ok', 'the confirm button is clickable, not covered by the wizard');
+  await assertClickable(win, '#btn-confirm-cancel', 'the cancel button is clickable');
+
+  await win.webContents.executeJavaScript(`document.getElementById('btn-confirm-cancel').click()`);
+  await new Promise((r) => setTimeout(r, 500));
+
+  // Typed double-confirm: OK must be inert until the word is typed.
+  win.webContents.executeJavaScript(
+    `confirmDialog({ title: 'T', body: 'B', confirmLabel: 'Delete', typed: 'DELETE' }); true;`
+  );
+  await new Promise((r) => setTimeout(r, 600));
+  const typedGate = await win.webContents.executeJavaScript(`(() => {
+    const ok = document.getElementById('btn-confirm-ok');
+    const input = document.getElementById('confirm-typed-input');
+    const before = ok.disabled;
+    input.value = 'DELETE';
+    input.dispatchEvent(new Event('input'));
+    return { before, after: ok.disabled };
+  })()`);
+  assert(typedGate.before === true, 'a typed double-confirm starts disabled');
+  assert(typedGate.after === false, 'it enables only once the word is typed');
+  await assertClickable(win, '#confirm-typed-input', 'the typed-confirm input is reachable');
+  await win.webContents.executeJavaScript(`document.getElementById('btn-confirm-cancel').click()`);
+  await new Promise((r) => setTimeout(r, 400));
+
+  // --- Unlocker dialog ----------------------------------------------------
+  console.log('');
+  console.log('Unlocker dialog');
+  await win.webContents.executeJavaScript(`document.querySelector('.nav-item[data-tab="task-manager"]').click()`);
+  await new Promise((r) => setTimeout(r, 1500));
+  await win.webContents.executeJavaScript(`document.getElementById('btn-open-unlocker').click()`);
+  await new Promise((r) => setTimeout(r, 600));
+  await assertClickable(win, '#unlock-path-input', 'the unlocker path input is reachable');
+  await assertClickable(win, '#btn-find-lockers', 'the "Find holders" button is clickable');
+  await win.webContents.executeJavaScript(`document.getElementById('unlock-close-x').click()`);
+  await new Promise((r) => setTimeout(r, 400));
+
+  // --- Every tab reachable, and the destructive lock is honest ------------
+  console.log('');
+  console.log('Navigation and Audit Mode locking');
+  for (const tab of ['all-apps', 'audit', 'task-manager', 'system-clean', 'quarantine', 'force-uninstall', 'settings', 'about']) {
+    await assertClickable(win, `.nav-item[data-tab="${tab}"]`, `the ${tab} tab is clickable`);
+  }
+
+  const locked = await win.webContents.executeJavaScript(`(() => {
+    const all = Array.from(document.querySelectorAll('[data-destructive="true"]'));
+    return {
+      total: all.length,
+      locked: all.filter((e) => e.classList.contains('tier-locked')).length,
+      titled: all.filter((e) => (e.title || '').includes('Full Mode')).length
+    };
+  })()`);
+  assert(locked.total > 0, `${locked.total} destructive controls are marked`);
+  assert(locked.locked === locked.total, 'every destructive control is locked in Audit Mode');
+  assert(locked.titled === locked.total, 'every locked control explains why in its tooltip');
+
+  console.log('');
+  console.log(`Result: ${pass} passed, ${fail} failed`);
+  app.exit(fail > 0 ? 1 : 0);
+});

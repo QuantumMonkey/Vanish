@@ -11,7 +11,7 @@ full decision rules.
 ## [Unreleased]
 
 > Rule 10 note: everything below is **In Progress**, not Complete. It is coded
-> and passes a 280-assertion local suite on Windows 11 build 26200, but no clean
+> and passes a 310-assertion local suite on Windows 11 build 26200, but no clean
 > Windows 10 / Windows 11 VM pass has happened yet (TASK-17). No stage flips to
 > "Complete" until it does.
 
@@ -100,6 +100,15 @@ full decision rules.
   new LICENSE file, description/author/repository filled in.
 
 ### Fixed
+* **Every dialog in the app was unclickable.** The uninstall wizard's overlay is
+  invisible when idle, but its first screen keeps `pointer-events: all` - and a
+  child stays hit-testable even when its parent is `pointer-events: none`. The
+  wizard sits later in the DOM at the same `z-index`, so it silently covered the
+  elevation offer, the unlocker, and every confirmation dialog, including the
+  Delete Forever double-confirm. Controls rendered perfectly and did nothing.
+  Inactive overlays are now `visibility: hidden`, which removes the whole
+  subtree from hit testing, and the overlays have explicit stacking so a dialog
+  raised from inside another dialog lands on top.
 * A `DisplayName` stored as `REG_MULTI_SZ` arrived in the renderer as an array
   and threw `app.name.toLowerCase is not a function`, which emptied the entire
   application list. Display fields are now coerced in the engine, with a
@@ -151,6 +160,11 @@ full decision rules.
 * New `test/security-verify.ps1` attempts each of these attacks and asserts it
   is refused; the suite also proves legitimate operations still work and that
   Audit Mode retains read access after the ACL change.
+* New `test/ui-interaction-verify.js` loads the real UI offscreen and hit-tests
+  every dialog control with `elementFromPoint`, asserting the topmost element at
+  a button's centre is that button. Every other harness talks to the engine or
+  the IPC layer and bypasses the DOM, which is how a whole broken dialog layer
+  shipped past 280 passing assertions.
 
 ### Added - zero network, first-party assets
 * **The last runtime network calls are gone.** The FontAwesome CDN stylesheet
