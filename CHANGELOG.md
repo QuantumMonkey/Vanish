@@ -11,7 +11,7 @@ full decision rules.
 ## [Unreleased]
 
 > Rule 10 note: everything below is **In Progress**, not Complete. It is coded
-> and passes a 240-assertion local suite on Windows 11 build 26200, but no clean
+> and passes a 280-assertion local suite on Windows 11 build 26200, but no clean
 > Windows 10 / Windows 11 VM pass has happened yet (TASK-17). No stage flips to
 > "Complete" until it does.
 
@@ -127,6 +127,30 @@ full decision rules.
 * A strict Content-Security-Policy is now set: `connect-src 'none'` makes fetch,
   XHR and WebSockets impossible from the renderer, so no scan result or path can
   leave the machine.
+* **Fixed: local privilege escalation via the quarantine vault.** `manifest.json`
+  and the vault payloads live under the app data directory, which a standard
+  user can write to, but the engine acts on them with administrator rights. A
+  forged manifest entry could therefore have made the elevated engine move an
+  attacker-supplied file to any location (including `System32`), import an
+  arbitrary `.reg`, or recursively delete an arbitrary directory via a traversing
+  entry id. Entry ids are now validated as UUIDs before any path is built, every
+  manifest-supplied relative path must resolve back inside its own entry folder,
+  and restores into the Windows directory are refused outright.
+* **Fixed: the app data directory is no longer world-writable.** On every
+  elevated start Vanish now checks the directory ACL and, if a non-administrator
+  can write to it, applies an explicit DACL - Administrators and SYSTEM get full
+  control, Users keep read so Audit Mode can still list the vault - with
+  inheritance severed. This closes the `ASSUMED` item in `01-trd.md`'s security
+  section, which had shipped unresolved.
+* **Fixed: elevated execution of attacker-plantable uninstallers.** `queue.json`
+  was user-writable and its stored `uninstallString` was executed as-is. The
+  runner now re-reads each entry from the live registry at execution time, and
+  an uninstaller registered under `HKCU` or whose binary sits in a user-writable
+  location is refused unless the operator acknowledges it by name in a typed
+  confirmation. The engine enforces this independently of the queue runner.
+* New `test/security-verify.ps1` attempts each of these attacks and asserts it
+  is refused; the suite also proves legitimate operations still work and that
+  Audit Mode retains read access after the ACL change.
 
 ### Added - zero network, first-party assets
 * **The last runtime network calls are gone.** The FontAwesome CDN stylesheet

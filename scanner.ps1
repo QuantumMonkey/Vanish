@@ -796,6 +796,75 @@ function Test-IsElevated {
     return ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+# ---- Vault input validation (security review 2026-08-03, Vuln 1) ----------
+#
+# manifest.json and the vault payloads live under the Electron userData path,
+# which a standard user can write to, but the engine acts on them ELEVATED.
+# Every path that arrives from the manifest is therefore untrusted input, not
+# internal state. Validate at the privilege boundary, here, not in the renderer.
+
+# Entry ids are app-generated UUIDv4 (schema rule 4). Anything else - notably
+# anything containing a separator - is an attempt to escape the vault root.
+function Test-VaultEntryId {
+    param([string]$entryId)
+    if ([string]::IsNullOrWhiteSpace($entryId)) { return $false }
+    return ($entryId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+}
+
+# Resolve a manifest-supplied relative path and prove the result is still
+# inside the entry folder. Defeats "..\..\..\Windows\System32\x" payloads.
+function Resolve-SafeVaultPath {
+    param([string]$entryDir, [string]$relative)
+    if ([string]::IsNullOrWhiteSpace($relative)) { return $null }
+    # Reject the obvious before touching the filesystem.
+    if ($relative -match '(^|[\\/])\.\.([\\/]|$)') { return $null }
+    if ($relative -match '^[A-Za-z]:' -or $relative -match '^[\\/]{2}') { return $null }
+
+    try {
+        $entryFull = [System.IO.Path]::GetFullPath($entryDir)
+        if (-not $entryFull.EndsWith('\')) { $entryFull += '\' }
+        $candidate = [System.IO.Path]::GetFullPath((Join-Path $entryDir ($relative -replace '/', '\')))
+        if (-not $candidate.StartsWith($entryFull, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+        return $candidate
+    } catch {
+        return $null
+    }
+}
+
+# Restoring is a file WRITE performed as administrator to a location the
+# manifest chose. The leftover scanner never proposes anything under the
+# Windows directory, so a manifest that asks to restore there is either
+# corrupt or hostile. Refuse either way.
+function Test-ProtectedDestination {
+    param([string]$path)
+    if ([string]::IsNullOrWhiteSpace($path)) { return $true }
+
+    try {
+        $full = [System.IO.Path]::GetFullPath($path)
+    } catch {
+        return $true
+    }
+
+    $blocked = @(
+        $env:SystemRoot,
+        (Join-Path $env:SystemRoot 'System32'),
+        (Join-Path $env:SystemRoot 'SysWOW64'),
+        (Join-Path $env:SystemRoot 'WinSxS'),
+        (Join-Path $env:SystemRoot 'INF'),
+        (Join-Path $env:SystemRoot 'Boot'),
+        $PSScriptRoot
+    ) | Where-Object { $_ }
+
+    foreach ($root in $blocked) {
+        try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
+        if (-not $rootFull.EndsWith('\')) { $rootFull += '\' }
+        # Block the directory itself and everything beneath it.
+        if ($full.Equals($rootFull.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if ($full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
 function Get-ItemSizeBytes {
     param([string]$path)
     try {
@@ -854,6 +923,9 @@ function Invoke-QuarantineItems {
     }
     if (-not $p -or [string]::IsNullOrWhiteSpace($p.vaultRoot) -or [string]::IsNullOrWhiteSpace($p.entryId)) {
         return @{ success = $false; error = "vaultRoot and entryId are required." }
+    }
+    if (-not (Test-VaultEntryId $p.entryId)) {
+        return @{ success = $false; error = "Rejected: entry id is not a UUID." }
     }
 
     $entryDir = Join-Path $p.vaultRoot $p.entryId
@@ -1030,6 +1102,9 @@ function Invoke-VaultRestore {
     if (-not $p -or -not $p.entry -or [string]::IsNullOrWhiteSpace($p.vaultRoot)) {
         return @{ success = $false; error = "vaultRoot and entry are required." }
     }
+    if (-not (Test-VaultEntryId $p.entry.id)) {
+        return @{ success = $false; error = "Rejected: entry id is not a UUID." }
+    }
 
     $entryDir  = Join-Path $p.vaultRoot $p.entry.id
     $onConflict = if ($p.onConflict) { $p.onConflict } else { "skip" }   # skip | overwrite
@@ -1039,7 +1114,18 @@ function Invoke-VaultRestore {
     foreach ($f in @($p.entry.files)) {
         if (-not $f -or $f.status -ne "quarantined") { continue }
         $res = @{ originalPath = $f.originalPath; status = "failed"; error = $null }
-        $vaultPath = Join-Path $entryDir ($f.vaultRelative -replace '/', '\')
+
+        # The manifest is user-writable; the restore runs elevated. Both the
+        # source it reads and the destination it writes are untrusted.
+        $vaultPath = Resolve-SafeVaultPath -entryDir $entryDir -relative $f.vaultRelative
+        if (-not $vaultPath) {
+            $res.error = "Rejected: vault payload path escapes the entry folder."
+            $fileResults.Add($res); continue
+        }
+        if (Test-ProtectedDestination $f.originalPath) {
+            $res.error = "Rejected: refusing to restore into a protected system location."
+            $fileResults.Add($res); continue
+        }
 
         if (-not (Test-Path -LiteralPath $vaultPath)) {
             $res.error = "Vault payload missing."
@@ -1074,7 +1160,14 @@ function Invoke-VaultRestore {
     foreach ($r in @($p.entry.registry)) {
         if (-not $r -or $r.status -ne "quarantined") { continue }
         $res = @{ keyPath = $r.keyPath; status = "failed"; error = $null }
-        $regFile = Join-Path $entryDir ($r.regFile -replace '/', '\')
+
+        # reg.exe import applies whatever the file says, as administrator. The
+        # file must provably be one we wrote inside this entry folder.
+        $regFile = Resolve-SafeVaultPath -entryDir $entryDir -relative $r.regFile
+        if (-not $regFile) {
+            $res.error = "Rejected: restore manifest path escapes the entry folder."
+            $regResults.Add($res); continue
+        }
 
         if (-not (Test-Path -LiteralPath $regFile)) {
             $res.error = "Restore manifest (.reg) missing."
@@ -1112,6 +1205,11 @@ function Invoke-VaultDelete {
     if (-not $p -or [string]::IsNullOrWhiteSpace($p.vaultRoot) -or [string]::IsNullOrWhiteSpace($p.entryId)) {
         return @{ success = $false; error = "vaultRoot and entryId are required." }
     }
+    # This is a recursive force-delete running as administrator. An entry id of
+    # "..\..\..\Windows\System32" must never reach Join-Path.
+    if (-not (Test-VaultEntryId $p.entryId)) {
+        return @{ success = $false; error = "Rejected: entry id is not a UUID." }
+    }
 
     $entryDir = Join-Path $p.vaultRoot $p.entryId
     if (-not (Test-Path -LiteralPath $entryDir)) {
@@ -1122,6 +1220,183 @@ function Invoke-VaultDelete {
         return @{ success = $true }
     } catch {
         return @{ success = $false; error = $_.Exception.Message }
+    }
+}
+
+# Lock the Vanish data directory so the elevated engine is not reading its
+# instructions out of a folder any standard user can rewrite (security review
+# 2026-08-03, Vuln 2; also the ASSUMED item in 01-trd.md's security section).
+#
+# Administrators and SYSTEM get full control; Users keep READ so Audit Mode can
+# still list the vault (SCR-02) but can no longer forge a manifest entry.
+# Inheritance is severed so a permissive %APPDATA% ACL cannot leak back in.
+function Set-VanishDataDirAcl {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required to set the data directory ACL." }
+    }
+    if (-not $p -or [string]::IsNullOrWhiteSpace($p.path)) {
+        return @{ success = $false; error = "A path is required." }
+    }
+    if (-not (Test-Path -LiteralPath $p.path)) {
+        return @{ success = $false; error = "Data directory does not exist yet." }
+    }
+
+    try {
+        $admins = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+        $system = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+        $users  = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinUsersSid, $null)
+
+        $inherit = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
+                   [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+        $none    = [System.Security.AccessControl.PropagationFlags]::None
+        $allow   = [System.Security.AccessControl.AccessControlType]::Allow
+
+        $acl = Get-Acl -LiteralPath $p.path
+        $acl.SetAccessRuleProtection($true, $false)   # disable inheritance, drop inherited rules
+
+        foreach ($rule in @($acl.Access)) {
+            $null = $acl.RemoveAccessRule($rule)
+        }
+
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $admins, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit, $none, $allow)))
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $system, [System.Security.AccessControl.FileSystemRights]::FullControl, $inherit, $none, $allow)))
+        $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule(
+            $users, [System.Security.AccessControl.FileSystemRights]::ReadAndExecute, $inherit, $none, $allow)))
+
+        $acl.SetOwner($admins)
+        Set-Acl -LiteralPath $p.path -AclObject $acl -ErrorAction Stop
+
+        return @{ success = $true; protected = $true }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message }
+    }
+}
+
+# Report whether a non-administrator can still write to the data directory.
+# Called on every elevated start so a loosened ACL is visible, not assumed.
+function Test-VanishDataDirAcl {
+    param([object]$p)
+
+    if (-not $p -or [string]::IsNullOrWhiteSpace($p.path) -or -not (Test-Path -LiteralPath $p.path)) {
+        return @{ success = $true; exists = $false; protected = $false }
+    }
+
+    try {
+        $acl = Get-Acl -LiteralPath $p.path
+        # Mask ONLY genuine mutation bits. Do not build this from Modify or
+        # FullControl: those composites include the read bits, so ANDing against
+        # them reports a harmless ReadAndExecute ACE as a writer.
+        $writeRights = [System.Security.AccessControl.FileSystemRights]::WriteData -bor
+                       [System.Security.AccessControl.FileSystemRights]::AppendData -bor
+                       [System.Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor
+                       [System.Security.AccessControl.FileSystemRights]::WriteAttributes -bor
+                       [System.Security.AccessControl.FileSystemRights]::Delete -bor
+                       [System.Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor
+                       [System.Security.AccessControl.FileSystemRights]::ChangePermissions -bor
+                       [System.Security.AccessControl.FileSystemRights]::TakeOwnership
+
+        $trusted = @('S-1-5-32-544', 'S-1-5-18', 'S-1-3-0', 'S-1-5-32-573')
+        $writers = [System.Collections.Generic.List[string]]::new()
+
+        foreach ($rule in @($acl.Access)) {
+            if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+            if (($rule.FileSystemRights -band $writeRights) -eq 0) { continue }
+            $sid = try { $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $null }
+            if ($sid -and ($trusted -contains $sid)) { continue }
+            # The interactive account owning this profile is itself untrusted
+            # for our purposes: that is exactly the attacker in the EoP path.
+            $writers.Add([string]$rule.IdentityReference)
+        }
+
+        return @{
+            success       = $true
+            exists        = $true
+            protected     = ($writers.Count -eq 0 -and $acl.AreAccessRulesProtected)
+            inherited     = (-not $acl.AreAccessRulesProtected)
+            nonAdminWriters = @($writers)
+        }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message }
+    }
+}
+
+# Vuln 3: how much should we trust an uninstaller we are about to run as
+# administrator? HKCU is writable by the standard user, so an entry there can
+# name any binary. Report the reasons rather than silently refusing - the
+# operator decides, but with the facts in front of them.
+function Get-UninstallerTrust {
+    param([string]$registryPath, [string]$executable)
+
+    $reasons = [System.Collections.Generic.List[string]]::new()
+    $regExe  = ConvertTo-RegExePath $registryPath
+
+    $userHive = ($regExe -and $regExe -match '^HKCU\\')
+    if ($userHive) {
+        $reasons.Add("registered under HKCU, which any standard user can write")
+    }
+
+    $userWritable = $false
+    if (-not [string]::IsNullOrWhiteSpace($executable)) {
+        $expanded = [System.Environment]::ExpandEnvironmentVariables($executable)
+        $userRoots = @($env:APPDATA, $env:LOCALAPPDATA, $env:TEMP, (Join-Path $env:SystemDrive 'Users\Public')) |
+                     Where-Object { $_ }
+        foreach ($root in $userRoots) {
+            try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
+            if (-not $rootFull.EndsWith('\')) { $rootFull += '\' }
+            if ($expanded.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $userWritable = $true
+                break
+            }
+        }
+        if ($userWritable) {
+            $reasons.Add("its executable sits in a user-writable location: $expanded")
+        }
+    }
+
+    return @{
+        userHive     = $userHive
+        userWritable = $userWritable
+        risky        = ($userHive -or $userWritable)
+        reasons      = @($reasons)
+    }
+}
+
+# Re-read an uninstall entry from the LIVE registry. queue.json is user-
+# writable, so the command persisted there is not trusted at execution time.
+function Read-UninstallEntry {
+    param([object]$p)
+
+    if (-not $p -or [string]::IsNullOrWhiteSpace($p.registryPath)) {
+        return @{ success = $false; error = "A registry path is required." }
+    }
+
+    $psPath = ConvertTo-PSRegPath $p.registryPath
+    if (-not $psPath -or -not (Test-Path -LiteralPath $psPath)) {
+        return @{ success = $false; found = $false; error = "The uninstall entry no longer exists in the registry." }
+    }
+
+    try {
+        $props = Get-ItemProperty -LiteralPath $psPath -ErrorAction Stop
+        $uninstallString = [string]$props.UninstallString
+        $split = Split-UninstallString $uninstallString
+        $trust = Get-UninstallerTrust -registryPath $p.registryPath -executable $split.executable
+
+        return @{
+            success         = $true
+            found           = $true
+            displayName     = [string]$props.DisplayName
+            publisher       = [string]$props.Publisher
+            uninstallString = $uninstallString
+            installLocation = [string]$props.InstallLocation
+            executable      = $split.executable
+            trust           = $trust
+        }
+    } catch {
+        return @{ success = $false; found = $false; error = $_.Exception.Message }
     }
 }
 
@@ -1896,6 +2171,19 @@ function Invoke-Uninstaller {
 
     $timeoutSeconds = 600
     if ($p.timeoutSeconds) { $timeoutSeconds = [int]$p.timeoutSeconds }
+
+    # Defence in depth for Vuln 3: even if the queue runner is bypassed, the
+    # engine refuses to launch a binary from a user-writable location with
+    # administrator rights unless the caller says the user acknowledged it.
+    $trust = Get-UninstallerTrust -registryPath $p.registryPath -executable $p.executable
+    if ($trust.userWritable -and $p.acknowledged -ne $true) {
+        return @{
+            success = $false
+            blocked = $true
+            error   = "Refused: $($trust.reasons -join '; '). This needs explicit confirmation."
+            trust   = $trust
+        }
+    }
 
     $argString = (@($p.baseArgs, $p.arguments) | Where-Object { $_ } ) -join " "
     $started = Get-Date
@@ -2702,6 +2990,15 @@ if ($Action) {
         }
         "find-broken-entries" {
             Find-BrokenUninstallEntries | ConvertTo-Json -Depth 6 -Compress
+        }
+        "read-uninstall-entry" {
+            Read-UninstallEntry -p $Params | ConvertTo-Json -Depth 6 -Compress
+        }
+        "secure-data-dir" {
+            Set-VanishDataDirAcl -p $Params | ConvertTo-Json -Depth 4 -Compress
+        }
+        "check-data-dir" {
+            Test-VanishDataDirAcl -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         # ---- PHASE 4: SYSTEM CLEAN ----
         "cleaner-scan" {

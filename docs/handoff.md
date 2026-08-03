@@ -97,10 +97,42 @@ Rule 10: a stage is only "Complete" once manually verified on a clean Windows 10
 |---|---|---|---|
 | 1 | VM test matrix, clean Win10 (1607+) + Win11 | `vanish-uninstaller-0xt` | **Blocked - no VM available.** This is the gate that turns In Progress into Complete. |
 | 2 | Security audit (`/cso` full pass) | `vanish-uninstaller-vhm` | Approved by the operator, not yet run. Start it in a fresh session. |
-| 3 | `/code-review high` on destructive surfaces | `vanish-uninstaller-1td` | Approved by the operator, not yet run. Fresh session. |
+| 3 | `/code-review high` on destructive surfaces | `vanish-uninstaller-1td` | **Done 2026-08-03.** Three findings, all fixed and regression-tested (see below). |
 | 4 | Docs pass + demo GIF | `vanish-uninstaller-k2o` | Open |
 | 5 | Code signing + Store submission | `vanish-uninstaller-1w0` | **Operator decision, has cost.** Deferred until just before Store submission. Do not start unprompted. |
 | 6 | One real external user completes the core flow | `vanish-uninstaller-442` | Operator will self-test first, then hand to someone else |
+
+### Security review, 2026-08-03 (TASK-19)
+
+A focused review of the destructive surfaces found three real issues, all now
+fixed with a regression test per attack in `test/security-verify.ps1`. The
+shared root cause is worth carrying forward: **the app data directory is
+user-writable, but the engine reads it as elevated instructions.** Anything new
+that reads from `%APPDATA%\vanish-uninstaller\` and acts on it in Full Mode must
+treat that content as untrusted input.
+
+1. **Vault path traversal (HIGH).** A forged `manifest.json` entry could make
+   the elevated engine write an arbitrary file anywhere (`vaultRelative` /
+   `originalPath`), import an arbitrary `.reg`, or recursively delete an
+   arbitrary directory (traversing `entryId`). Fixed with UUID validation on
+   entry ids, containment checks that every manifest-relative path resolves back
+   inside its own entry folder, and a refusal to restore into the Windows
+   directory.
+2. **Unprotected data directory (HIGH).** The vault inherited `%APPDATA%` ACLs.
+   Now ACL'd on every elevated start: Administrators + SYSTEM full control,
+   Users read-only, inheritance severed. This was the `ASSUMED` item in
+   `01-trd.md`; it is now resolved.
+3. **Elevated execution of plantable uninstallers (MEDIUM).** `queue.json` was
+   trusted at execution time and `HKCU` entries can name any binary. The runner
+   re-reads the registry live, and untrusted uninstallers require a typed
+   acknowledgement naming them.
+
+Three further candidates were assessed and deliberately not actioned: the
+pre-existing `exec(uninstallString)` in `uninstall-native` (unchanged by this
+work - fold into `/cso`), renderer-supplied finding objects in `cleaner-purge`
+(needs renderer compromise; strings are escaped), and `Grant-VanishOwnership`
+argument handling (PowerShell's call operator passes arguments without shell
+re-parsing, so no injection exists).
 
 ### Known gaps that are NOT bugs to rediscover
 
@@ -114,7 +146,7 @@ Rule 10: a stage is only "Complete" once manually verified on a clean Windows 10
 
 ## 🧪 Verification status
 
-`test\run-all.ps1`, elevated, on Windows 11 build 26200: **240 passed, 0 failed** across nine suites.
+`test\run-all.ps1`, elevated, on Windows 11 build 26200: **280 passed, 0 failed** across ten suites.
 
 | Suite | Covers |
 |---|---|
@@ -127,6 +159,7 @@ Rule 10: a stage is only "Complete" once manually verified on a clean Windows 10
 | `phase4-verify.ps1` | TASK-13/14/15/16, plus the core-handler regression guard |
 | `phase4-ipc-verify.js` | Cleaner purge/restore round trips, INV-1 |
 | `force-verify.ps1` | REQ-20 detection, evidence, and reversible forced uninstall |
+| `security-verify.ps1` | The three 2026-08-03 review findings, attempted as real attacks |
 
 Unelevated, `tier-verify.js` additionally proves all nine destructive channels are rejected at the IPC boundary.
 

@@ -97,6 +97,32 @@ app.whenReady().then(async () => {
     meta: { version: app.getVersion() }
   });
 
+  // The engine reads manifest.json, queue.json and the .reg restore manifests
+  // as ELEVATED instructions. If a standard user can rewrite them, that is a
+  // privilege escalation path (security review 2026-08-03, Vuln 2). Lock the
+  // directory on every elevated start and record what we found.
+  if (isFullMode()) {
+    try {
+      const before = await runPowerShell('check-data-dir', { path: store.dataDir() });
+      if (before && before.exists && !before.protected) {
+        const applied = await runPowerShell('secure-data-dir', { path: store.dataDir() });
+        store.appendOplog({
+          action: 'secure-data-dir',
+          tier: currentTier,
+          items: {},
+          outcome: applied && applied.success ? 'success' : 'error',
+          meta: {
+            wasInherited: before.inherited === true,
+            nonAdminWriters: before.nonAdminWriters || [],
+            error: applied && applied.error
+          }
+        });
+      }
+    } catch (err) {
+      console.error('Could not secure the data directory:', err.message);
+    }
+  }
+
   // FLOW-03 auto-purge branch (opt-in, off by default).
   if (isFullMode()) {
     vault.autoPurgeSweep().catch((err) => console.error('Auto-purge sweep failed:', err.message));
@@ -431,9 +457,12 @@ fullModeOnly('queue-remove', async (event, { itemId }) => queue.remove(itemId));
 fullModeOnly('queue-clear', async () => queue.clear());
 fullModeOnly('queue-retry', async (event, { itemId }) => queue.retry(itemId));
 fullModeOnly('queue-pause', async () => queue.pause());
-fullModeOnly('queue-start', async () => {
+fullModeOnly('queue-start', async (event, params) => {
   try {
-    return await queue.start();
+    // Only the ids the user ticked by name in the confirmation may run an
+    // uninstaller that is registered under HKCU or lives in a user-writable
+    // location. Anything else is skipped as "needs attention".
+    return await queue.start((params && params.acknowledgedIds) || []);
   } catch (error) {
     return { success: false, error: error.message };
   }

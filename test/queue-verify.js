@@ -35,7 +35,8 @@ const scripted = {
   RebootApp1641: { exitCode: 1641, timedOut: false, interactive: false },
   FailApp: { exitCode: 1603, timedOut: false, interactive: false },
   StubbornApp: { exitCode: null, timedOut: true, interactive: true },
-  CorrectionsApp: { exitCode: 0, timedOut: false, interactive: false }
+  CorrectionsApp: { exitCode: 0, timedOut: false, interactive: false },
+  RiskyApp: { exitCode: 0, timedOut: false, interactive: false }
 };
 
 const calls = [];
@@ -58,6 +59,32 @@ async function fakeRunner(action, params = {}) {
   if (action === 'msiserver-set') {
     msiserverStartMode = params.startMode;
     return { success: true, startMode: msiserverStartMode, state: 'Stopped', usable: true };
+  }
+  if (action === 'read-uninstall-entry') {
+    // The runner re-reads the entry from the live registry rather than
+    // trusting queue.json. RiskyApp models an HKCU-registered uninstaller
+    // pointing at a user-writable binary.
+    const name = String(params.registryPath || '').split('\\').pop();
+    if (name === 'MissingApp') {
+      return { success: false, found: false, error: 'The uninstall entry no longer exists in the registry.' };
+    }
+    const risky = name === 'RiskyApp';
+    return {
+      success: true,
+      found: true,
+      displayName: name,
+      publisher: 'Test Publisher',
+      uninstallString: 'C:\\fake\\uninstall.exe',
+      executable: 'C:\\fake\\uninstall.exe',
+      trust: risky
+        ? {
+            userHive: true,
+            userWritable: true,
+            risky: true,
+            reasons: ['registered under HKCU, which any standard user can write']
+          }
+        : { userHive: false, userWritable: false, risky: false, reasons: [] }
+    };
   }
   if (action === 'resolve-uninstall-args') {
     const isCorrection = params.displayName === 'CorrectionsApp';
@@ -113,13 +140,13 @@ function itemFor(name) {
 
   console.log('');
   console.log('Queue building (ENT-04)');
-  queue.add(app('CleanApp'));
-  queue.add(app('CorrectionsApp'));
-  queue.add(app('FailApp'));
-  queue.add(app('StubbornApp'));
-  queue.add(app('RebootApp'));
+  await queue.add(app('CleanApp'));
+  await queue.add(app('CorrectionsApp'));
+  await queue.add(app('FailApp'));
+  await queue.add(app('StubbornApp'));
+  await queue.add(app('RebootApp'));
 
-  const dup = queue.add(app('CleanApp'));
+  const dup = await queue.add(app('CleanApp'));
   assert(dup.success === false, 'the same application cannot be queued twice while pending');
 
   let state = queue.getState();
@@ -194,9 +221,48 @@ function itemFor(name) {
   // 1641 is the other reboot code and must behave identically. Run it on a
   // fresh queue: a queue that still held RebootApp would (correctly) pause on
   // that item first and never reach this one.
+  // Security review Vuln 3: an uninstaller Vanish cannot vouch for must not
+  // run elevated just because it sat in the queue.
+  console.log('');
+  console.log('Untrusted uninstaller gate (security review Vuln 3)');
+  await queue.add(app('RiskyApp'));
+  const riskyItem = itemFor('RiskyApp');
+  assert(riskyItem.meta.trust.risky === true, 'trust is evaluated at queue time, before Start is pressed');
+  assert(
+    riskyItem.meta.trust.reasons.length > 0,
+    'the reason is captured so the confirmation can name it'
+  );
+
+  await queue.start(); // no acknowledgement given
+  assert(itemFor('RiskyApp').state === 'needsAttention', 'an unacknowledged untrusted uninstaller is NOT run');
+  assert(
+    /explicit confirmation/i.test(itemFor('RiskyApp').meta.error),
+    'the item explains why it was skipped'
+  );
+  assert(
+    calls.filter((c) => c.action === 'run-uninstaller').every((c) => c.params.executable !== undefined),
+    'no run-uninstaller call was made for it'
+  );
+
+  queue.retry(itemFor('RiskyApp').id);
+  await queue.start([itemFor('RiskyApp').id]); // acknowledged by id
+  assert(itemFor('RiskyApp').state === 'done', 'it runs once the operator acknowledges it by name');
+  queue.clear();
+
+  console.log('');
+  console.log('Live registry re-read (security review Vuln 2)');
+  await queue.add(app('MissingApp'));
+  await queue.start();
+  assert(itemFor('MissingApp').state === 'failed', 'an entry that no longer exists in the registry fails rather than running a stale command');
+  assert(
+    calls.some((c) => c.action === 'read-uninstall-entry'),
+    'the runner re-reads the entry from the live registry instead of trusting queue.json'
+  );
+  queue.clear();
+
   console.log('');
   console.log('Second reboot exit code');
-  queue.add(app('RebootApp1641'));
+  await queue.add(app('RebootApp1641'));
   await queue.start();
   assert(itemFor('RebootApp1641').state === 'rebootRequired', 'exit 1641 -> reboot required');
   assert(queue.getState().paused === true, 'exit 1641 also pauses the queue');

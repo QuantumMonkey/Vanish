@@ -2145,8 +2145,37 @@ async function startQueue() {
   });
   if (!ok) return;
 
-  window.api.queueStart();
-  toast('Queue started.', 'success');
+  // An uninstaller registered under HKCU, or one whose binary sits somewhere a
+  // standard user can write, is something malware could have planted. Running
+  // it here would run it as administrator, so it needs naming out loud.
+  const risky = pending.filter((i) => i.meta && i.meta.trust && i.meta.trust.risky);
+  let acknowledgedIds = [];
+
+  if (risky.length > 0) {
+    const detail = risky
+      .map((i) => `${i.displayName}: ${(i.meta.trust.reasons || []).join('; ')}`)
+      .join('\n');
+    const ackRisky = await confirmDialog({
+      title: `${risky.length} uninstaller(s) cannot be fully trusted`,
+      body:
+        'These entries would run with administrator rights, but they are the kind of entry ' +
+        'malware can create:\n\n' +
+        detail +
+        '\n\nSkip them unless you recognise every one. Type RUN to run them anyway; cancel to ' +
+        'uninstall everything else and mark these as needing attention.',
+      confirmLabel: 'Run them too',
+      typed: 'RUN'
+    });
+    if (ackRisky) acknowledgedIds = risky.map((i) => i.id);
+  }
+
+  window.api.queueStart({ acknowledgedIds });
+  toast(
+    risky.length > 0 && acknowledgedIds.length === 0
+      ? `Queue started. ${risky.length} untrusted uninstaller(s) will be skipped.`
+      : 'Queue started.',
+    'success'
+  );
 }
 
 function renderQueue() {

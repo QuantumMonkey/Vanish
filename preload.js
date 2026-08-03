@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('api', {
   queueRemove: (params) => ipcRenderer.invoke('queue-remove', params),
   queueClear: () => ipcRenderer.invoke('queue-clear'),
   queueRetry: (params) => ipcRenderer.invoke('queue-retry', params),
-  queueStart: () => ipcRenderer.invoke('queue-start'),
+  queueStart: (params) => ipcRenderer.invoke('queue-start', params),
   queuePause: () => ipcRenderer.invoke('queue-pause'),
   onQueueUpdate: (callback) => {
     const listener = (event, state) => callback(state);
