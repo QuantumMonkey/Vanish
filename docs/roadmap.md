@@ -27,31 +27,66 @@ graph TD
 
 | Tier | Stages | Condition |
 |------|--------|-----------|
-| **Core** | 1, 2, 3, 6, 9 | Must complete before any public release |
-| **Standard** | 4, 7, 8, 11, 12, 14 | Ships in v1.x post-launch |
-| **Extended** | 10, 13 | Future milestones, no committed timeline |
+| **Core** | 1, 3, 6, 9 | Must complete before any public release |
+| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14 | Ships in v1.x post-launch |
+| **Extended** | 10 | Future milestone, no committed timeline, waits on 17 (VM pass) |
+| **Dissolved** | 2, 7, 12 | Re-scoped 2026-08-05 into Core stages / Stage 14 rather than shipped standalone; see each stage below |
 
 Do not begin Standard work until all Core stages are complete and tested on clean Windows 10 and Windows 11 VMs. Do not commit Extended stages to any public timeline. See `docs/promptgate.md` Rule 16.
+
+Note: earlier revisions of this table listed Stage 2 under Core, but the
+locked implementation plan (`docs/planning/05-implementation-plan.md`,
+derived from the viability gate on `vanish-uninstaller-22n`) never scoped a
+TASK for it -- Core in practice has always meant Stages 1/3/6/9. Fixed here
+to match reality rather than carry a stale entry.
+
+### 2026-08-05 re-scope pass
+
+Six Standard/Extended stages (2, 4, 7, 8, 12, 13) got re-evaluated against
+real measurements taken on the operator's own machine, the same way Stage
+11's driver-store numbers justified that stage originally -- rather than
+carrying speculative scope indefinitely. Each stage below records what was
+measured and the resulting decision: kept as scoped, reduced and folded into
+an existing screen, or dissolved into Stage 14's tiered cleaning engine.
+Guiding rule applied throughout: prefer a small stat/badge on a screen Core
+already ships over a new dedicated wizard -- real technical depth, without
+new tiresome UX.
 
 ### Stage 1: Core MVP (Current Status)
 * **Status**: Completed.
 * **Deliverables**: Registry & UWP package mapping, System Restore Point triggers, Safe/Moderate/Advanced scanning heuristics, and remnant deletion.
 
-### Stage 2: Audit & Health Advisor UI
+### Stage 2: Audit & Health Advisor UI *(Dissolved 2026-08-05 -- folded into Stage 3's Task Manager tab and the existing app list, no standalone screen)*
 * **Goal**: Provide a detailed overview of the system's software health and resource utilization.
-* **Technical Tasks**:
-  * **Asynchronous Sizing Worker**: Run a background thread to calculate physical folder sizes and cache them to disk.
-  * **Boot Speed Analyzer**: Inspect registry `Run` hives (`HKCU/HKLM\Software\Microsoft\Windows\CurrentVersion\Run`), Task Scheduler (`Get-ScheduledTask`), and active Services to identify applications running on startup and calculate their startup latency impact.
-    Detection only, deliberately - a Startup Item Manager (enable/disable
-    toggles) was proposed 2026-08-03 and reverted the same day: Windows'
-    own Task Manager Startup tab already does this well for the common
-    case (Run-hive apps), and rebuilding an already-solved incumbent
-    feature isn't worth it. This analyzer stays read-only reporting; if
-    Scheduled-Task/Service-based startup items (which Task Manager's tab
-    doesn't cover) ever prove to be a real, named pain point, that is a
-    narrower, justified re-entry - not "rebuild what Task Manager does."
-  * **Consolidation Engine**: Detect redundant software (e.g. multiple web browsers, matching PDF readers) and alert the user.
-  * **Optimized Diagnostics Query**: Query hardware and system diagnostics using specific CIM SELECT filters (e.g., `Get-CimInstance -Query "SELECT Name, Caption FROM Win32_ComputerSystem"`), falling back to fast registry cache lookups to prevent thread delays.
+* **Re-scope rationale, measured on the operator's own machine 2026-08-05**:
+  the "real, named pain point" bar the original Boot Speed Analyzer note set
+  for itself turned out to be met -- 38 non-Microsoft-attributed scheduled
+  tasks and 25 non-Microsoft auto-start services, several visibly stale
+  (RealPlayer alone: 2 services + 2 scheduled tasks; a CCleaner "Skip UAC"
+  task; Zoom and a Comet-branded updater task). That's real signal. The
+  Consolidation Engine side found almost nothing to consolidate (Brave +
+  Edge only; zero duplicate PDF readers or archivers) -- a dedicated screen
+  for that would sit empty most of the time. Net result: the startup-impact
+  half earns a place, the consolidation half doesn't earn its own UI.
+* **Technical Tasks (revised)**:
+  * **Startup impact, folded into Stage 3's Task Manager tab**: list
+    Scheduled-Task and Service-based auto-starts -- the two categories
+    Windows' own Task Manager Startup tab does not cover -- as extra rows
+    in the existing process/startup view. Still detection-only, same as
+    originally scoped; no enable/disable toggles (Rule: don't rebuild what
+    Task Manager already does).
+  * **Consolidation hint, folded into the existing app list**: a single
+    inline badge on an app row ("Also installed: Microsoft Edge") when 2+
+    installed apps share a known category tag. Reuses the category-tag
+    lookup Stage 11/13 already need; no dedicated engine, no dedicated
+    screen -- exactly the "info, not a wizard" shape.
+  * **Asynchronous Sizing Worker**: kept as originally scoped, feeding the
+    existing app list's size column rather than a new UI surface.
+  * **Optimized Diagnostics Query**: kept, backend-only, has no UI of its
+    own regardless of where it lands.
+  * **Cut**: a standalone "Health Advisor" tab/wizard. What was measured
+    earns two or three extra data points on screens Core already ships,
+    not a new destination.
 
 ### Stage 3: Task Manager & "Unlocker" Integration
 * **Goal**: Enable process management, resource tracking, and file/folder handle releasing (the "Unlocker" feature).
@@ -67,9 +102,19 @@ Do not begin Standard work until all Core stages are complete and tested on clea
     * *Benefit*: 100% native, requires no external executables, and handles locks safely.
   * **Watchdog Suspension System**: Integrate process suspension (using native `NtSuspendProcess` bindings) before closing handles, ensuring watchdog processes do not spawn new locking threads during remnant cleanup.
 
-### Stage 4: Search & Destroy Keyword Purge
+### Stage 4: Search & Destroy Keyword Purge *(Scope confirmed as-is 2026-08-05 -- see rationale)*
 * **Goal**: Allow users to enter arbitrary app names or folders to run a deep-scan cleanup, even if the application does not have a registry uninstaller entry.
-* **Technical Tasks**:
+* **Why manual keyword input, not automatic orphan detection**: tested an
+  automatic "orphan folder" heuristic against this machine's real
+  `Program Files` tree (folders with no obvious registry `DisplayName`
+  match) -- 35 of 69 folders flagged, and most were false positives: shared
+  vendor folders (`Common Files`, `NVIDIA Corporation`), SDK/runtime
+  scaffolding (`dotnet`, `MSBuild`, `Reference Assemblies`), OS components
+  (`Windows Defender`). Automatic detection at this fidelity would train
+  users to approve garbage. The originally-scoped design -- a human types
+  the keyword, the engine confirms -- isn't an under-scoped compromise, it's
+  the correct amount of automation. No change.
+* **Technical Tasks** (unchanged):
   * Input a custom application keyword (e.g., "Slack") and a publisher keyword (e.g., "Slack Technologies").
   * Run the `Scan-Leftovers` engine with the keywords, displaying files/registry keys found in common system paths.
   * Safely purge the elements upon approval.
@@ -96,19 +141,43 @@ Do not begin Standard work until all Core stages are complete and tested on clea
   * **Installer Lockout Manager**: Validate and configure the `msiserver` (Windows Installer) service state before executing uninstallation queues, temporarily enabling and starting it if needed, and managing concurrent locks.
   * **Restore Point Frequency Override**: Temporarily set the `SystemRestorePointCreationFrequency` registry value to `0` prior to calling system checkpoint commands, restoring it immediately afterward to ensure restore points are generated successfully on consecutive uninstalls.
 
-### Stage 7: Network & Disk Optimization
-* **Goal**: Provide active network monitoring, firewall control, and temporary junk file cleaning.
-* **Technical Tasks**:
-  * **Network Inspector**: List active sockets per application and resolve destination IP addresses.
-  * **Firewall Controller**: Enable one-click firewall blocking rules via PowerShell (`New-NetFirewallRule`) to cut off internet access for suspicious programs.
-  * **Junk Sweeper**: Scan and delete cache repositories, temp files, crash dumps, and leftover Windows Update downloads.
+### Stage 7: Network & Disk Optimization *(Dissolved 2026-08-05 -- see disposition per item)*
+* **Firewall Controller**: cut outright, not a scope reduction. One-click
+  blocking of "suspicious" programs requires exactly the threat verdict
+  this project already refuses to make (`docs/promptgate.md` Rule 6 --
+  Vanish is not an antivirus, the same reasoning that already cut Stage 5's
+  cloud threat-intel piece). A boundary call, not an evidence one.
+* **Network Inspector**: cut. Per-app socket/IP monitoring duplicates
+  ground Stage 3's process monitor already covers (CPU/mem/disk) and, like
+  the firewall piece, edges toward security-tool territory with no
+  measured demand behind it.
+* **Junk Sweeper**: real but modest evidence, measured 2026-08-05 on the
+  operator's own machine -- User Temp 0.48GB across 1237 files, Windows
+  Temp and the Windows Update download cache both 0GB. Genuinely useful,
+  but it was already itemized under Stage 14's SAFE-AUTO tier
+  ("User/Windows Temp" is literally on that list). No reason for it to be
+  a separate stage; folded into Stage 14, nothing lost.
 
-### Stage 8: Installation Sandbox Rollback (The Complete End-to-End)
+### Stage 8: Installation Sandbox Rollback (The Complete End-to-End) *(Reduced scope 2026-08-05 -- evolves Stage 1's existing restore point, no live-monitoring engine)*
 * **Goal**: Allow users to monitor installer executions in real-time to enable 100% complete rollbacks.
-* **Technical Tasks**:
-  * **Snapshot Scanner**: Capture system folder and registry states immediately before and after running a custom installer, tracking diff logs.
-  * **Installation Logger**: Generate an isolated log file detailing every registry write, file addition, and driver registration performed by the program installer.
-  * **Total Rollback Purge**: Offer a one-click rollback that reverts every change logged, ensuring zero leftover traces.
+* **Re-scope rationale**: not a "how much junk" question like the others --
+  it's the single biggest engineering lift on the roadmap (live Restart
+  Manager-style installer hooking, full diff logging, one-click total
+  rollback) for a safety net Core's after-the-fact scan already covers
+  reasonably. Evolving the incumbent Stage 1 restore-point trigger gets
+  most of the value for a fraction of the build.
+* **Technical Tasks (revised)**:
+  * **Before/after snapshot diff**: reuse Stage 1's existing System Restore
+    Point trigger -- snapshot the `Run`-key registry hives and top-level
+    Program Files/AppData folder listing immediately before and after a
+    monitored install, instead of live Restart Manager hooking.
+  * **Diff report, not a rollback wizard**: surface the result as one line
+    of real numbers ("14 new registry keys, 3 new folders") on the existing
+    install-monitor UI, rather than a dedicated live-tracking screen -- the
+    "info without tiresome UX" shape this whole pass is aiming for.
+  * **Total Rollback Purge**: deferred, not cut. Worth building only if the
+    diff report itself proves people need more than Core's normal
+    scan+quarantine flow already gives them.
 
 ### Stage 9: System Integration & Environment Clean
 * **Goal**: Purge orphaned system services, driver repositories, path variables, and file associations.
@@ -149,21 +218,54 @@ Do not begin Standard work until all Core stages are complete and tested on clea
     (RAPR) is the granular-control reference if a from-scratch
     implementation is wanted instead of shelling out to Disk Cleanup.
   * **SharedDLLs Reference Cleaner**: Inspect paths registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs`. For any path where a `Test-Path` check fails (the DLL is physically gone), remove the registry count value to clean up dead links.
+  * **Idle-driver label** (folded in from Stage 13, 2026-08-05): the same
+    `cleaner=drivers` scan gets a second label alongside "orphaned" (INF
+    missing) -- "idle" (package valid, INF present, but no currently
+    connected device claims it). Needs elevation to enumerate driver
+    packages (`Get-WindowsDriver`); one extra column on an existing scan,
+    not a new feature.
 
-### Stage 12: OS Telemetry & Shortcut Alignment
-* **Goal**: Scrub Jump Lists, AppCompat telemetry caches, Prefetch logs, and orphaned fonts.
-* **Technical Tasks**:
-  * **Jump Lists & Pin Scrub**: Locate pinning shortcuts and recent Jump List shortcut hashes (`.lnk` files) under `AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations`, deleting dead links pointing to missing application executables.
-  * **AppCompat Assistant Cleaner**: Scan registry keys under AppCompat Assistant stores (`AppCompatFlags\Compatibility Assistant\Store`) and delete telemetry values matching uninstalled executable names.
-  * **Prefetch Cache Cleaner**: Scan the `C:\Windows\Prefetch` directory, locate and delete `.pf` execution cache files matching the uninstalled app's executable names to clean OS execution history.
-  * **Orphaned Fonts Cleaner**: Match font registries under `Windows NT\CurrentVersion\Fonts` against files in `C:\Windows\Fonts`, removing registry maps for missing fonts.
+### Stage 12: OS Telemetry & Shortcut Alignment *(Dissolved 2026-08-05 -- folded into Stage 14's tier system)*
+* **Measured on the operator's own machine, 2026-08-05**:
+  * **Prefetch**: 0 files, 0MB. LEAVE-ALONE, confirmed empirically -- the
+    exact outcome Stage 14's own tiering principle anticipates ("re-measure
+    per-machine rather than assuming a fixed list").
+  * **Orphaned fonts**: 349 registered, 0 with a missing target file.
+    LEAVE-ALONE, confirmed empirically.
+  * **Jump Lists**: 61 files present -- real but modest, and telling dead
+    links from live ones needs per-shortcut target resolution, not a size
+    check. Filed as a NEEDS-ORPHAN-DETECTION item inside Stage 14 rather
+    than a dedicated screen.
+  * **AppCompat Assistant cache**: not separately measured -- telemetry
+    values, not disk space, low standalone value. If ever built, it's a
+    Stage 14 line item, not its own stage.
+* No standalone Stage 12 remains; every candidate category is now either
+  LEAVE-ALONE (evidence says don't bother) or a line item inside Stage 14's
+  existing tiered engine.
 
-### Stage 13: Runtime Dependency & Driver Audit
+### Stage 13: Runtime Dependency & Driver Audit *(Reduced scope 2026-08-05 -- info-only slice moves to Standard, removal logic deferred/folded)*
 * **Goal**: Audit dynamic linking dependencies to identify unused runtime packages (e.g. older Visual C++ redistributables) and idle hardware/developer drivers (e.g. Google USB drivers).
-* **Technical Tasks**:
-  * **PE Import Scanner**: Write a quick PE (Portable Executable) binary parser in PowerShell/C# that reads the import directory headers of installed application main executables, matching runtime references (e.g. `msvcr100.dll` imports) to map a database of active Visual C++ version dependencies.
-  * **Orphaned Runtime Detector**: Cross-reference the active dependency map against installed runtime packages. Flag any installed runtimes (e.g. Visual C++ 2005 or 2010) that have no active application references, warning that they can be uninstalled safely to reduce clutter and can be easily fetched again when required.
-  * **Idle Driver Auditor**: Cross-reference active hardware classes (`Get-PnpDevice -Status OK`) against third-party OEM drivers (`Get-WindowsDriver`), flagging installed developer or debug drivers (such as the Google USB debugging driver or Samsung Android driver) that are currently idle (no connected physical devices).
+* **Orphaned Runtime Detector**: real evidence -- 22 separate Visual C++
+  Redistributable packages measured installed on the operator's own
+  machine. Building the full PE-import parser (reading every installed
+  app's import table to know which redistributables are still referenced)
+  is real work with real removal risk if the cross-reference is wrong.
+  First cut ships as pure info, no removal action: a read-only count/list
+  on the existing app list ("22 Visual C++ Redistributable packages
+  installed"). The PE-import cross-reference and any purge capability is a
+  later, separately-justified step once the number itself has been sitting
+  in front of users. Low-risk enough (read-only) to move to the Standard
+  tier rather than sit in Extended indefinitely.
+* **Idle Driver Auditor**: real signal too -- 84 devices measured in an
+  error/unknown state -- but the actual "third-party package present, no
+  connected device" check needs elevation (`Get-WindowsDriver` requires it,
+  confirmed by a failed unelevated attempt) and overlaps directly with
+  Stage 11's driver-store scan, which already walks the same driver list.
+  Folded into Stage 11/`vanish-uninstaller-0ng` as a second label on its
+  existing scan output ("orphaned" = INF missing vs. "idle" = valid but no
+  connected device) instead of a separate Stage 13 feature.
+* **PE Import Scanner**: deferred along with the Orphaned Runtime
+  Detector's removal half -- the count-only version above ships without it.
 
 ### Stage 14: CleanerML Cache Engine
 * **Goal**: Provide an unpretentious, highly effective, transparent junk file cleaning service utilizing crowdsourced XML cleaning rules.
