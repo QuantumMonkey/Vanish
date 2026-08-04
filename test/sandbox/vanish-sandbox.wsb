@@ -1,0 +1,20 @@
+<Configuration>
+  <VGpu>Enable</VGpu>
+  <Networking>Enable</Networking>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>D:\quickhelp projects\vanish-uninstaller</HostFolder>
+      <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\test folder\vanish-uninstaller</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>C:\Program Files\nodejs</HostFolder>
+      <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\nodejs</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -NoExit -ExecutionPolicy Bypass -File "C:\Users\WDAGUtilityAccount\Desktop\test folder\vanish-uninstaller\test\sandbox\sandbox-setup.ps1"</Command>
+  </LogonCommand>
+  <MemoryInMB>4096</MemoryInMB>
+</Configuration>

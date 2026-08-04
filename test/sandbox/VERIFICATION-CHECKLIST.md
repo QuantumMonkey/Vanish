@@ -1,0 +1,107 @@
+# Sandbox verification checklist
+
+Runs inside Windows Sandbox (fresh Windows 11 image every launch, discarded
+on close, no risk to the host). Launch by double-clicking
+`test\sandbox\vanish-sandbox.wsb` on the host. The sandbox auto-runs
+`npm test` and opens this file.
+
+This covers everything in the backlog that only needed "a human at a UAC
+prompt" or "a clean machine" -- it does NOT cover Windows 10 (Sandbox always
+mirrors the host OS version, which is Windows 11). TASK-17 needs a separate
+Win10 pass; see the note at the bottom.
+
+In the sandbox PowerShell window, `npm start` launches the app
+(`node_modules\.bin\electron.cmd .` if `npm start` doesn't resolve).
+
+---
+
+## 1. beads-69a -- elevated relaunch UAC branch on a spaced path
+
+Path already contains a space (`test folder`) -- that's done for you.
+
+- [ ] **Accept branch**: launch unelevated (`npm start`). Click the FLOW-01
+      "Restart as administrator" banner/button. Accept the UAC prompt.
+      -> Expect: an elevated instance starts, the unelevated one exits,
+      exactly one instance running.
+- [ ] **Decline branch**: launch unelevated. Click restart-as-admin. When
+      UAC appears, click **No**.
+      -> Expect: stays in a working Audit Mode. No crash, no exit.
+- [ ] **Cancel branch**: launch unelevated. Click restart-as-admin, then
+      dismiss the UAC prompt with Esc / the X button.
+      -> Expect: same as decline -- Audit Mode, no crash, no exit.
+
+Record result in `bd show vanish-uninstaller-69a` notes, then
+`bd close vanish-uninstaller-69a --reason="..."` if all three pass.
+
+## 2. beads-kt0 -- startup elevation toggle actually elevates
+
+- [ ] Launch unelevated. Open Settings, enable "Start Vanish as
+      administrator". Close the app.
+- [ ] Relaunch (`npm start` again, or the desktop/start-menu path if you
+      set one up). UAC should appear **before any window is shown**.
+      Accept it.
+      -> Expect: elevated instance starts, no unelevated window ever
+      flashes on screen.
+- [ ] Repeat, this time decline/cancel UAC.
+      -> Expect: falls through to a working Audit Mode, same as always.
+- [ ] Turn the toggle back off, confirm a normal launch no longer prompts.
+
+Record result and close `vanish-uninstaller-kt0` if all pass.
+
+## 3. beads-1qp -- Force Uninstall against a real broken app
+
+- [ ] Install a small real app (anything installable without extra
+      licensing -- e.g. 7-Zip, Notepad++, a portable-installer freeware
+      tool). Confirm it shows up in Programs and Features.
+- [ ] Manually delete its uninstaller executable (find the path from its
+      registry uninstall string, delete the .exe, leave the registry
+      entry).
+- [ ] In Vanish (elevated), confirm the app is detected as broken
+      *without you naming it* -- it should surface via the missing-
+      uninstaller signal, not a hardcoded list.
+- [ ] Force-uninstall it. Confirm it disappears from Programs and
+      Features.
+- [ ] Restore it from the vault. Confirm it reappears in Programs and
+      Features.
+
+Record result and close `vanish-uninstaller-1qp` if all pass.
+
+## 4. TASK-17 (Win11 half only) -- vanish-uninstaller-0xt
+
+Full spec: `docs/planning/05-implementation-plan.md` TASK-17. This
+sandbox pass can close the Win11 half; Win10 still needs a separate VM
+(see note below). Black-box only -- exercise the app, don't read source.
+
+- [ ] **M3**: fresh unelevated launch lands in a functional Audit Mode
+      with the elevation banner visible. No crash.
+- [ ] Walk each phase's acceptance check from
+      `docs/planning/05-implementation-plan.md` (TASK-01 through TASK-16)
+      as a real user: plant/observe real state, exercise the flow, confirm
+      vault + restore + oplog behave as documented. A failed check is a
+      bug ticket (`bd create`), not a note.
+- [ ] **M4**: queue 5 real apps for bulk uninstall, run unattended. Confirm
+      it completes except where an uninstaller itself isn't silent.
+- [ ] **NFR-03 benchmark**: with Task Manager/Process Monitor tab open,
+      confirm refresh interval and CPU usage, then record a measured
+      row into `docs/BENCHMARKS.md` with the Rule 9 fields (CPU model,
+      RAM, storage type, installed-app count, Windows version/build,
+      cold or warm run). Sandbox specs: shares the host's CPU/RAM: **fill
+      in your actual host hardware**, storage = host's, Windows build =
+      `winver` inside the sandbox.
+- [ ] Fill a results row into `docs/planning/reviews/vm-test-log.md`
+      (create it from the TASK-17 Verify block if it doesn't exist) marked
+      `Windows 11 (Sandbox)`.
+
+**Do NOT close vanish-uninstaller-0xt from this pass alone** -- it explicitly
+requires both Win10 and Win11. Once this Win11 pass is green, tell me and
+I'll split it (17a..17d per the task's own instructions) or file a
+Win10-specific follow-up so the Win11 work isn't lost waiting on Win10.
+
+---
+
+## Win10 gap
+
+Windows Sandbox always mirrors the host OS (Windows 11 here) -- there is no
+Windows 10 Sandbox. Closing TASK-17 fully still needs an actual Windows 10
+VM (Hyper-V + a Win10 ISO, or any other hypervisor). That's a bigger, separate
+ask -- flagging it rather than assuming you want it set up too.
