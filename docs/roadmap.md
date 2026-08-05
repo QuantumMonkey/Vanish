@@ -80,7 +80,12 @@ new tiresome UX.
     inline badge on an app row ("Also installed: Microsoft Edge") when 2+
     installed apps share a known category tag. Reuses the category-tag
     lookup Stage 11/13 already need; no dedicated engine, no dedicated
-    screen -- exactly the "info, not a wizard" shape.
+    screen -- exactly the "info, not a wizard" shape. Category list should
+    include remote-access tools, not just browsers/PDF/archivers -- the
+    operator's own machine had both TeamViewer and UltraViewer auto-
+    starting simultaneously, a stronger consolidation signal (two always-on
+    remote-access surfaces) than the browser duplicate that originally
+    justified this bullet.
   * **Asynchronous Sizing Worker**: kept as originally scoped, feeding the
     existing app list's size column rather than a new UI surface.
   * **Optimized Diagnostics Query**: kept, backend-only, has no UI of its
