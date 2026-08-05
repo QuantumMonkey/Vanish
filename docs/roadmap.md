@@ -22,6 +22,7 @@ graph TD
     P12 --> P13[Stage 13: Runtime Dependency & Driver Audit]
     P13 --> P14[Stage 14: CleanerML Cache Engine]
     P14 --> P15[Stage 15: Bandwidth Diagnostics & Game/Stream Mode]
+    P15 --> P16[Stage 16: Orphaned Firewall Rule Sweep]
 ```
 
 ## Stage Priority Tiers
@@ -29,7 +30,7 @@ graph TD
 | Tier | Stages | Condition |
 |------|--------|-----------|
 | **Core** | 1, 3, 6, 9 | Must complete before any public release |
-| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14, 15 | Ships in v1.x post-launch |
+| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14, 15, 16 | Ships in v1.x post-launch |
 | **Extended** | 10 | Future milestone, no committed timeline, waits on 17 (VM pass) |
 | **Dissolved** | 2, 7, 12 | Re-scoped 2026-08-05 into Core stages / Stage 14 rather than shipped standalone; see each stage below |
 
@@ -367,6 +368,36 @@ new tiresome UX.
     original Stage 7 -- Rule 6 boundary, unchanged by this stage's
     approval. This stage's connection list exists for bandwidth attribution
     only, not to imply a verdict about what's "suspicious."
+
+### Stage 16: Orphaned Firewall Rule Sweep *(Added 2026-08-05, Standard tier)*
+* **Goal**: Remove Windows Firewall rules whose referenced program no
+  longer exists on disk. Not the Firewall *Controller* cut from Stage 7 --
+  that was about judging live processes as "suspicious" (Rule 6 boundary).
+  This is pure path-existence, the same orphan pattern already used for
+  SharedDLLs (Stage 11) and fonts (Stage 12): a fact, not a verdict.
+* **Measured on the operator's own machine, 2026-08-05**: 659 total
+  firewall rules, 48 reference a program path that no longer exists after
+  expanding environment variables (the first measurement pass got this
+  wrong -- `Test-Path` doesn't expand `%SystemRoot%`-style variables, and
+  reported 295 false positives against live Windows system binaries before
+  being corrected; see Rule 24). The real 48 split into dead OS-feature
+  rules (Windows Media Center's `ehome\*`, removed from Windows years ago;
+  P2P Collaboration Foundation, deprecated), a temp installer's leftover
+  rule, and rules pointing at a since-moved/uninstalled third-party app
+  (BlueStacks). Modest but real, and cheap to build on top of Stage 9's
+  existing registry-view utilities.
+* **Technical Tasks**:
+  * `Get-NetFirewallRule` + `Get-NetFirewallApplicationFilter`, expand
+    environment variables in the `Program` path with
+    `[Environment]::ExpandEnvironmentVariables`, `Test-Path` the result.
+  * Quarantine-first per Rule 2: export the matched rule(s) before removal
+    (`Get-NetFirewallRule | Export-...` or an equivalent serialized
+    snapshot), not a bare `Remove-NetFirewallRule`.
+  * Per Rule 24: label each finding by why it's dead (removed OS feature
+    vs. uninstalled third-party app vs. leftover installer temp path) --
+    not a bare "orphaned" list.
+  * Needs elevation (`Get-NetFirewallRule`/`Remove-NetFirewallRule` require
+    Full Mode for the write path; read/list can run in Audit Mode).
 
 ---
 
