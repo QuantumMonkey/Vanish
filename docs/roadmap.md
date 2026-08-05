@@ -21,6 +21,7 @@ graph TD
     P11 --> P12[Stage 12: OS Telemetry & Shortcut Alignment]
     P12 --> P13[Stage 13: Runtime Dependency & Driver Audit]
     P13 --> P14[Stage 14: CleanerML Cache Engine]
+    P14 --> P15[Stage 15: Bandwidth Diagnostics & Game/Stream Mode]
 ```
 
 ## Stage Priority Tiers
@@ -28,7 +29,7 @@ graph TD
 | Tier | Stages | Condition |
 |------|--------|-----------|
 | **Core** | 1, 3, 6, 9 | Must complete before any public release |
-| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14 | Ships in v1.x post-launch |
+| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14, 15 | Ships in v1.x post-launch |
 | **Extended** | 10 | Future milestone, no committed timeline, waits on 17 (VM pass) |
 | **Dissolved** | 2, 7, 12 | Re-scoped 2026-08-05 into Core stages / Stage 14 rather than shipped standalone; see each stage below |
 
@@ -218,12 +219,23 @@ new tiresome UX.
     (RAPR) is the granular-control reference if a from-scratch
     implementation is wanted instead of shelling out to Disk Cleanup.
   * **SharedDLLs Reference Cleaner**: Inspect paths registered under `HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs`. For any path where a `Test-Path` check fails (the DLL is physically gone), remove the registry count value to clean up dead links.
-  * **Idle-driver label** (folded in from Stage 13, 2026-08-05): the same
-    `cleaner=drivers` scan gets a second label alongside "orphaned" (INF
-    missing) -- "idle" (package valid, INF present, but no currently
-    connected device claims it). Needs elevation to enumerate driver
-    packages (`Get-WindowsDriver`); one extra column on an existing scan,
-    not a new feature.
+  * **Ghost/Phantom PnP Device Sweep** (revised 2026-08-05, supersedes the
+    Stage 13 "idle driver" framing): `Get-PnpDevice` on the operator's own
+    machine returned 80 devices at `Status -eq 'Unknown'` -- 23
+    `VolumeSnapshot` (ghost VSS records from System Restore points, benign),
+    14 `HIDClass` + 9 `USB` + 8 `WPD` + 4 `Keyboard` + 2 `Mouse` + smaller
+    classes (old peripherals no longer connected, benign), a handful
+    genuinely worth a second look. Real, common Windows cruft (same
+    category `USBDeview` and Device Manager's "show hidden devices"
+    address) and driver-store-adjacent -- an unplugged device's superseded
+    driver packages are exactly what can be sitting in Stage 11's other
+    5.1GB finding above. Scan lists every `Unknown`-status device,
+    classified by class per **Rule 24** (never show a bare "Unknown" -- a
+    ghost restore-point record and an actually-failed device must not read
+    as the same alarming thing), user reviews and confirms per item,
+    `pnputil /remove-device` on approval. Needs elevation to enumerate
+    driver packages (`Get-WindowsDriver`) for the cross-reference against
+    Stage 11's driver-store scan.
 
 ### Stage 12: OS Telemetry & Shortcut Alignment *(Dissolved 2026-08-05 -- folded into Stage 14's tier system)*
 * **Measured on the operator's own machine, 2026-08-05**:
@@ -301,6 +313,55 @@ new tiresome UX.
     Every new CleanerML rule or hardcoded category added to this engine
     must be assigned one of these 4 tiers explicitly before it ships -
     "it's just a cache, should be fine" is not a tier.
+
+### Stage 15: Bandwidth Diagnostics & Game/Stream Mode *(Added 2026-08-05, Standard tier -- scoped from the Stage 7 disposition)*
+* **Goal**: Show what's using the network right now, and let the operator
+  de-prioritize known background bandwidth consumers while gaming or
+  streaming -- without becoming a firewall, a threat monitor, or a traffic
+  shaper.
+* **Scope boundary, stated up front**: this stage does NOT do real-time
+  per-app packet-level QoS. That requires a kernel-mode WFP callout driver
+  -- a categorically different risk class (driver signing, BSOD blast
+  radius, a new privileged attack surface) than anything else in this
+  codebase, and out of scope permanently, not just for now. It also cannot
+  fix contention caused by a *different device* on the LAN -- that
+  congestion happens at the router, out of reach of anything running on
+  this machine. If that's the actual problem, the correct tool is
+  router-level QoS (most gaming routers, or Cake/SQM on OpenWrt), not
+  Vanish. The panel should say this plainly rather than imply it can do
+  more than it can.
+* **Technical Tasks**:
+  * **Bandwidth panel (read-only)**: `Get-NetTCPConnection` +
+    `Get-NetUDPEndpoint` grouped by `OwningProcess`, cross-referenced to
+    `Get-Process` for name/icon, remote address resolved best-effort.
+    System-wide throughput from `Get-NetAdapterStatistics` deltas. Per Rule
+    9: this ships as "active connections + system-wide throughput," not as
+    per-app byte-rate -- true per-process bandwidth attribution needs an
+    ETW consumer (the same mechanism Task Manager's Network column uses
+    internally) and is a separately-justified v2, not promised here.
+  * **Game/Stream Mode toggle (manual target selection)**: operator picks
+    the running process(es) to prioritize from a list -- no automatic
+    "detect the game" heuristic for v1, consistent with this project's
+    general preference for an explicit, reviewable user action over
+    automatic guessing (same principle as Stage 4's manual keyword input).
+    On enable:
+    - Throttle Delivery Optimization (Windows Update P2P) via its
+      documented bandwidth-cap policy knobs.
+    - Throttle/pause BITS transfers for the duration.
+    - Raise the selected process(es) to a higher `PriorityClass`.
+    - Tag the selected process(es)' traffic via `New-NetQosPolicy`
+      (DSCP marking) -- documented as "helps only if your router or ISP
+      path honors DSCP," not a guarantee, per Rule 9's no-overpromising
+      standard.
+    On disable: revert every setting touched, tracked the same
+    schema-rule-5 settings pattern as `startupMode` -- Rule 3's "never
+    leave the system in a worse state than before" applies here exactly as
+    it does to elevation.
+  * **Explicitly cut**: Firewall Controller and general Network Inspector
+    (per-app IP resolution as a security/threat surface) stay cut from the
+    original Stage 7 -- Rule 6 boundary, unchanged by this stage's
+    approval. This stage's connection list exists for bandwidth attribution
+    only, not to imply a verdict about what's "suspicious."
 
 ---
 

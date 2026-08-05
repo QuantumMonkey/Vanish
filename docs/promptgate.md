@@ -263,6 +263,15 @@ These are proper nouns and acronyms respectively. "Javascript" and "xml" in any 
 
 ---
 
+## STATUS COMMUNICATION
+
+### Rule 24 — Ambiguous status must be classified before display
+Never surface a raw Windows status enum (PnP `Unknown`, driver state codes, service state codes, scan result codes) directly to the user. Classify it into a plain-language category with a benign/needs-review signal before it reaches any UI or report. A bare ambiguous status reads as alarming regardless of actual severity, and classification is a research step the app is already positioned to do -- deferring it to the user, or to an external tool, is a completed feature shipped as an unfinished one.
+
+This rule exists because a raw "Unknown" status covers wildly different real conditions (a benign ghost VSS snapshot record and a genuinely failed device look identical unclassified) -- the fix is one extra classification pass, not new capability, so there's no excuse for skipping it.
+
+---
+
 ## HOW TO USE THIS FILE
 
 When starting any planning, speccing, prompting, or implementation session for Vanish:
