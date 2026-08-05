@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('api', {
   killProcess: (params) => ipcRenderer.invoke('kill-process', params),
   listLockers: (params) => ipcRenderer.invoke('list-lockers', params),
   unlockPath: (params) => ipcRenderer.invoke('unlock-path', params),
+  browseForPath: () => ipcRenderer.invoke('browse-for-path'),
 
   // Stage 6 - Bulk uninstall queue (REQ-10, REQ-12, REQ-13)
   queueGet: () => ipcRenderer.invoke('queue-get'),

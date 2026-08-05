@@ -115,6 +115,7 @@ contextBridge.exposeInMainWorld('api', {
   killProcess: stub('killProcess', { success: true }),
   listLockers: stub('listLockers', { success: true, holders: [] }),
   unlockPath: stub('unlockPath', { success: true, closedTargets: 0, totalTargets: 0, notes: [] }),
+  browseForPath: stub('browseForPath', { canceled: true }),
   queueGet: stub('queueGet', { items: [], running: false, paused: false, counts: {} }),
   queueAdd: stub('queueAdd', { success: true }),
   queueRemove: stub('queueRemove', { success: true }),

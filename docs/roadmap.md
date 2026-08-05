@@ -23,6 +23,7 @@ graph TD
     P13 --> P14[Stage 14: CleanerML Cache Engine]
     P14 --> P15[Stage 15: Bandwidth Diagnostics & Game/Stream Mode]
     P15 --> P16[Stage 16: Orphaned Firewall Rule Sweep]
+    P16 --> P17[Stage 17: Windows Update Rollback]
 ```
 
 ## Stage Priority Tiers
@@ -30,7 +31,7 @@ graph TD
 | Tier | Stages | Condition |
 |------|--------|-----------|
 | **Core** | 1, 3, 6, 9 | Must complete before any public release |
-| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14, 15, 16 | Ships in v1.x post-launch |
+| **Standard** | 4, 8 (reduced), 11, 13 (info-only slice), 14, 15, 16, 17 | Ships in v1.x post-launch |
 | **Extended** | 10 | Future milestone, no committed timeline, waits on 17 (VM pass) |
 | **Dissolved** | 2, 7, 12 | Re-scoped 2026-08-05 into Core stages / Stage 14 rather than shipped standalone; see each stage below |
 
@@ -398,6 +399,49 @@ new tiresome UX.
     not a bare "orphaned" list.
   * Needs elevation (`Get-NetFirewallRule`/`Remove-NetFirewallRule` require
     Full Mode for the write path; read/list can run in Audit Mode).
+
+### Stage 17: Windows Update Rollback *(Added 2026-08-05, Standard tier)*
+* **Goal**: Let the operator uninstall a specific installed Windows Update
+  (KB) through the same native, Microsoft-supported mechanisms Windows'
+  own "Uninstall updates" control panel uses -- not a third-party or
+  unsupported technique.
+* **Grounded 2026-08-05**: `Get-HotFix` on the operator's own machine
+  lists `KB5101650` (a security cumulative update) installed 2026-07-22,
+  roughly 2 weeks before this was scoped -- comfortably inside Windows'
+  typical 10-30 day rollback window before superseded component-store
+  files get permanently cleaned up. Not theoretical: this is a live,
+  currently-actionable case on the reference machine right now.
+* **Native mechanisms, no gray-area tooling**:
+  * `Get-HotFix` (or `Get-WmiObject Win32_QuickFixEngineering`) to list
+    installed updates -- the read-only side, safe in Audit Mode.
+  * `wusa.exe /uninstall /kb:NNNNNNN /quiet /norestart` for MSU-packaged
+    updates (most optional and older updates).
+  * `DISM /Online /Remove-Package /PackageName:<full package name>` for
+    CBS-packaged cumulative updates (most current monthly updates) --
+    `DISM /Online /Get-Packages` first to resolve the KB number to its
+    full package name.
+  * Both are the exact mechanisms Windows' own Settings > Windows Update
+    > Update History > Uninstall updates calls into -- nothing here
+    bypasses or reimplements anything Microsoft doesn't already ship.
+* **Hard limit, stated plainly in the UI, not hidden in a tooltip**: once
+  the rollback window closes (system-cleanup dependent, not fixed), the
+  superseded files are gone and no tool -- native or otherwise -- can
+  bring them back. The feature must detect and say "no longer
+  rollback-eligible" per update, not attempt and fail confusingly.
+* **Safety framing (binding, same weight as Rule 17's WMI/DCOM gate)**:
+  removing a security update measurably reduces security. This ships as
+  MANDATORY-REVIEW-GATE, always -- no SAFE-AUTO tier is possible here by
+  definition. Every entry shows the KB number, install date, and
+  Microsoft's own description; security updates get an explicit "this
+  is a security fix" flag the operator must acknowledge past, matching
+  the typed-confirm pattern already used for Delete Forever and the
+  fatal/risky process-kill tiers. A reboot is required for the removal
+  to take effect -- say so before the operator commits, not after.
+* **Not this stage's job**: any "recommend rolling back" logic, any
+  attempt to identify *which* update caused a problem. This surfaces the
+  native capability safely; diagnosing what to blame stays the
+  operator's call, matching Rule 6/7 (no threat verdicts, no automated
+  diagnosis presented as fact).
 
 ---
 

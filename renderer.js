@@ -331,7 +331,15 @@ function guardFullMode() {
 // Load both Desktop and UWP Apps
 async function loadApplications() {
   showLoadingState();
-  
+  // UWP enumeration in particular can genuinely take 10+ seconds on a real
+  // machine (Get-UwpApps walks every package's full folder size before
+  // returning) - a bare "0" on the dashboard for that whole window is
+  // indistinguishable from "not implemented." Loading state distinguishes
+  // "still counting" from "counted zero."
+  elements.statTotalApps.textContent = '...';
+  elements.statUwpApps.textContent = '...';
+  elements.statTotalSize.textContent = '...';
+
   try {
     const [desktopApps, uwpApps] = await Promise.all([
       window.api.getDesktopApps(),
@@ -2077,6 +2085,11 @@ function setupUnlocker() {
   });
 
   document.getElementById('unlock-close-x').addEventListener('click', () => overlay.classList.remove('active'));
+  document.getElementById('btn-browse-unlock-target').addEventListener('click', async () => {
+    const res = await window.api.browseForPath();
+    if (!res || res.canceled) return;
+    document.getElementById('unlock-path-input').value = res.path;
+  });
   document.getElementById('btn-find-lockers').addEventListener('click', findLockers);
   document.getElementById('unlock-path-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') findLockers();

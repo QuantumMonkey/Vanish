@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
 // SEC-1: spawn only. Nothing in this process may hand a string to a shell.
 const { spawn } = require('node:child_process');
@@ -591,6 +591,19 @@ fullModeOnly('kill-process', async (event, params) => {
   } catch (error) {
     return { success: false, error: error.message };
   }
+});
+
+// Native picker for the Unlocker input - typing a full path by hand was the
+// only option before this (operator feedback 2026-08-05). Windows lets
+// openFile and openDirectory combine into one dialog; other platforms would
+// need to split this, but this app only ships on Windows.
+ipcMain.handle('browse-for-path', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select a file or folder to check for locks',
+    properties: ['openFile', 'openDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) return { canceled: true };
+  return { canceled: false, path: result.filePaths[0] };
 });
 
 // Read-only enumeration; closing holders is the Full Mode step below.
