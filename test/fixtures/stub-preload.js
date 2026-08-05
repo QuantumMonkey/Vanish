@@ -99,7 +99,11 @@ contextBridge.exposeInMainWorld('api', {
   }),
   getStartupItems: async () => ({ items: [], total: 0, orphans: 0 }),
   getSoftwareRedundancy: async () => ({ groups: [], hasRedundancy: false }),
-  listProcesses: async () => ({
+  // These four were plain hardcoded functions until a DOM-driving test
+  // needed to script a specific process list and found queueResponse had no
+  // effect on them - stub() wires them into the same override queue as
+  // everything else below.
+  listProcesses: stub('listProcesses', {
     success: true, sampledMs: 400, logicalCores: 16,
     indicatorNote: 'Indicator -- investigate with your antivirus',
     items: [{
@@ -108,9 +112,9 @@ contextBridge.exposeInMainWorld('api', {
       startedAt: '2026-01-01 00:00:00', indicators: []
     }]
   }),
-  killProcess: async () => ({ success: true }),
-  listLockers: async () => ({ success: true, holders: [] }),
-  unlockPath: async () => ({ success: true, closedTargets: 0, totalTargets: 0, notes: [] }),
+  killProcess: stub('killProcess', { success: true }),
+  listLockers: stub('listLockers', { success: true, holders: [] }),
+  unlockPath: stub('unlockPath', { success: true, closedTargets: 0, totalTargets: 0, notes: [] }),
   queueGet: stub('queueGet', { items: [], running: false, paused: false, counts: {} }),
   queueAdd: stub('queueAdd', { success: true }),
   queueRemove: stub('queueRemove', { success: true }),

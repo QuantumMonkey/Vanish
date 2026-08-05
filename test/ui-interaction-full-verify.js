@@ -79,6 +79,22 @@ async function wait(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+// sampleProcesses() no-ops if a refresh is already in flight (its own
+// re-entrancy guard), so a fixed wait() after queuing a response can
+// legitimately race the task-manager tab's automatic first sample. Poll for
+// the expected row instead of assuming a timing window.
+async function waitForSelector(win, selector, timeoutMs = 3000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const found = await win.webContents.executeJavaScript(
+      `!!document.querySelector(${JSON.stringify(selector)})`
+    );
+    if (found) return true;
+    await wait(100);
+  }
+  return false;
+}
+
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
     width: 1280, height: 860, show: false, frame: false, backgroundColor: '#0b0f19',
@@ -221,11 +237,23 @@ app.whenReady().then(async () => {
 
   await assertClickable(win, '#btn-wiz-purge', 'the purge/quarantine button is clickable with items selected');
 
+  // Purge now confirms first - the immediate-effect warning added after the
+  // operator found the main wizard purge path was the one entry point of
+  // three that skipped confirmation entirely.
+  await click(win, '#btn-wiz-purge');
+  await wait(400);
+  const purgeConfirmShown = await win.webContents.executeJavaScript(`(() => {
+    const overlay = document.getElementById('confirm-modal-overlay');
+    return { active: overlay.classList.contains('active'), title: document.getElementById('confirm-title').textContent };
+  })()`);
+  assert(purgeConfirmShown.active === true, 'quarantining from the wizard is confirmed before anything moves');
+  assert(purgeConfirmShown.title.includes('Quarantine'), 'the confirm dialog names the action being confirmed');
+
   // Purge: quarantine everything selected, land on the completion screen.
   await queueResponse(win, 'purgeRemnants', {
     success: true, entryId: 'wizard-entry-1', quarantinedCount: 3, files: [], registry: []
   });
-  await click(win, '#btn-wiz-purge');
+  await click(win, '#btn-confirm-ok');
   await wait(800);
 
   const onCompleteScreen = await win.webContents.executeJavaScript(
@@ -426,6 +454,97 @@ app.whenReady().then(async () => {
   await queueResponse(win, 'queueStart', { success: true });
   await click(win, '#btn-confirm-ok');
   await wait(500);
+
+  // ==========================================================================
+  // Task Manager: critical-process kill protection
+  //
+  // Found by the operator running the real app: nothing stopped Task Manager
+  // from ending csrss.exe or the wrong svchost.exe instance, an outright BSOD
+  // risk with zero legitimate use. Three tiers now: an always-fatal denylist
+  // refuses outright (no dialog to click through), a risky-but-sometimes-
+  // legitimate set requires a typed double-confirm, everything else keeps
+  // the original single-click confirm.
+  // ==========================================================================
+  console.log('');
+  console.log('Task Manager: critical-process kill protection');
+
+  await click(win, '.nav-item[data-tab="task-manager"]');
+  // Let the tab's own automatic first sample (triggered by startProcessRefresh)
+  // fully settle before queuing a scripted response - sampleProcesses() no-ops
+  // while one is already in flight, so queuing too early can be silently lost.
+  await wait(900);
+  // The 2s auto-refresh interval that same call started is still live and
+  // will silently overwrite a scripted fixture with the stub default the
+  // moment it next fires - stop it for the rest of this section.
+  await win.webContents.executeJavaScript('stopProcessRefresh()');
+
+  await queueResponse(win, 'listProcesses', {
+    success: true, sampledMs: 400, logicalCores: 16, indicatorNote: '',
+    items: [
+      { pid: 111, name: 'csrss', cpuPercent: 0, memoryBytes: 0, ioBytesPerSec: 0, parentPid: 1, parentName: '', commandLine: '', imagePath: '', startedAt: '', indicators: [] },
+      { pid: 222, name: 'svchost', cpuPercent: 0, memoryBytes: 0, ioBytesPerSec: 0, parentPid: 1, parentName: '', commandLine: '', imagePath: '', startedAt: '', indicators: [] },
+      { pid: 333, name: 'notepad', cpuPercent: 0, memoryBytes: 0, ioBytesPerSec: 0, parentPid: 1, parentName: '', commandLine: '', imagePath: '', startedAt: '', indicators: [] }
+    ]
+  });
+  await win.webContents.executeJavaScript('sampleProcesses()');
+  const gotFixtureRows = await waitForSelector(win, 'tr[data-pid="111"]');
+  assert(gotFixtureRows === true, 'the scripted 3-process fixture actually rendered');
+  if (!gotFixtureRows) {
+    console.log('  aborting this section - rows never appeared, nothing safe to click');
+  } else {
+
+  // Fatal tier (csrss): refused outright, no confirm dialog appears at all.
+  await win.webContents.executeJavaScript(`document.querySelector('tr[data-pid="111"]').click()`);
+  await wait(150);
+  await click(win, '#btn-kill-process');
+  await wait(300);
+  const fatalState = await win.webContents.executeJavaScript(`(() => {
+    const overlay = document.getElementById('confirm-modal-overlay');
+    return { dialogOpen: overlay.classList.contains('active') };
+  })()`);
+  assert(fatalState.dialogOpen === false, 'ending csrss (fatal tier) opens no confirm dialog - refused before one is shown');
+
+  // Risky tier (svchost): typed double-confirm, OK stays disabled until the exact name is typed.
+  await win.webContents.executeJavaScript(`document.querySelector('tr[data-pid="222"]').click()`);
+  await wait(150);
+  await click(win, '#btn-kill-process');
+  await wait(300);
+  const riskyBeforeType = await win.webContents.executeJavaScript(`(() => ({
+    dialogOpen: document.getElementById('confirm-modal-overlay').classList.contains('active'),
+    typedRowVisible: document.getElementById('confirm-typed-row').style.display !== 'none',
+    okDisabled: document.getElementById('btn-confirm-ok').disabled
+  }))()`);
+  assert(riskyBeforeType.dialogOpen === true, 'ending svchost (risky tier) opens a confirm dialog');
+  assert(riskyBeforeType.typedRowVisible === true, 'svchost requires typing the name, not just a click');
+  assert(riskyBeforeType.okDisabled === true, 'OK stays disabled before the name is typed correctly');
+
+  await win.webContents.executeJavaScript(`(() => {
+    const input = document.getElementById('confirm-typed-input');
+    input.value = 'svchost';
+    input.dispatchEvent(new Event('input'));
+  })()`);
+  await wait(150);
+  const riskyAfterType = await win.webContents.executeJavaScript(
+    `document.getElementById('btn-confirm-ok').disabled`
+  );
+  assert(riskyAfterType === false, 'typing the exact process name unlocks OK');
+  await click(win, '#btn-confirm-cancel');
+  await wait(200);
+
+  // Normal tier (notepad): single-click confirm, no typed field, same as before this fix.
+  await win.webContents.executeJavaScript(`document.querySelector('tr[data-pid="333"]').click()`);
+  await wait(150);
+  await click(win, '#btn-kill-process');
+  await wait(300);
+  const normalState = await win.webContents.executeJavaScript(`(() => ({
+    dialogOpen: document.getElementById('confirm-modal-overlay').classList.contains('active'),
+    typedRowVisible: document.getElementById('confirm-typed-row').style.display !== 'none'
+  }))()`);
+  assert(normalState.dialogOpen === true, 'ending an ordinary process still confirms once');
+  assert(normalState.typedRowVisible === false, 'an ordinary process does not require typing a name');
+  await click(win, '#btn-confirm-cancel');
+  await wait(200);
+  } // end gotFixtureRows guard
 
   // ==========================================================================
   // System Clean: scan -> select -> purge

@@ -2025,12 +2025,31 @@ function Get-ProcessList {
     }
 }
 
+$Script:ProcessKillDenylistFatal = @(
+    'system', 'system idle process', 'registry', 'csrss', 'wininit', 'winlogon',
+    'services', 'lsass', 'smss'
+)
+
 function Stop-VanishProcess {
     param([object]$p)
     if (-not (Test-IsElevated)) {
         return @{ success = $false; error = "Full Mode required. Vanish is running in Audit Mode (read-only)." }
     }
     if (-not $p -or -not $p.pid) { return @{ success = $false; error = "A process id is required." } }
+
+    # Defense in depth: the renderer already refuses to offer this, but the
+    # IPC boundary is the real security boundary here (same reasoning as
+    # every elevation check in this file), not the UI that calls it.
+    try {
+        $target = Get-Process -Id ([int]$p.pid) -ErrorAction Stop
+        if ($Script:ProcessKillDenylistFatal -contains $target.ProcessName.ToLowerInvariant()) {
+            return @{ success = $false; error = "Refusing to end $($target.ProcessName): a core Windows process, ending it crashes or force-restarts the session." }
+        }
+    } catch {
+        # Process already gone by the time we checked - fall through to Stop-Process,
+        # which will fail with its own clear error.
+    }
+
     try {
         Stop-Process -Id ([int]$p.pid) -Force -ErrorAction Stop
         return @{ success = $true }

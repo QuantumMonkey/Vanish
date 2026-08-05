@@ -16,6 +16,23 @@ let appSettings = { autoPurgeEnabled: false, autoPurgeRetentionDays: 30, process
 
 const TIER_TOOLTIP = 'Requires Full Mode - restart as administrator';
 
+// Killing these has no legitimate outcome from Task Manager - Windows treats
+// their exit as fatal and either BSODs or force-restarts the session. Refuse
+// outright rather than warn: there is nothing on the other side of "yes" for
+// these that a user could actually want. Matched against Get-Process's bare
+// ProcessName (no .exe), case-insensitive.
+const PROCESS_KILL_DENYLIST_FATAL = new Set([
+  'system', 'system idle process', 'registry', 'csrss', 'wininit', 'winlogon',
+  'services', 'lsass', 'smss'
+]);
+
+// Killing these is usually a bad idea and occasionally what someone actually
+// means to do (svchost hosts many services and the wrong PID can take out
+// networking/audio/etc; explorer.exe restart is a known troubleshooting
+// step; dwm.exe crashes the desktop session). Typed double-confirm instead
+// of a hard block.
+const PROCESS_KILL_DENYLIST_RISKY = new Set(['svchost', 'explorer', 'dwm']);
+
 // Everything the app renders can contain a path, a registry key or a command
 // line that came from disk. None of it is trusted markup.
 function esc(value) {
@@ -211,6 +228,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   await loadSettings();
   await checkElevation();
+  // Seed the Settings panel's controls now, not just on first visit: without
+  // this, set-startup-elevated (and every other settings control) shows the
+  // HTML default until the user navigates to Settings once, which visibly
+  // contradicts a currently-elevated session on a machine where startupMode
+  // was already 'full' from a prior run.
+  syncSettingsPanel();
   await loadApplications();
   await maybeOfferElevation();
 });
@@ -1027,6 +1050,22 @@ function setupWizardControls() {
         registryToPurge.push({ path });
       }
     });
+
+    // The other two purge entry points (single-item quarantine, Force
+    // Uninstall) already confirm before acting; this, the most-used path,
+    // did not. Quarantine is reversible, but not instantaneous-feeling: the
+    // files/keys move out immediately, so whatever depended on them stops
+    // working right now, not after some later "actually delete" step.
+    const itemCount = filesToPurge.length + registryToPurge.length;
+    const purgeOk = await confirmDialog({
+      title: `Quarantine ${itemCount} item(s)?`,
+      body:
+        `These files and registry entries move to the vault immediately, not just when you clear it out. ` +
+        'If any of them are still needed by something, that something stops working the moment you confirm ' +
+        'this - restore it from Quarantine Manager any time to bring it back exactly as it was.',
+      confirmLabel: 'Quarantine'
+    });
+    if (!purgeOk) return;
 
     wizState.spaceReclaimedBytes = estimatedSpaceSaved;
     showScreen(5);
@@ -1984,12 +2023,29 @@ async function killSelectedProcess() {
   const proc = processes.find((p) => p.pid === selectedPid);
   if (!proc) return;
 
+  const nameLower = (proc.name || '').toLowerCase();
+
+  if (PROCESS_KILL_DENYLIST_FATAL.has(nameLower)) {
+    toast(
+      `${proc.name} is a core Windows process. Ending it will crash or force-restart your session - ` +
+      'Vanish will not do this from Task Manager.',
+      'error', 8000
+    );
+    return;
+  }
+
+  const isRisky = PROCESS_KILL_DENYLIST_RISKY.has(nameLower);
   const ok = await confirmDialog({
     title: `End ${proc.name}?`,
-    body:
-      `PID ${proc.pid} will be terminated immediately. Unsaved work in that process is lost, and ` +
-      'ending a system process can destabilise Windows until you reboot.',
-    confirmLabel: 'End process'
+    body: isRisky
+      ? `PID ${proc.pid} (${proc.name}) is a process Windows itself depends on for other things running ` +
+        'right now - ending the wrong one can take out networking, audio, or your desktop shell until you ' +
+        'sign out or reboot. Only proceed if you specifically mean to end this PID, not just "a" ' +
+        `${proc.name} instance.`
+      : `PID ${proc.pid} will be terminated immediately. Unsaved work in that process is lost, and ` +
+        'ending a system process can destabilise Windows until you reboot.',
+    confirmLabel: 'End process',
+    typed: isRisky ? proc.name : null
   });
   if (!ok) return;
 
