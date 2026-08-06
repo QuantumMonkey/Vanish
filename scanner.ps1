@@ -517,25 +517,41 @@ function Get-SystemDiagnostics {
     $ramFreeGB  = if ($os -and $os.FreePhysicalMemory)     { [math]::Round($os.FreePhysicalMemory     / 1MB, 1) } else { $null }
 
     # --- Disk volumes (filter to local fixed drives only) ---
+    #
+    # This query used to ask Win32_LogicalDisk for DriveLetter. That property
+    # belongs to Win32_Volume, not Win32_LogicalDisk - the drive letter here is
+    # DeviceID ("C:"). Naming a property the class does not have makes the WHOLE
+    # query invalid ("Invalid query"), the catch below swallowed it, and the
+    # Storage panel rendered "No local drives found." on every machine, forever.
+    # It never worked once. Nothing in the stub-driven suite could see that,
+    # because no stub ever asks Windows anything (7oo.8).
+    #
+    # Use -ClassName/-Filter rather than a hand-written SELECT: a typo in a
+    # property name then costs nothing, because there is no property list.
     $disks = @()
+    $diskError = $null
     try {
-        $volumes = Get-CimInstance -Query "SELECT DriveLetter, Size, FreeSpace, VolumeName FROM Win32_LogicalDisk WHERE DriveType=3" -ErrorAction Stop
+        $volumes = Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=3' -ErrorAction Stop
         foreach ($v in $volumes) {
-            if (-not $v.DriveLetter) { continue }
+            if (-not $v.DeviceID) { continue }
             $totalGB = if ($v.Size)      { [math]::Round($v.Size      / 1GB, 1) } else { 0 }
             $freeGB  = if ($v.FreeSpace) { [math]::Round($v.FreeSpace / 1GB, 1) } else { 0 }
             $usedGB  = [math]::Round($totalGB - $freeGB, 1)
             $pctUsed = if ($totalGB -gt 0) { [math]::Round(($usedGB / $totalGB) * 100, 1) } else { 0 }
             $disks += @{
-                drive    = $v.DriveLetter
-                label    = if ($v.VolumeName) { $v.VolumeName } else { "Local Disk" }
+                drive    = ([string]$v.DeviceID).TrimEnd(':')
+                label    = if ($v.VolumeName) { [string]$v.VolumeName } else { "Local Disk" }
                 totalGB  = $totalGB
                 freeGB   = $freeGB
                 usedGB   = $usedGB
                 pctUsed  = $pctUsed
             }
         }
-    } catch {}
+    } catch {
+        # Report the failure instead of rendering an empty section that looks
+        # like an honest "you have no drives".
+        $diskError = $_.Exception.Message
+    }
 
     # --- BIOS / Manufacturer ---
     $manufacturer = $null; $model = $null
@@ -585,6 +601,7 @@ function Get-SystemDiagnostics {
         manufacturer = $manufacturer
         model        = $model
         disks        = $disks
+        disksError   = $diskError
     }
 }
 

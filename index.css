@@ -439,11 +439,17 @@ body {
 }
 
 /* Dashboard Statistics */
+/* Everything above the workspace is a fixed cost paid out of the same vertical
+   budget the app list and the details panel share. At 1080x720 - the window
+   main.js actually opens - this row plus the header left the workspace 310px;
+   at the 800x600 minimum it left 190px, and the details panel's info list
+   collapsed to nothing. Sizing this row in vh instead of px means it gives
+   ground as the window shrinks rather than starving what matters. */
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  padding: 24px 32px;
+  gap: clamp(10px, 1.6vh, 20px);
+  padding: clamp(10px, 2.2vh, 24px) 32px;
 }
 
 .stat-card {
@@ -451,10 +457,10 @@ body {
   backdrop-filter: blur(10px);
   border: 1px solid var(--border-glass);
   border-radius: 16px;
-  padding: 20px;
+  padding: clamp(10px, 1.8vh, 20px);
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: clamp(10px, 1.6vh, 20px);
   transition: var(--transition-smooth);
 }
 
@@ -465,13 +471,14 @@ body {
 }
 
 .stat-icon {
-  width: 52px;
-  height: 52px;
+  width: clamp(34px, 6vh, 52px);
+  height: clamp(34px, 6vh, 52px);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 24px;
+  font-size: clamp(16px, 2.8vh, 24px);
+  flex-shrink: 0;
 }
 
 .stat-icon.blue {
@@ -502,7 +509,7 @@ body {
 .stat-value {
   font-family: var(--font-title);
   font-weight: 800;
-  font-size: 24px;
+  font-size: clamp(17px, 2.8vh, 24px);
   line-height: 1.2;
 }
 
@@ -632,21 +639,64 @@ body {
 }
 
 /* Details Panel (Right Sidebar) */
+/* The panel itself does NOT scroll. Its info list does, and the action buttons
+   are pinned to the bottom.
+   Why this matters (operator audit 2026-08-06, reproduced by
+   test/real-data-verify.js): with `overflow-y: auto` on the panel and
+   `margin-top: auto` on the button, "push the button to the bottom" only works
+   while there is spare space. A real registry path is long, a real install
+   location is longer, and with six populated info rows in the app's own 1080x720
+   window the two action buttons landed at y=969 and y=1036 - 250px BELOW the
+   bottom edge of the window, reachable only by scrolling a panel that gives no
+   hint it scrolls. That is the "choice buttons are partially hidden" the
+   operator reported. An action the user cannot see is an action they do not
+   have, so the actions are now structure, not leftovers. */
 .details-panel {
-  width: 320px;
+  /* Width follows the workspace instead of claiming a fixed 320px out of an
+     800px window, where it left the app list barely wider than itself. */
+  width: clamp(250px, 28%, 340px);
+  flex-shrink: 0;
   background: rgba(11, 15, 25, 0.55);
   backdrop-filter: blur(25px);
   border: 1px solid var(--border-glass);
   border-radius: 20px;
-  padding: 24px;
+  padding: clamp(12px, 2vh, 20px);
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  overflow-y: auto;
+  gap: clamp(8px, 1.6vh, 14px);
+  overflow: hidden;
   opacity: 0;
   transform: translateX(30px);
   transition: opacity 0.3s ease, transform 0.3s ease;
   pointer-events: none;
+}
+
+/* Header, divider and every action button keep their natural height; only the
+   info list gives ground. */
+.details-panel > .details-header,
+.details-panel > .details-divider,
+.details-panel > .indicator-detail-list,
+.details-panel > button {
+  flex: 0 0 auto;
+}
+
+/* margin-top:auto is the global .btn-primary rule that used to do the pinning.
+   Inside this panel the flex layout does it properly, so cancel it - otherwise
+   the first button absorbs all the spare height and detaches from the second.
+   The compact padding is not cosmetic either: two full-size buttons plus the
+   header did not fit the panel at the app's own window size. */
+.details-panel > button {
+  margin-top: 0;
+  padding: clamp(7px, 1.4vh, 13px) 14px;
+  font-size: clamp(12px, 1.8vh, 14px);
+}
+
+/* Process indicators are evidence, not chrome - cap them so they can never
+   push the End process button off the panel the way the app list's info rows
+   pushed Clean Uninstall off. */
+.details-panel > .indicator-detail-list {
+  max-height: 96px;
+  overflow-y: auto;
 }
 
 .details-panel.active {
@@ -655,40 +705,59 @@ body {
   pointer-events: all;
 }
 
+/* Horizontal, not a centred column. The centred layout spent 131px of a 268px
+   panel on a 72px letter tile and two centred lines, which left the info list
+   with literally zero height on a 1080x720 window - the app's own default size.
+   The user got a big initial, an app name, and no information at all
+   (measured by test/real-data-verify.js). Vertical room in this panel is the
+   scarce resource; decoration does not get to spend it. */
 .details-header {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
   align-items: center;
-  text-align: center;
-  gap: 12px;
+  text-align: left;
 }
 
 .details-icon {
-  width: 72px;
-  height: 72px;
-  border-radius: 16px;
+  grid-row: 1 / span 2;
+  width: clamp(30px, 5.5vh, 44px);
+  height: clamp(30px, 5.5vh, 44px);
+  border-radius: 12px;
   background: rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
   justify-content: center;
   font-family: var(--font-title);
   font-weight: 800;
-  font-size: 28px;
+  font-size: clamp(13px, 2.4vh, 18px);
   color: var(--color-primary);
   border: 1px solid var(--border-glass-active);
+  flex-shrink: 0;
 }
 
 .details-title {
   font-family: var(--font-title);
   font-weight: 700;
-  font-size: 18px;
+  font-size: clamp(13px, 2.1vh, 15px);
+  line-height: 1.25;
   word-break: break-word;
+  align-self: end;
+  /* A long product name must not push the actions off the panel. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .details-publisher {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--text-gray);
-  margin-top: -6px;
+  align-self: start;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .details-divider {
@@ -696,10 +765,17 @@ body {
   background: var(--border-glass);
 }
 
+/* This is the part that scrolls. min-height:0 is load-bearing: without it a
+   flex item refuses to shrink below its content and the overflow escapes the
+   panel again, which is the whole defect. */
 .details-info-list {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: clamp(8px, 1.8vh, 16px);
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 6px;
 }
 
 .details-info-item {

@@ -9,6 +9,17 @@ const queue = require('./lib/queue');
 
 let mainWindow;
 
+// VANISH_HEADLESS_HARNESS=1 - set by test/real-data-verify.js and its siblings,
+// never by the packaged app. Diagnostics that want the REAL IPC handlers have to
+// require() this file, and until this existed that also spawned main.js's real
+// visible window as a side effect: a test harness put a window on the operator's
+// screen that was indistinguishable from the app itself and cost a debugging
+// session (AGP-3 in the verification-pitfalls retrospective). With this set,
+// bootstrap runs exactly as it always did except that no window is created and
+// no start-up side effect that writes to the machine fires. The harness supplies
+// its own window, with its own title, so it can never be mistaken for the app.
+const headlessHarness = process.env.VANISH_HEADLESS_HARNESS === '1';
+
 // ==========================================
 // ELEVATION TIERS (promptgate Rule 3, REQ-04, NFR-02)
 // ==========================================
@@ -72,7 +83,9 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(async () => {
+// Exposed so a harness that require()s this file can wait for bootstrap - tier
+// resolution in particular - instead of guessing with a sleep.
+const bootstrapped = app.whenReady().then(async () => {
   store.init(app.getPath('userData'));
   vault.init(runPowerShell);
   queue.init(runPowerShell, (state) => {
@@ -133,7 +146,7 @@ app.whenReady().then(async () => {
   // as ELEVATED instructions. If a standard user can rewrite them, that is a
   // privilege escalation path (security review 2026-08-03, Vuln 2). Lock the
   // directory on every elevated start and record what we found.
-  if (isFullMode()) {
+  if (isFullMode() && !headlessHarness) {
     try {
       const before = await runPowerShell('check-data-dir', { path: store.dataDir() });
       if (before && before.exists && !before.protected) {
@@ -156,10 +169,13 @@ app.whenReady().then(async () => {
     }
   }
 
-  // FLOW-03 auto-purge branch (opt-in, off by default).
-  if (isFullMode()) {
+  // FLOW-03 auto-purge branch (opt-in, off by default). A harness must never
+  // delete anything from the operator's real vault just by starting.
+  if (isFullMode() && !headlessHarness) {
     vault.autoPurgeSweep().catch((err) => console.error('Auto-purge sweep failed:', err.message));
   }
+
+  if (headlessHarness) return;
 
   createWindow();
 
@@ -168,8 +184,12 @@ app.whenReady().then(async () => {
   });
 });
 
+module.exports = { bootstrapped };
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // A harness owns its own window and decides when the run is over; letting the
+  // default quit-on-last-window fire would kill it mid-assertion.
+  if (process.platform !== 'darwin' && !headlessHarness) app.quit();
 });
 
 // Helper to run scanner.ps1 functions

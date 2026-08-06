@@ -1414,7 +1414,7 @@ async function loadAuditData(force = false) {
     ]);
 
     renderSysInfoCards(diag);
-    renderDiskBars(diag.disks || []);
+    renderDiskBars(diag.disks || [], diag.disksError);
     renderStartupTable(startup);
     renderRedundancyGroups(redundancy);
 
@@ -1477,9 +1477,20 @@ function shortenCpuName(name) {
   return name.replace(/\s+/g, ' ').replace(/ CPU @.*$/, '').trim();
 }
 
-function renderDiskBars(disks) {
+function renderDiskBars(disks, error) {
   const list = document.getElementById('audit-disk-list');
   if (!list) return;
+
+  // "No local drives found" is a claim about the machine. If the query failed,
+  // say that instead - a broken query rendered as an empty result is what let
+  // this section ship dead (7oo.8).
+  if (error) {
+    list.innerHTML = `<div class="panel-state error" style="padding: 12px 0;">
+      <i class="fa-solid fa-circle-xmark"></i>
+      <div>Could not read the drives on this machine: ${esc(error)}</div>
+    </div>`;
+    return;
+  }
 
   if (!disks || disks.length === 0) {
     list.innerHTML = '<div style="color: var(--text-gray); font-size: 13px;">No local drives found.</div>';

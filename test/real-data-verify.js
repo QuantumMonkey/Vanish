@@ -1,0 +1,1084 @@
+// REAL-DATA verification harness (vanish-uninstaller-7oo.10).
+//
+// WHY THIS EXISTS
+// ---------------
+// Every other UI suite in this repo runs against test/fixtures/stub-preload.js:
+// one fake application, clean well-formed fields, instant responses. On the real
+// machine there are 150+ registry entries of wildly varied shape, scans that
+// take seconds, partial states, and a list long enough to scroll. That gap is
+// not academic - it is how 312/312 stayed green while the operator was looking
+// at a visibly broken app, and it is how the hit-test suite that exists
+// SPECIFICALLY to catch un-clickable buttons passed while real buttons were
+// occluded on screen (operator audit 2026-08-06).
+//
+// So this harness runs the REAL preload against the REAL backend on the REAL
+// machine, and asserts what a user would actually see. Ground truth comes from
+// test/fixtures/real-machine-truth.ps1, which reads the machine with its own
+// queries - a harness that asks the code under test what reality looks like can
+// only ever agree with itself.
+//
+//   npx electron test/real-data-verify.js
+//   npx electron test/real-data-verify.js --only=storage,inventory
+//   npx electron test/real-data-verify.js --size=800x600
+//   npx electron test/real-data-verify.js --only=applist,wizard,tabs --sweep
+//
+// The window defaults to 1080x720 because that is what main.js createWindow()
+// actually opens. Verifying at a roomier size than the app ships hides exactly
+// the defects this file exists to find - the first run of this harness at
+// 1280x860 still caught the details panel's buttons falling below the fold, but
+// only because the panel is tall; a narrower miss would have slipped through.
+//
+// It is deliberately NOT in npm test's default path: it is slow, it is bound to
+// whatever is installed on the machine running it, and its failures are meant to
+// be read, not counted.
+//
+// NO WINDOW YOU COULD MISTAKE FOR THE APP: main.js is loaded with
+// VANISH_HEADLESS_HARNESS=1, so it creates no window and fires no start-up side
+// effect. This file makes its own offscreen window, titled as a harness. A
+// diagnostic that quietly spawned the real app window once cost a whole
+// debugging session (AGP-3 in the verification-pitfalls retrospective).
+//
+// NOTHING HERE IS DESTRUCTIVE. Every channel it touches is read-only; the run
+// stays in Audit Mode on purpose, so even a mistake cannot reach a purge path.
+
+const { app, BrowserWindow } = require('electron');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+
+process.env.VANISH_DISABLE_AUTO_ELEVATE = '1';
+process.env.VANISH_HEADLESS_HARNESS = '1';
+
+const main = require('../main.js');
+
+app.disableHardwareAcceleration();
+
+const ROOT = path.join(__dirname, '..');
+const TRUTH_SCRIPT = path.join(__dirname, 'fixtures', 'real-machine-truth.ps1');
+
+// ---------------------------------------------------------------- reporting
+
+let pass = 0;
+let fail = 0;
+const failures = [];
+let section = '';
+
+function assert(condition, label, detail) {
+  if (condition) {
+    console.log(`  PASS  ${label}`);
+    pass += 1;
+  } else {
+    console.log(`  FAIL  ${label}`);
+    if (detail) console.log(`        ${String(detail).split('\n').join('\n        ')}`);
+    fail += 1;
+    failures.push({ section, label, detail: detail || '' });
+  }
+}
+
+function heading(name) {
+  section = name;
+  console.log('');
+  console.log(`--- ${name} ${'-'.repeat(Math.max(0, 66 - name.length))}`);
+}
+
+function skip(label, why) {
+  console.log(`  SKIP  ${label} (${why})`);
+}
+
+// ---------------------------------------------------------------- utilities
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function runTruthProbe() {
+  return new Promise((resolve, reject) => {
+    const ps = spawn('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', TRUTH_SCRIPT
+    ]);
+    let out = '';
+    let err = '';
+    ps.stdout.on('data', (d) => { out += d.toString(); });
+    ps.stderr.on('data', (d) => { err += d.toString(); });
+    ps.on('close', (code) => {
+      if (code !== 0) return reject(new Error(`truth probe exited ${code}: ${err}`));
+      try {
+        resolve(JSON.parse(out));
+      } catch (e) {
+        reject(new Error(`truth probe produced unparseable JSON: ${e.message}`));
+      }
+    });
+  });
+}
+
+let win;
+
+function js(expression) {
+  return win.webContents.executeJavaScript(expression);
+}
+
+// Is `selector` the topmost element at its own centre? Same contract as
+// test/ui-interaction-verify.js - the difference here is what is on screen
+// behind it when the question is asked.
+const HIT_TEST = `(selector) => {
+  const el = document.querySelector(selector);
+  if (!el) return { found: false };
+  const cs = getComputedStyle(el);
+  if (cs.display === 'none' || cs.visibility === 'hidden') return { found: true, rendered: false };
+  const r = el.getBoundingClientRect();
+  if (r.width === 0 || r.height === 0) return { found: true, rendered: false };
+  const probes = [
+    ['centre', Math.round(r.x + r.width / 2), Math.round(r.y + r.height / 2)],
+    ['left edge', Math.round(r.x + 4), Math.round(r.y + r.height / 2)],
+    ['right edge', Math.round(r.right - 4), Math.round(r.y + r.height / 2)],
+    ['top edge', Math.round(r.x + r.width / 2), Math.round(r.y + 4)],
+    ['bottom edge', Math.round(r.x + r.width / 2), Math.round(r.bottom - 4)]
+  ];
+  const blocked = [];
+  let allBlockersAreAncestors = true;
+  for (const [where, x, y] of probes) {
+    const top = document.elementFromPoint(x, y);
+    const ok = top && (el === top || el.contains(top));
+    if (!ok) {
+      if (!top || !top.contains(el)) allBlockersAreAncestors = false;
+      blocked.push(where + ' -> ' + (top
+        ? top.tagName + (top.id ? '#' + top.id : '') +
+          (typeof top.className === 'string' && top.className ? '.' + top.className.trim().split(/\\s+/).join('.') : '')
+        : 'nothing (outside the viewport)'));
+    }
+  }
+  return {
+    found: true, rendered: true, hit: blocked.length === 0, blocked,
+    // A control locked out of Audit Mode carries pointer-events:none by design,
+    // so the hit test lands on its own parent. That is the tier working, not an
+    // occlusion - but its GEOMETRY still has to be sound, which is what
+    // onScreen answers.
+    tierLocked: el.classList.contains('tier-locked'),
+    inertByDesign: blocked.length > 0 && allBlockersAreAncestors,
+    onScreen: r.top >= 0 && r.left >= 0 &&
+              r.bottom <= window.innerHeight && r.right <= window.innerWidth,
+    rect: { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) },
+    viewport: { w: window.innerWidth, h: window.innerHeight }
+  };
+}`;
+
+async function hitTest(selector) {
+  return js(`(${HIT_TEST})(${JSON.stringify(selector)})`);
+}
+
+// A control the user is expected to click must be the topmost element across
+// its WHOLE box, not just its middle. Half a button is not a button.
+//
+// The one legitimate exception is a destructive control in Audit Mode: it is
+// deliberately pointer-events:none, so the hit lands on its own ancestor. Those
+// are held to the weaker but still meaningful contract - the box must be fully
+// on screen, because an off-screen button is broken in either tier.
+async function assertClickable(selector, label) {
+  const r = await hitTest(selector);
+  if (!r.found) return assert(false, label, `${selector} is not in the DOM`);
+  if (!r.rendered) return assert(false, label, `${selector} has no rendered box`);
+
+  if (r.tierLocked && r.inertByDesign) {
+    return assert(
+      r.onScreen,
+      `${label} (inert in Audit Mode - geometry checked)`,
+      r.onScreen ? '' :
+        `${selector} at ${JSON.stringify(r.rect)} falls outside the ${r.viewport.w}x${r.viewport.h} window`
+    );
+  }
+
+  assert(
+    r.hit,
+    label,
+    r.hit ? '' : `${selector} at ${JSON.stringify(r.rect)} (window ${r.viewport.w}x${r.viewport.h}) is covered:\n  ` +
+      r.blocked.join('\n  ')
+  );
+}
+
+// ---------------------------------------------------------------- IPC counting
+//
+// "Does interacting with this screen re-run the scan?" is only answerable by
+// counting what actually crossed the bridge. Wrap the real handlers rather than
+// adding a counter inside main.js that would then ship to users.
+
+const ipcCounts = new Map();
+
+function instrumentIpc() {
+  const { ipcMain } = require('electron');
+  const map = ipcMain._invokeHandlers;
+  if (!map || !map.forEach) return false;
+  for (const channel of Array.from(map.keys())) {
+    const original = map.get(channel);
+    map.set(channel, (...args) => {
+      ipcCounts.set(channel, (ipcCounts.get(channel) || 0) + 1);
+      return original(...args);
+    });
+  }
+  return true;
+}
+
+const callsTo = (channel) => ipcCounts.get(channel) || 0;
+
+// ---------------------------------------------------------------- sections
+
+async function waitForAppList(timeoutMs = 180000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const state = await js(`(() => ({
+      rows: document.querySelectorAll('#apps-tbody .app-row').length,
+      loading: !!document.getElementById('initial-loading-row'),
+      status: (document.getElementById('filter-status-text') || {}).textContent || ''
+    }))()`);
+    if (!state.loading && state.rows > 0) return { ...state, elapsedMs: Date.now() - started };
+    if (!state.loading && state.rows === 0 && Date.now() - started > 20000) {
+      return { ...state, elapsedMs: Date.now() - started };
+    }
+    await sleep(500);
+  }
+  return { rows: 0, loading: true, elapsedMs: timeoutMs };
+}
+
+async function dismissElevationOffer() {
+  const active = await js(
+    `document.getElementById('elevation-modal-overlay').classList.contains('active')`
+  );
+  if (!active) return;
+  await js(`document.getElementById('btn-stay-audit').click(); true;`);
+  await sleep(600);
+}
+
+// --- inventory (7oo.3) -----------------------------------------------------
+async function sectionInventory(truth) {
+  heading('Inventory: does the list show what is actually installed?');
+
+  const engine = await js(`(async () => {
+    const desktop = await window.api.getDesktopApps();
+    return desktop.map((a) => ({
+      name: a.name, publisher: a.publisher, registryPath: a.registryPath,
+      classification: a.classification || null,
+      protected: a.protected === true,
+      protectionReason: a.protectionReason || ''
+    }));
+  })()`);
+
+  console.log(`  (registry holds ${truth.entryCount} display-named entries; the engine returned ${engine.length})`);
+
+  const engineNames = new Set(engine.map((a) => String(a.name).toLowerCase()));
+  const missing = truth.entries.filter((e) => !engineNames.has(String(e.name).toLowerCase()));
+
+  assert(
+    engine.length > 20,
+    'the engine returns a real-length desktop list, not a token one',
+    `got ${engine.length}`
+  );
+
+  // THE DEFECT (7oo.3): SystemComponent=1 and ParentKeyName entries are dropped
+  // outright, so real products - antivirus, vendor utilities, language runtimes -
+  // are invisible with nothing on screen admitting they exist.
+  assert(
+    missing.length === 0,
+    'every installed entry the registry lists is accounted for by the engine',
+    missing.length === 0 ? '' :
+      `${missing.length} entries never reach the renderer:\n` +
+      missing.slice(0, 25).map((m) =>
+        `${m.name}  [${m.hiveLabel}]  ${m.systemComponent ? 'SystemComponent=1' : ''}${m.parentKeyName ? 'ParentKeyName=' + m.parentKeyName : ''}`
+      ).join('\n') + (missing.length > 25 ? `\n... and ${missing.length - 25} more` : '')
+  );
+
+  // A user must be able to uninstall an application that happens to be
+  // published by Microsoft. Only genuine OS components may be held back.
+  const microsoftApps = truth.entries.filter((e) =>
+    /^Microsoft (Edge|Office|OneDrive|Teams|Visual Studio Code)/i.test(e.name) && e.uninstallerExists);
+  if (microsoftApps.length === 0) {
+    skip('ordinary Microsoft applications are uninstallable', 'none installed on this machine');
+  } else {
+    const held = microsoftApps.filter((m) => {
+      const row = engine.find((a) => String(a.name).toLowerCase() === String(m.name).toLowerCase());
+      return !row || row.protected === true;
+    });
+    assert(
+      held.length === 0,
+      'ordinary Microsoft applications are listed and not protected',
+      held.map((h) => h.name).join(', ')
+    );
+  }
+
+  // Rule 24: whatever protection survives must say WHY, in the payload, not as
+  // a greyed-out control with no explanation.
+  const silentlyProtected = engine.filter((a) => a.protected && !a.protectionReason.trim());
+  assert(
+    silentlyProtected.length === 0,
+    'every protected entry states the specific reason it is protected',
+    silentlyProtected.map((s) => s.name).join(', ')
+  );
+
+  // Anything the engine hides from the default view has to be reachable and
+  // counted, never silently dropped.
+  const classified = engine.filter((a) => a.classification);
+  assert(
+    classified.length === engine.length,
+    'every entry carries a classification the UI can filter on',
+    `${engine.length - classified.length} of ${engine.length} entries have no classification`
+  );
+
+  return { engine, missing };
+}
+
+// --- app list DOM (real length) --------------------------------------------
+async function sectionAppList(listState) {
+  heading('Application list: real length, real geometry');
+
+  const dom = await js(`(() => {
+    const container = document.querySelector('.apps-list-container');
+    const rows = document.querySelectorAll('#apps-tbody .app-row');
+    return {
+      rows: rows.length,
+      allApps: (typeof allApps !== 'undefined') ? allApps.length : -1,
+      scrollHeight: container ? container.scrollHeight : 0,
+      clientHeight: container ? container.clientHeight : 0,
+      status: document.getElementById('filter-status-text').textContent
+    };
+  })()`);
+
+  console.log(`  (${dom.rows} rows rendered, list is ${dom.scrollHeight}px tall in a ${dom.clientHeight}px viewport)`);
+
+  assert(dom.rows === dom.allApps, 'every loaded application has a row', `${dom.rows} rows for ${dom.allApps} apps`);
+  assert(
+    dom.scrollHeight > dom.clientHeight,
+    'the list is long enough to scroll - the condition the fixture suites never reach',
+    `scrollHeight ${dom.scrollHeight} <= clientHeight ${dom.clientHeight}`
+  );
+  assert(
+    dom.status.includes(String(dom.allApps)),
+    'the filter caption states the real total',
+    dom.status
+  );
+  console.log(`  (initial load took ${(listState.elapsedMs / 1000).toFixed(1)}s)`);
+
+  // Select the LAST row: the worst case for geometry, and the one a 1-app
+  // fixture can never produce.
+  await js(`(() => {
+    const rows = document.querySelectorAll('#apps-tbody .app-row');
+    rows[rows.length - 1].scrollIntoView();
+    rows[rows.length - 1].click();
+    return true;
+  })()`);
+  await sleep(400);
+
+  await assertClickable('#details-sidebar', 'the details panel is on screen once a row is selected');
+  await assertClickable('#btn-start-uninstall', 'Clean Uninstall is clickable with the full list loaded');
+  await assertClickable('#btn-queue-app', 'Add to bulk queue is clickable with the full list loaded');
+  await assertClickable('#search-bar', 'the search box is still reachable over a full list');
+
+  // The panel must not be the thing that overflows: its info list scrolls, the
+  // panel itself stays inside the workspace.
+  const panelBox = await js(`(() => {
+    const p = document.getElementById('details-sidebar');
+    const list = p.querySelector('.details-info-list');
+    const pr = p.getBoundingClientRect();
+    const inner = pr.height - parseFloat(getComputedStyle(p).paddingTop) - parseFloat(getComputedStyle(p).paddingBottom);
+    return {
+      bottom: Math.round(pr.bottom),
+      viewportHeight: window.innerHeight,
+      listScrolls: list.scrollHeight > list.clientHeight,
+      panelOverflows: p.scrollHeight > p.clientHeight + 1,
+      innerHeight: Math.round(inner),
+      listHeight: Math.round(list.getBoundingClientRect().height),
+      firstRowHeight: list.firstElementChild
+        ? Math.round(list.firstElementChild.getBoundingClientRect().height)
+        : 0,
+      children: Array.from(p.children).map((c) => ({
+        cls: c.className || c.tagName,
+        h: Math.round(c.getBoundingClientRect().height),
+        bottom: Math.round(c.getBoundingClientRect().bottom)
+      }))
+    };
+  })()`);
+  assert(
+    panelBox.bottom <= panelBox.viewportHeight,
+    'the details panel stays inside the window',
+    JSON.stringify(panelBox)
+  );
+  // Nothing may be clipped off the panel: the info list is the only element
+  // allowed to run out of room, and it scrolls.
+  assert(
+    !panelBox.panelOverflows,
+    'nothing overflows the details panel - its info list absorbs the pressure and scrolls',
+    JSON.stringify(panelBox, null, 1)
+  );
+  assert(
+    panelBox.listScrolls,
+    'the info list is the element that scrolls',
+    JSON.stringify(panelBox)
+  );
+  // A list squeezed to zero height satisfies "nothing overflows" while showing
+  // the user no information at all. That is a worse failure than the original,
+  // and the first pass at this fix produced exactly it - so pin the contract to
+  // what a person can actually read.
+  assert(
+    panelBox.listHeight >= panelBox.firstRowHeight && panelBox.firstRowHeight > 0,
+    'the info list shows at least one full row rather than collapsing to nothing',
+    JSON.stringify(panelBox, null, 1)
+  );
+
+  // The Task Manager details panel is the same component with the same failure
+  // mode, so it gets the same contract.
+  await js(`document.querySelector('.nav-item[data-tab="task-manager"]').click(); true;`);
+  await sleep(4000);
+  const picked = await js(`(() => {
+    const row = document.querySelector('#process-tbody tr.app-row, #process-tbody tr[data-pid]');
+    if (!row) return false;
+    row.click();
+    return true;
+  })()`);
+  if (!picked) {
+    skip('the process details panel pins its action', 'no process row to select');
+  } else {
+    await sleep(500);
+    await assertClickable('#btn-kill-process', 'End process is on screen with a real process list loaded');
+  }
+  await js(`document.querySelector('.nav-item[data-tab="all-apps"]').click(); true;`);
+  await sleep(500);
+}
+
+// --- uninstall wizard (7oo.1) ----------------------------------------------
+async function sectionWizard() {
+  heading('Uninstall wizard: every action button on every screen, real data behind it');
+
+  // The wizard is opened directly. The Clean Uninstall button is tier-locked in
+  // Audit Mode by design (tier-verify.js owns that contract); what is under test
+  // here is the wizard's LAYOUT with a real list and a real details panel
+  // underneath it, which is the state the operator was looking at.
+  const opened = await js(`(() => {
+    if (typeof selectedApp === 'undefined' || !selectedApp) return { ok: false, why: 'no app selected' };
+    openUninstallWizard(selectedApp);
+    return { ok: true, app: selectedApp.name };
+  })()`);
+  if (!opened.ok) {
+    skip('wizard geometry', opened.why);
+    return;
+  }
+  await sleep(700);
+  console.log(`  (wizard open on "${opened.app}")`);
+
+  // A realistic screen-5 payload. Real scans return dozens of long paths; the
+  // fixture returns two short ones, which is exactly why the tree's scroll
+  // geometry has never been exercised.
+  await js(`(() => {
+    const files = [];
+    const registry = [];
+    for (let i = 0; i < 60; i++) {
+      files.push({
+        path: 'C:\\\\Users\\\\Operator\\\\AppData\\\\Roaming\\\\Vendor Name Long\\\\Product Suite ' + i + '\\\\cache\\\\segment-' + i + '.dat',
+        type: 'Directory', risk: i % 7 === 0 ? 'Advanced' : (i % 3 === 0 ? 'Moderate' : 'Safe'), sizeBytes: 1024 * (i + 1)
+      });
+      registry.push({
+        path: 'HKLM\\\\Software\\\\Vendor Name Long\\\\Product Suite\\\\Components\\\\Entry' + i,
+        type: 'Key', risk: i % 5 === 0 ? 'Advanced' : 'Safe'
+      });
+    }
+    wizState.leftovers = { files, registry };
+    renderLeftoversTree();
+    return true;
+  })()`);
+
+  const screens = [
+    ['scr-config', 0, ['.scan-modes-box .mode-card[data-mode="Advanced"]', '.option-toggle-row .toggle-switch .slider']],
+    ['scr-restore-loading', 1, []],
+    ['scr-native-run', 2, ['#btn-launch-native']],
+    ['scr-scan-loading', 3, []],
+    ['scr-leftovers-tree', 4, ['#btn-select-all']],
+    ['scr-purge-loading', 5, []],
+    ['scr-complete', 6, ['#btn-review-quarantine']]
+  ];
+
+  const FOOTER = ['#btn-wiz-cancel', '#btn-wiz-back', '#btn-wiz-next', '#btn-wiz-purge', '#btn-wiz-finish'];
+
+  for (const [screenId, index, extras] of screens) {
+    await js(`showScreen(${index}); true;`);
+    await sleep(350);
+
+    const visibleFooter = await js(`(() => {
+      const ids = ${JSON.stringify(FOOTER)};
+      return ids.filter((s) => {
+        const el = document.querySelector(s);
+        return el && getComputedStyle(el).display !== 'none';
+      });
+    })()`);
+
+    for (const selector of visibleFooter) {
+      await assertClickable(selector, `${screenId}: ${selector} is fully clickable`);
+    }
+    for (const selector of extras) {
+      await assertClickable(selector, `${screenId}: ${selector} is fully clickable`);
+    }
+    await assertClickable('#wiz-close-x', `${screenId}: the close X is fully clickable`);
+  }
+
+  // The screen the operator was describing - the tree, scrolled to the bottom,
+  // where the footer and a long list share the same 520px modal.
+  await js(`showScreen(4); true;`);
+  await sleep(300);
+  const treeGeometry = await js(`(() => {
+    const tree = document.getElementById('leftovers-tree-view');
+    tree.scrollTop = tree.scrollHeight;
+    const modal = document.querySelector('.wizard-modal').getBoundingClientRect();
+    const footer = document.querySelector('.wizard-footer').getBoundingClientRect();
+    const screens = document.querySelector('.wizard-screens').getBoundingClientRect();
+    return {
+      treeScrolls: tree.scrollHeight > tree.clientHeight,
+      modalBottom: Math.round(modal.bottom),
+      footerBottom: Math.round(footer.bottom),
+      footerTop: Math.round(footer.top),
+      screensBottom: Math.round(screens.bottom),
+      viewportHeight: window.innerHeight
+    };
+  })()`);
+  await sleep(200);
+
+  assert(treeGeometry.treeScrolls, 'the leftovers tree actually scrolls with a real-length finding list');
+
+  // The last checkbox in a 120-item tree: reachable only after scrolling, which
+  // is the point - it must be hit-testable once the user has scrolled to it.
+  await js(`(() => {
+    const items = document.querySelectorAll('#leftovers-tree-view .tree-item');
+    items[items.length - 1].scrollIntoView({ block: 'center' });
+    return true;
+  })()`);
+  await sleep(300);
+  await assertClickable(
+    '#leftovers-tree-view .tree-group:last-child .tree-item:last-child input[type="checkbox"]',
+    'the last checkbox in a long leftovers tree is clickable once scrolled to'
+  );
+  assert(
+    treeGeometry.footerBottom <= treeGeometry.viewportHeight,
+    'the wizard footer sits inside the window, not below its bottom edge',
+    JSON.stringify(treeGeometry)
+  );
+  assert(
+    treeGeometry.screensBottom <= treeGeometry.footerTop + 1,
+    'the scrolling screen area stops where the footer starts, instead of running under it',
+    JSON.stringify(treeGeometry)
+  );
+
+  for (const selector of ['#btn-wiz-cancel', '#btn-wiz-purge']) {
+    await assertClickable(selector, `scrolled leftovers tree: ${selector} is still fully clickable`);
+  }
+
+  await js(`document.getElementById('wizard-modal-overlay').classList.remove('active'); true;`);
+  await sleep(300);
+}
+
+// --- health advisor (7oo.8) ------------------------------------------------
+async function sectionHealthAdvisor(truth) {
+  heading('Health Advisor: system overview and storage');
+
+  await js(`document.querySelector('.nav-item[data-tab="audit"]').click(); true;`);
+
+  const started = Date.now();
+  while (Date.now() - started < 180000) {
+    const done = await js(`document.getElementById('audit-content').style.display !== 'none'`);
+    if (done) break;
+    await sleep(500);
+  }
+  console.log(`  (audit data took ${((Date.now() - started) / 1000).toFixed(1)}s)`);
+
+  const audit = await js(`(() => {
+    const grid = document.getElementById('audit-sysinfo-grid');
+    const diskList = document.getElementById('audit-disk-list');
+    const scroll = document.getElementById('audit-scroll-area');
+    const panel = document.getElementById('audit-panel');
+    const section = grid ? grid.closest('.audit-section') : null;
+    return {
+      cards: grid ? grid.querySelectorAll('.audit-info-card').length : 0,
+      unknownCards: grid
+        ? Array.from(grid.querySelectorAll('.card-value')).filter((v) => v.textContent.trim() === 'Unknown').length
+        : 0,
+      diskRows: diskList ? diskList.querySelectorAll('.disk-bar-row').length : 0,
+      diskText: diskList ? diskList.textContent.trim().slice(0, 120) : '',
+      panelWidth: panel ? Math.round(panel.getBoundingClientRect().width) : 0,
+      sectionWidth: section ? Math.round(section.getBoundingClientRect().width) : 0,
+      scrollWidth: scroll ? Math.round(scroll.getBoundingClientRect().width) : 0,
+      startupRows: document.querySelectorAll('#audit-startup-tbody tr').length
+    };
+  })()`);
+
+  assert(audit.cards >= 6, 'the system overview renders its cards', `got ${audit.cards}`);
+  assert(
+    audit.unknownCards === 0,
+    'no overview card falls back to "Unknown" on a real machine',
+    `${audit.unknownCards} of ${audit.cards} cards say Unknown`
+  );
+
+  // THE DEFECT (7oo.8): the Storage panel has never rendered anything. The CIM
+  // query asks Win32_LogicalDisk for DriveLetter, which belongs to Win32_Volume,
+  // so the whole query is invalid and the catch leaves the list empty.
+  assert(
+    audit.diskRows === truth.diskCount,
+    `Storage shows every fixed drive on this machine (${truth.diskCount})`,
+    `rendered ${audit.diskRows}; panel says: "${audit.diskText}"`
+  );
+
+  // "does not span the screen": the overview section must use the panel's width,
+  // not sit in a narrow column with dead space beside it.
+  assert(
+    audit.sectionWidth > 0 && audit.sectionWidth >= audit.scrollWidth - 48,
+    'the System Overview section spans the panel instead of leaving dead width',
+    `section ${audit.sectionWidth}px inside a ${audit.scrollWidth}px scroll area`
+  );
+
+  assert(audit.startupRows > 0, 'startup items render rows', `got ${audit.startupRows}`);
+}
+
+// --- redundancy (7oo.6) ----------------------------------------------------
+//
+// Same-family entries are not duplicate installations. Edge + Edge Update +
+// WebView2 is one product with its updater and its embedded runtime; telling a
+// user to "keep only one" is wrong advice, and it is what the current keyword
+// matcher produces.
+function familyKey(name) {
+  return String(name)
+    .toLowerCase()
+    .replace(/\b(update|updater|runtime|redistributable|helper|service|sdk|webview2?|installer|launcher|bootstrapper|prerequisites?)\b/g, '')
+    .replace(/\bv?\d+(\.\d+)*\b/g, '')
+    .replace(/\((x64|x86|64-bit|32-bit|user|machine)\)/g, '')
+    .replace(/[^a-z]+/g, ' ')
+    .trim()
+    .split(' ')
+    .slice(0, 2)
+    .join(' ');
+}
+
+async function sectionRedundancy() {
+  heading('Redundant software: families are one product, not several installs');
+
+  const redundancy = await js(`window.api.getSoftwareRedundancy()`);
+  const groups = (redundancy && redundancy.groups) || [];
+  console.log(`  (${groups.length} group(s) reported)`);
+
+  const bogus = [];
+  for (const g of groups) {
+    const seen = new Map();
+    for (const a of g.apps || []) {
+      const key = familyKey(a.name);
+      if (!key) continue;
+      if (seen.has(key)) {
+        bogus.push(`${g.category}: "${seen.get(key)}" and "${a.name}" are the same product family`);
+      } else {
+        seen.set(key, a.name);
+      }
+    }
+    // A group of one, after collapsing families, is not redundancy at all.
+    if (seen.size < 2) {
+      bogus.push(`${g.category}: reported ${g.count} installed, but they collapse to ${seen.size} product(s)`);
+    }
+  }
+
+  assert(
+    bogus.length === 0,
+    'no redundancy group counts same-family entries as separate installations',
+    bogus.join('\n')
+  );
+
+  const tipsMatch = groups.every((g) => String(g.tip || '').includes(String(g.count)));
+  assert(tipsMatch || groups.length === 0, 'each group advises using its own real count');
+}
+
+// --- force uninstall (7oo.2) -----------------------------------------------
+async function sectionForceUninstall(truth) {
+  heading('Force Uninstall: the list matches what is genuinely broken');
+
+  // Ground truth, derived independently: an entry is broken when Windows has no
+  // way to uninstall it, or the uninstaller it names is gone.
+  const trulyBroken = truth.entries.filter((e) =>
+    !e.uninstallString || (!e.uninstallerExists && e.uninstallerPath));
+
+  await js(`document.querySelector('.nav-item[data-tab="force-uninstall"]').click(); true;`);
+  const started = Date.now();
+  while (Date.now() - started < 180000) {
+    const loading = await js(`document.getElementById('broken-loading').style.display !== 'none'`);
+    if (!loading) break;
+    await sleep(500);
+  }
+
+  const panel = await js(`(() => ({
+    listed: Array.from(document.querySelectorAll('#broken-list .vault-entry')).map((el) => ({
+      name: el.querySelector('.vault-entry-app').textContent.trim().split('\\n')[0].trim(),
+      pill: (el.querySelector('.status-pill') || {}).textContent ? el.querySelector('.status-pill').textContent.trim() : ''
+    })),
+    emptyShown: document.getElementById('broken-empty').style.display !== 'none',
+    emptyText: document.getElementById('broken-empty').textContent.trim()
+  }))()`);
+
+  console.log(`  (registry says ${trulyBroken.length} broken; the panel lists ${panel.listed.length})`);
+
+  const listedNames = new Set(panel.listed.map((l) => l.name.toLowerCase()));
+  const notListed = trulyBroken.filter((b) => !listedNames.has(String(b.name).toLowerCase()));
+  const truthNames = new Set(trulyBroken.map((b) => String(b.name).toLowerCase()));
+  const shouldNotBeListed = panel.listed.filter((l) => !truthNames.has(l.name.toLowerCase()));
+
+  // (b) false negatives - "still not displaying all entries"
+  assert(
+    notListed.length === 0,
+    'every genuinely broken entry on this machine is listed',
+    notListed.map((n) => `${n.name} [${n.hiveLabel}] ${n.uninstallString ? 'uninstaller missing: ' + n.uninstallerPath : 'no UninstallString'}`).join('\n')
+  );
+
+  // (a) false positives - "shows wrong entries which cant be uninstalled"
+  assert(
+    shouldNotBeListed.length === 0,
+    'nothing is listed that is not actually broken',
+    shouldNotBeListed.map((s) => s.name).join('\n')
+  );
+
+  if (panel.listed.length > 0) {
+    await assertClickable('#broken-list .vault-entry [data-force-entry]', 'the first broken entry\'s action button is clickable');
+  } else {
+    assert(panel.emptyShown, 'an empty list says so rather than showing a blank panel', panel.emptyText);
+  }
+
+  await assertClickable('#btn-rescan-broken', 'Re-scan is clickable');
+  await assertClickable('#force-name-input', 'the manual search box is reachable');
+  await assertClickable('#btn-force-scan', 'the manual Scan button is clickable');
+}
+
+// --- system clean (7oo.5) --------------------------------------------------
+async function sectionSystemClean() {
+  heading('System Clean: scan once, and say when a count is still partial');
+
+  await js(`document.querySelector('.nav-item[data-tab="system-clean"]').click(); true;`);
+  await sleep(800);
+
+  const ids = await js(`(typeof CLEANERS !== 'undefined') ? CLEANERS.filter((c) => !c.needsKeyword).map((c) => c.id) : []`);
+  if (!ids || ids.length === 0) {
+    skip('System Clean', 'no cleaner sections rendered');
+    return;
+  }
+  const target = ids[0];
+  const sel = `#cleaner-${target}`;
+  console.log(`  (${ids.length} cleaners; exercising "${target}")`);
+
+  const before = callsTo('cleaner-scan');
+  await js(`scanCleaner(${JSON.stringify(target)}); true;`);
+
+  const started = Date.now();
+  while (Date.now() - started < 180000) {
+    const busy = await js(`(() => {
+      const el = document.querySelector(${JSON.stringify(sel)});
+      return el ? /fa-spin/i.test(el.innerHTML) : false;
+    })()`);
+    if (!busy) break;
+    await sleep(500);
+  }
+  const afterScan = callsTo('cleaner-scan');
+  console.log(`  (first scan took ${((Date.now() - started) / 1000).toFixed(1)}s, ${afterScan - before} engine call(s))`);
+
+  assert(afterScan - before === 1, 'one scan request produces exactly one engine call', `${afterScan - before} calls`);
+
+  const snapshot = () => js(`(() => {
+    const el = document.querySelector(${JSON.stringify(sel)});
+    if (!el) return { rows: 0, badge: '', checked: 0 };
+    return {
+      rows: el.querySelectorAll('.finding-row').length,
+      badge: (document.getElementById('cleaner-count-${target}') || {}).textContent || '',
+      checked: el.querySelectorAll('.finding-row input[type=checkbox]:checked').length
+    };
+  })()`);
+
+  const countBefore = await snapshot();
+
+  // Ticking a checkbox, collapsing, re-expanding, leaving the tab and coming
+  // back - none of these are new evidence about the machine, so none may re-run
+  // the scan, and none may lose what the user already ticked.
+  await js(`(() => {
+    const el = document.querySelector(${JSON.stringify(sel)});
+    if (!el) return false;
+    const box = el.querySelector('.finding-row input[type=checkbox]:not([disabled])');
+    if (box) box.click();
+    return true;
+  })()`);
+  await sleep(400);
+  const afterTick = await snapshot();
+
+  await js(`(() => {
+    const header = document.querySelector(${JSON.stringify(sel)} + ' .cleaner-section-header');
+    if (header) { header.click(); header.click(); }
+    return true;
+  })()`);
+  await sleep(800);
+
+  await js(`document.querySelector('.nav-item[data-tab="all-apps"]').click(); true;`);
+  await sleep(500);
+  await js(`document.querySelector('.nav-item[data-tab="system-clean"]').click(); true;`);
+  await sleep(1200);
+
+  const afterInteraction = callsTo('cleaner-scan');
+  assert(
+    afterInteraction === afterScan,
+    'collapsing, re-expanding and revisiting the tab does not re-run the scan',
+    `${afterInteraction - afterScan} extra engine call(s) fired just from interacting`
+  );
+
+  const countAfter = await snapshot();
+  assert(
+    countAfter.rows === countBefore.rows && countAfter.badge === countBefore.badge,
+    'the finding count is stable across interaction',
+    `${countBefore.rows} rows/badge "${countBefore.badge}" -> ${countAfter.rows} rows/badge "${countAfter.badge}"`
+  );
+  if (afterTick.checked > 0) {
+    assert(
+      countAfter.checked === afterTick.checked,
+      'a selection survives collapsing the section and leaving the tab',
+      `${afterTick.checked} ticked -> ${countAfter.checked} still ticked`
+    );
+  } else {
+    skip('a selection survives navigation', 'nothing selectable in this cleaner');
+  }
+}
+
+// --- startup items (7oo.4) -------------------------------------------------
+async function sectionStartupItems() {
+  heading('Startup items: an orphan the app shows is an orphan the app can act on');
+
+  const startup = await js(`window.api.getStartupItems()`);
+  const items = (startup && startup.items) || [];
+  const orphans = items.filter((i) => i.exeExists === false);
+  console.log(`  (${items.length} startup items, ${orphans.length} orphaned)`);
+
+  await js(`document.querySelector('.nav-item[data-tab="audit"]').click(); true;`);
+  await sleep(1200);
+
+  const rendered = await js(`(() => {
+    const rows = Array.from(document.querySelectorAll('#audit-startup-tbody tr'));
+    return {
+      rows: rows.length,
+      orphanRows: rows.filter((r) => r.querySelector('.status-dot.orphan')).length,
+      actionable: rows.filter((r) => r.querySelector('button, a, input')).length,
+      badgeShown: document.getElementById('audit-orphan-count').style.display !== 'none'
+    };
+  })()`);
+
+  assert(rendered.rows === items.length, 'every startup item the engine found has a row', `${rendered.rows} vs ${items.length}`);
+  assert(
+    rendered.orphanRows === orphans.length,
+    'every orphaned startup item is marked as orphaned',
+    `${rendered.orphanRows} marked vs ${orphans.length} found`
+  );
+
+  if (orphans.length === 0) {
+    skip('orphaned startup items are actionable', 'no orphans on this machine');
+  } else {
+    assert(
+      rendered.actionable > 0,
+      'an orphaned startup item offers something the user can actually do about it',
+      'the table reports orphans and offers no control on any row'
+    );
+    assert(rendered.badgeShown, 'the orphan count badge is visible when orphans exist');
+  }
+}
+
+// --- every tab survives real data ------------------------------------------
+async function sectionTabs() {
+  heading('Every tab renders with real data behind it');
+
+  const tabs = ['all-apps', 'audit', 'task-manager', 'system-clean', 'quarantine', 'force-uninstall', 'settings', 'about'];
+  for (const tab of tabs) {
+    await assertClickable(`.nav-item[data-tab="${tab}"]`, `the ${tab} tab is clickable`);
+    await js(`document.querySelector('.nav-item[data-tab="${tab}"]').click(); true;`);
+    await sleep(700);
+
+    const state = await js(`(() => {
+      const visible = Array.from(document.querySelectorAll('.content-area'))
+        .filter((el) => getComputedStyle(el).display !== 'none');
+      const el = visible[0];
+      if (!el) return { none: true };
+      const r = el.getBoundingClientRect();
+      return {
+        none: false, count: visible.length,
+        width: Math.round(r.width), height: Math.round(r.height),
+        overflowsRight: Math.round(r.right) > window.innerWidth + 1,
+        bodyScrollsSideways: document.body.scrollWidth > window.innerWidth + 1
+      };
+    })()`);
+
+    assert(!state.none && state.count === 1, `${tab}: exactly one panel is visible`, JSON.stringify(state));
+    assert(state.width > 300 && state.height > 200, `${tab}: the panel has a real box`, JSON.stringify(state));
+    assert(!state.overflowsRight, `${tab}: the panel does not run off the right edge`, JSON.stringify(state));
+    assert(!state.bodyScrollsSideways, `${tab}: the window does not scroll sideways`, JSON.stringify(state));
+  }
+}
+
+// ---------------------------------------------------------------- runner
+
+const SECTIONS = {
+  inventory: sectionInventory,
+  applist: sectionAppList,
+  wizard: sectionWizard,
+  storage: sectionHealthAdvisor,
+  redundancy: sectionRedundancy,
+  force: sectionForceUninstall,
+  clean: sectionSystemClean,
+  startup: sectionStartupItems,
+  tabs: sectionTabs
+};
+
+// The app's minimum, the app's default, and a roomy desktop. --sweep runs the
+// geometry sections at each.
+const SWEEP_SIZES = [
+  { width: 800, height: 600 },
+  { width: 1080, height: 720 },
+  { width: 1440, height: 900 }
+];
+
+// main.js createWindow() opens 1080x720 with a 800x600 minimum. Those are the
+// sizes a user actually has; anything larger here is the harness flattering the
+// app.
+function windowSize() {
+  const arg = process.argv.find((a) => a.startsWith('--size='));
+  if (!arg) return { width: 1080, height: 720 };
+  const m = /^(\d+)x(\d+)$/.exec(arg.slice('--size='.length));
+  if (!m) {
+    console.error('--size expects WIDTHxHEIGHT, e.g. --size=800x600');
+    process.exit(2);
+  }
+  return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) };
+}
+
+function requestedSections() {
+  const arg = process.argv.find((a) => a.startsWith('--only='));
+  if (!arg) return Object.keys(SECTIONS);
+  const names = arg.slice('--only='.length).split(',').map((s) => s.trim()).filter(Boolean);
+  const unknown = names.filter((n) => !SECTIONS[n]);
+  if (unknown.length) {
+    console.error(`Unknown section(s): ${unknown.join(', ')}. Known: ${Object.keys(SECTIONS).join(', ')}`);
+    process.exit(2);
+  }
+  return names;
+}
+
+app.whenReady().then(async () => {
+  await main.bootstrapped;
+
+  console.log('');
+  console.log('Vanish REAL-DATA verification');
+  console.log('=============================');
+  console.log('This runs the real preload against the real backend on THIS machine.');
+  console.log('Results depend on what is installed here. Read the failures; do not count them.');
+
+  if (!instrumentIpc()) {
+    console.log('WARNING: could not instrument ipcMain - scan-count assertions will be skipped.');
+  }
+
+  console.log('');
+  console.log('Reading ground truth from the machine...');
+  let truth;
+  try {
+    truth = await runTruthProbe();
+  } catch (err) {
+    console.error(`Could not establish ground truth: ${err.message}`);
+    app.exit(2);
+    return;
+  }
+  console.log(`  registry uninstall entries: ${truth.entryCount}`);
+  console.log(`  fixed drives:               ${truth.diskCount}`);
+  console.log(`  appx packages:              ${truth.appxCount}`);
+  console.log(`  elevated:                   ${truth.isAdmin}`);
+
+  const size = windowSize();
+  console.log(`  window:                     ${size.width}x${size.height}`);
+
+  win = new BrowserWindow({
+    width: size.width,
+    height: size.height,
+    show: false,
+    frame: false,
+    title: 'VANISH REAL-DATA HARNESS - not the application',
+    backgroundColor: '#0b0f19',
+    webPreferences: {
+      preload: path.join(ROOT, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      offscreen: true
+    }
+  });
+
+  await win.loadFile(path.join(ROOT, 'index.html'));
+
+  console.log('');
+  console.log('Waiting for the real application list (this is genuinely slow)...');
+  const listState = await waitForAppList();
+  await dismissElevationOffer();
+
+  if (listState.rows === 0) {
+    console.error('The application list never rendered a row. Nothing below would mean anything.');
+    app.exit(2);
+    return;
+  }
+
+  const names = requestedSections();
+  const runSections = async () => {
+    for (const name of names) {
+      try {
+        if (name === 'applist') await SECTIONS[name](listState);
+        else if (name === 'inventory' || name === 'storage' || name === 'force') await SECTIONS[name](truth);
+        else await SECTIONS[name]();
+      } catch (err) {
+        section = name;
+        assert(false, `${name}: the section itself threw`, err.stack || err.message);
+      }
+    }
+  };
+
+  await runSections();
+
+  // --sweep re-runs the geometry-bearing sections at the other window sizes a
+  // user can actually produce. Layout that holds at one size and breaks at
+  // another is the same class of miss as layout that holds against a fixture
+  // and breaks against real data: the first pass at the details-panel fix
+  // passed at 1080x720 and still collapsed the info list to zero height at the
+  // app's own 800x600 minimum.
+  if (process.argv.includes('--sweep')) {
+    const geometry = names.filter((n) => n === 'applist' || n === 'wizard' || n === 'tabs');
+    for (const sweepSize of SWEEP_SIZES) {
+      if (sweepSize.width === size.width && sweepSize.height === size.height) continue;
+      if (geometry.length === 0) break;
+
+      console.log('');
+      console.log(`### re-running geometry sections at ${sweepSize.width}x${sweepSize.height}`);
+      win.setSize(sweepSize.width, sweepSize.height);
+      await sleep(400);
+      await win.webContents.reload();
+      const swept = await waitForAppList();
+      await dismissElevationOffer();
+      if (swept.rows === 0) {
+        assert(false, `sweep ${sweepSize.width}x${sweepSize.height}: the app list never rendered`);
+        continue;
+      }
+      for (const name of geometry) {
+        try {
+          section = `${name} @ ${sweepSize.width}x${sweepSize.height}`;
+          if (name === 'applist') await SECTIONS[name](swept);
+          else await SECTIONS[name]();
+        } catch (err) {
+          assert(false, `${name}: the section itself threw`, err.stack || err.message);
+        }
+      }
+    }
+  }
+
+  console.log('');
+  console.log('='.repeat(72));
+  console.log(`Result: ${pass} passed, ${fail} failed`);
+  if (failures.length) {
+    console.log('');
+    console.log('Failures, grouped:');
+    let last = '';
+    for (const f of failures) {
+      if (f.section !== last) {
+        console.log(`\n  [${f.section}]`);
+        last = f.section;
+      }
+      console.log(`    - ${f.label}`);
+    }
+  }
+  console.log('');
+
+  app.exit(fail > 0 ? 1 : 0);
+});
