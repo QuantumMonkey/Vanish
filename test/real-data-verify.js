@@ -108,7 +108,20 @@ async function goToTab(tab) {
 
 // The Health Advisor genuinely takes seconds against real CIM queries; a fixed
 // sleep either flakes or wastes time.
+// Returns milliseconds spent WAITING, or -1 on timeout, or null when the panel
+// was already loaded before we looked.
+//
+// The distinction matters: an earlier section may have visited this tab, and
+// renderer.js caches the result. Printing "audit data took 0.0s" in that case
+// reads as a performance claim about CIM queries that were never re-run - a
+// measurement of nothing, presented as a measurement of something. That is the
+// same species of misleading number as a partial count shown as final.
 async function waitForAuditContent(timeoutMs = 180000) {
+  const alreadyLoaded = await js(
+    `document.getElementById('audit-content').style.display !== 'none'`
+  );
+  if (alreadyLoaded) return null;
+
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
     const done = await js(`document.getElementById('audit-content').style.display !== 'none'`);
@@ -701,9 +714,11 @@ async function sectionHealthAdvisor(truth) {
 
   await goToTab('audit');
   const auditMs = await waitForAuditContent();
-  assert(auditMs >= 0, 'the Health Advisor finished loading', 'audit content never became visible');
-  if (auditMs < 0) return;
-  console.log(`  (audit data took ${(auditMs / 1000).toFixed(1)}s)`);
+  assert(auditMs !== -1, 'the Health Advisor finished loading', 'audit content never became visible');
+  if (auditMs === -1) return;
+  console.log(auditMs === null
+    ? '  (audit data was already loaded from an earlier section - not re-queried)'
+    : `  (audit data took ${(auditMs / 1000).toFixed(1)}s)`);
 
   const audit = await js(`(() => {
     const grid = document.getElementById('audit-sysinfo-grid');
@@ -1150,8 +1165,8 @@ async function sectionStartupItems() {
 
   await goToTab('audit');
   const auditMs = await waitForAuditContent();
-  assert(auditMs >= 0, 'the Health Advisor finished loading', 'audit content never became visible');
-  if (auditMs < 0) return;
+  assert(auditMs !== -1, 'the Health Advisor finished loading', 'audit content never became visible');
+  if (auditMs === -1) return;
 
   const rendered = await js(`(() => {
     const rows = Array.from(document.querySelectorAll('#audit-startup-tbody tr.app-row'));
