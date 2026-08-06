@@ -10,6 +10,12 @@ let filterType = 'all';
 // Components are classified and counted, never dropped - this flag is how they
 // come into view.
 let showComponents = false;
+// 7oo.7: Windows optional features are neither desktop apps nor Store apps, so
+// they were invisible to this app entirely. Loaded lazily - there is no reason
+// to pay for the query on every start when the default view excludes them.
+let showFeatures = false;
+let windowsFeatures = [];
+let featuresLoaded = false;
 let sortOption = 'name-asc';
 let isAdmin = false;
 
@@ -414,7 +420,21 @@ async function requestElevation(overlay) {
 // components, not "anything Microsoft published". When it does refuse, it
 // refuses by name and with the reason, never as a silently inert button.
 function guardProtected() {
-  if (!selectedApp || selectedApp.protected !== true) return true;
+  if (!selectedApp) return true;
+
+  // 7oo.7: optional features are listed so the user can SEE them. Turning one
+  // on or off is a reboot-adjacent OS change and is Windows' own dialog's job,
+  // so the refusal names where to go rather than pretending to be able.
+  if (selectedApp.classification === 'feature') {
+    toast(
+      `${selectedApp.name} is a Windows optional feature. Turn it on or off in Windows' own "Turn Windows features on or off" dialog (optionalfeatures.exe).`,
+      'info',
+      9000
+    );
+    return false;
+  }
+
+  if (selectedApp.protected !== true) return true;
   toast(
     `${selectedApp.name} is held back: ${selectedApp.protectionReason || 'Windows needs it to service this machine.'}`,
     'warn',
@@ -504,7 +524,23 @@ function formatBytes(bytes, decimals = 2) {
 // Everything the user would call an application. Components and update rows are
 // real and reachable, but they are not what "you have N applications" means.
 function visibleApps() {
-  return showComponents ? allApps : allApps.filter((a) => a.classification === 'application');
+  const base = showComponents ? allApps : allApps.filter((a) => a.classification === 'application');
+  return showFeatures ? base.concat(windowsFeatures) : base;
+}
+
+async function loadWindowsFeatures() {
+  if (featuresLoaded) return;
+  try {
+    const res = await window.api.getWindowsFeatures();
+    if (res && res.success) {
+      windowsFeatures = (res.features || []).filter((f) => f && typeof f === 'object');
+      featuresLoaded = true;
+    } else {
+      toast(`Could not read Windows features: ${(res && res.error) || 'no response'}`, 'error', 7000);
+    }
+  } catch (err) {
+    toast(`Could not read Windows features: ${err.message}`, 'error', 7000);
+  }
 }
 
 // Update stats count & size
@@ -524,6 +560,9 @@ function updateDashboardStats() {
 
   const badge = document.getElementById('components-count');
   if (badge) badge.textContent = componentCount;
+
+  const featuresBadge = document.getElementById('features-count');
+  if (featuresBadge) featuresBadge.textContent = featuresLoaded ? windowsFeatures.length : '?';
 }
 
 // Filter and Sort Handler
@@ -588,18 +627,23 @@ function updateFilterStatus(shownCount) {
   clearBtn.style.display = isFiltered ? '' : 'none';
 
   const pool = visibleApps().length;
-  // The component split is a filter like any other, so it has to admit itself.
-  // The whole reason 60 entries could vanish for good is that a narrowed list
-  // read as a complete one.
-  const hidden = showComponents ? 0 : allApps.length - pool;
-  const hiddenSuffix = hidden > 0 ? ` (${hidden} component${hidden === 1 ? '' : 's'} hidden)` : '';
+  // Every split is a filter, and a filter has to admit itself. The whole reason
+  // 60 entries could vanish for good is that a narrowed list read as a complete
+  // one - so the caption names what is being held back AND what has been added.
+  const applications = allApps.filter((a) => a.classification === 'application').length;
+  const hidden = showComponents ? 0 : allApps.length - applications;
+
+  const notes = [];
+  if (hidden > 0) notes.push(`${hidden} component${hidden === 1 ? '' : 's'} hidden`);
+  if (showFeatures) notes.push(`including ${windowsFeatures.length} Windows feature${windowsFeatures.length === 1 ? '' : 's'}`);
+  const suffix = notes.length ? ` (${notes.join(', ')})` : '';
 
   if (!isFiltered) {
     text.textContent = allApps.length === 0
       ? 'Loading applications...'
-      : `Showing all ${pool} applications${hiddenSuffix}`;
+      : `Showing all ${pool} applications${suffix}`;
   } else {
-    text.textContent = `Showing ${shownCount} of ${pool} applications${hiddenSuffix}`;
+    text.textContent = `Showing ${shownCount} of ${pool} applications${suffix}`;
   }
 }
 
@@ -643,7 +687,9 @@ function renderTable(apps) {
         </div>
       </td>
       <td>
-        <span class="badge-type ${esc(app.type.toLowerCase())}">${app.type === 'UWP' ? 'Windows App' : 'Desktop'}</span>
+        <span class="badge-type ${esc(app.type.toLowerCase())}">${
+          app.type === 'UWP' ? 'Windows App' : app.type === 'Feature' ? 'Feature' : 'Desktop'
+        }</span>
       </td>
       <td style="color: var(--text-gray); font-size: 13px;">${esc(dateStr)}</td>
       <td style="color: var(--text-gray); font-size: 13px; font-weight: 500;">${esc(sizeStr)}</td>
@@ -673,7 +719,10 @@ function selectApp(app, rowElement) {
   elements.detSize.textContent = app.sizeBytes ? formatBytes(app.sizeBytes, 1) : 'Unknown';
   elements.detPath.textContent = app.installLocation || 'Unknown';
   elements.detReg.textContent = app.registryPath || 'Unknown';
-  elements.detType.textContent = app.type === 'UWP' ? 'Universal Windows Platform (UWP)' : 'Classic Desktop Executable';
+  elements.detType.textContent =
+    app.type === 'UWP' ? 'Universal Windows Platform (UWP)'
+    : app.type === 'Feature' ? 'Windows optional feature'
+    : 'Classic Desktop Executable';
 
   // Why this entry is classified as it is, why Windows hides its uninstall
   // button, or why Vanish holds it back. Whichever applies, the user reads the
@@ -693,9 +742,11 @@ function selectApp(app, rowElement) {
   // the button has to say so rather than looking available.
   const uninstallBtn = elements.btnStartUninstall;
   if (uninstallBtn) {
-    uninstallBtn.classList.toggle('entry-protected', app.protected === true);
-    uninstallBtn.querySelector('span').textContent = app.protected
-      ? 'Protected by Vanish'
+    const held = app.protected === true || app.classification === 'feature';
+    uninstallBtn.classList.toggle('entry-protected', held);
+    uninstallBtn.querySelector('span').textContent =
+      app.classification === 'feature' ? 'Managed by Windows'
+      : app.protected ? 'Protected by Vanish'
       : 'Clean Uninstall';
   }
 
@@ -725,6 +776,21 @@ function setupFilters() {
   if (componentsBox) {
     componentsBox.addEventListener('change', (e) => {
       showComponents = e.target.checked;
+      updateDashboardStats();
+      filterAndRenderApps();
+    });
+  }
+
+  // Windows optional features toggle (7oo.7)
+  const featuresBox = document.getElementById('chk-show-features');
+  if (featuresBox) {
+    featuresBox.addEventListener('change', async (e) => {
+      showFeatures = e.target.checked;
+      if (showFeatures && !featuresLoaded) {
+        const label = document.getElementById('features-count');
+        if (label) label.textContent = '...';
+        await loadWindowsFeatures();
+      }
       updateDashboardStats();
       filterAndRenderApps();
     });
@@ -1907,6 +1973,78 @@ async function loadVaultEntries() {
   applyTierLocks();
 }
 
+// 7oo.9. The operator called this surface "adequate but not user friendly", and
+// it is the screen someone opens when they are anxious about something they
+// just removed. The information was all present; it made them work for it.
+//
+// Five questions, answered in the order they get asked, without expanding
+// anything: what was this, where did it come from, when, can I get it back,
+// and - the one nothing on the screen answered at all - what happens if I do
+// nothing.
+
+function describeRelativeTime(date) {
+  if (!date || Number.isNaN(date.getTime())) return 'at an unknown time';
+  const days = Math.floor((Date.now() - date.getTime()) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  return months === 1 ? 'a month ago' : `${months} months ago`;
+}
+
+// The origin field is an internal route ("system-clean/context-menus"). Say it
+// the way the user experienced it.
+function describeOrigin(origin) {
+  const raw = String(origin || '');
+  const known = {
+    purge: 'the uninstall wizard',
+    'system-clean/context-menus': 'System Clean - context menu handlers',
+    'system-clean/services': 'System Clean - orphaned services',
+    'system-clean/associations': 'System Clean - file associations',
+    'system-clean/profiles': 'System Clean - other user profiles',
+    'system-clean/drivers': 'System Clean - driver packages'
+  };
+  if (known[raw]) return known[raw];
+  if (raw.startsWith('system-clean/path')) return 'System Clean - PATH entries';
+  if (raw.startsWith('system-clean')) return 'System Clean';
+  if (raw.startsWith('force')) return 'Force Uninstall';
+  return raw || 'an unrecorded action';
+}
+
+// What happens if the user closes the app and never comes back. Retention only
+// applies when automatic purge is actually on, so this reads the live setting
+// rather than assuming.
+function describeFate(entry) {
+  if (entry.status === 'restored') {
+    return { text: 'Already restored to its original location. This is the record of that.', kind: 'calm' };
+  }
+  if (entry.status === 'deleted') {
+    return { text: 'Permanently deleted. Only this record remains.', kind: 'gone' };
+  }
+  if (!appSettings.autoPurgeEnabled) {
+    return {
+      text: 'Kept here until you choose to restore or delete it. Nothing removes it on its own.',
+      kind: 'calm'
+    };
+  }
+
+  const retentionDays = parseInt(appSettings.autoPurgeRetentionDays, 10);
+  const created = entry.createdAt ? new Date(entry.createdAt) : null;
+  if (!created || Number.isNaN(created.getTime()) || !Number.isFinite(retentionDays)) {
+    return { text: `Automatic purge is on - this is deleted once it is ${retentionDays} days old.`, kind: 'warn' };
+  }
+
+  const dueMs = created.getTime() + retentionDays * 86400000;
+  const daysLeft = Math.ceil((dueMs - Date.now()) / 86400000);
+  if (daysLeft <= 0) {
+    return { text: 'Automatic purge is on and this is already past its retention - it will be deleted permanently at the next start.', kind: 'warn' };
+  }
+  return {
+    text: `Automatic purge is on: this is deleted permanently on ${new Date(dueMs).toLocaleDateString()}, in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`,
+    kind: 'warn'
+  };
+}
+
 function renderVaultEntry(entry) {
   const created = entry.createdAt ? new Date(entry.createdAt) : null;
   const dateStr = created && !Number.isNaN(created.getTime()) ? created.toLocaleString() : 'Unknown date';
@@ -1944,6 +2082,18 @@ function renderVaultEntry(entry) {
     )
     .join('');
 
+  // "Where did it come from" - the first original location, up front, instead
+  // of only inside the expanded body.
+  const firstPath = (entry.files || [])[0]?.originalPath
+    || (entry.registry || [])[0]?.keyPath
+    || null;
+  const otherCount = totalFiles + totalRegistry - (firstPath ? 1 : 0);
+  const fromLine = firstPath
+    ? `${esc(firstPath)}${otherCount > 0 ? ` <span class="vault-more">and ${otherCount} more</span>` : ''}`
+    : 'Location not recorded';
+
+  const fate = describeFate(entry);
+
   return `
     <div class="vault-entry status-${esc(entry.status)}" data-entry-id="${esc(entry.id)}">
       <div class="vault-entry-header">
@@ -1953,9 +2103,21 @@ function renderVaultEntry(entry) {
             ${esc(entry.sourceApp)}
             <span class="status-pill ${esc(entry.status)}">${esc(entry.status)}</span>
           </div>
-          <div class="vault-entry-meta">
-            ${esc(dateStr)} &nbsp;-&nbsp; ${esc(typeSummary)}${sizeLabel ? ' &nbsp;-&nbsp; ' + esc(sizeLabel) : ''}
-            &nbsp;-&nbsp; via ${esc(entry.origin)}
+
+          <!-- what and when, in a sentence rather than a field list -->
+          <div class="vault-entry-summary">
+            ${esc(typeSummary)}${sizeLabel ? `, ${esc(sizeLabel)}` : ''},
+            removed ${esc(describeRelativeTime(created))} by ${esc(describeOrigin(entry.origin))}.
+          </div>
+
+          <div class="vault-entry-from" title="${esc(firstPath || '')}">
+            <i class="fa-solid fa-location-dot"></i> ${fromLine}
+          </div>
+
+          <!-- the question nothing on this screen used to answer -->
+          <div class="vault-entry-fate ${esc(fate.kind)}">
+            <i class="fa-solid ${fate.kind === 'warn' ? 'fa-clock' : 'fa-shield-halved'}"></i>
+            ${esc(fate.text)}
           </div>
         </div>
         <div class="vault-entry-actions">
@@ -1974,6 +2136,8 @@ function renderVaultEntry(entry) {
       <div class="vault-entry-body">
         ${fileRows ? `<div class="vault-item-group-title">Files and folders</div>${fileRows}` : ''}
         ${regRows ? `<div class="vault-item-group-title">Registry keys (.reg restore manifest)</div>${regRows}` : ''}
+        <div class="vault-item-group-title">Quarantined on</div>
+        <div class="vault-item"><span class="vault-item-path">${esc(dateStr)}</span></div>
         <div class="vault-item-group-title">Vault location</div>
         <div class="vault-item"><span class="vault-item-path">${esc(entry.vaultPath)}</span></div>
       </div>

@@ -638,6 +638,13 @@ body {
   border: 1px solid rgba(139, 92, 246, 0.2);
 }
 
+/* 7oo.7: Windows optional features - listed, never acted on from here. */
+.badge-type.feature {
+  background: hsla(38, 92%, 60%, 0.12);
+  color: var(--color-warning);
+  border: 1px solid hsla(38, 92%, 60%, 0.22);
+}
+
 /* Details Panel (Right Sidebar) */
 /* The panel itself does NOT scroll. Its info list does, and the action buttons
    are pinned to the bottom.
@@ -1574,6 +1581,59 @@ input:checked + .slider:before {
 
 .disk-bar-fill.danger {
   background: linear-gradient(90deg, var(--color-danger), hsl(15, 90%, 55%));
+}
+
+/* 7oo.9: the quarantine entry answers what/where/when/can-I-undo/what-if-I-do-
+   nothing without the user expanding anything. */
+.vault-entry-summary {
+  font-size: 12px;
+  color: var(--text-gray);
+  margin-top: 3px;
+  line-height: 1.45;
+}
+.vault-entry-from {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  word-break: break-all;
+}
+.vault-entry-from i { color: var(--text-muted); flex-shrink: 0; }
+.vault-more {
+  font-family: var(--font-body);
+  font-style: italic;
+  white-space: nowrap;
+}
+.vault-entry-fate {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-top: 7px;
+  padding: 6px 9px;
+  border-radius: 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.vault-entry-fate i { flex-shrink: 0; }
+.vault-entry-fate.calm {
+  background: hsla(160, 84%, 45%, 0.07);
+  border: 1px solid hsla(160, 84%, 45%, 0.2);
+  color: var(--text-gray);
+}
+.vault-entry-fate.calm i { color: var(--color-success); }
+.vault-entry-fate.warn {
+  background: hsla(38, 92%, 60%, 0.08);
+  border: 1px solid hsla(38, 92%, 60%, 0.25);
+  color: var(--text-gray);
+}
+.vault-entry-fate.warn i { color: var(--color-warning); }
+.vault-entry-fate.gone {
+  background: hsla(0, 0%, 50%, 0.07);
+  border: 1px solid hsla(0, 0%, 50%, 0.18);
+  color: var(--text-muted);
 }
 
 /* 7oo.5: a count that is still being computed must not look like a result. */

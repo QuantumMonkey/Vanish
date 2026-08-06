@@ -149,6 +149,17 @@
               </span>
             </label>
 
+            <!-- 7oo.7: the "Turn Windows features on or off" list, which is
+                 neither a desktop app nor a Store app and was invisible here. -->
+            <label class="components-toggle" id="features-toggle" title="Windows optional features - the 'Turn Windows features on or off' list">
+              <input type="checkbox" id="chk-show-features">
+              <span class="slider"></span>
+              <span class="components-toggle-label">
+                Windows features
+                <span class="audit-badge" id="features-count">0</span>
+              </span>
+            </label>
+
             <!-- Sorting -->
             <select class="select-custom" id="sort-selector">
               <option value="name-asc">Name (A - Z)</option>

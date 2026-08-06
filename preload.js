@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('api', {
   // App Queries
   getDesktopApps: () => ipcRenderer.invoke('get-desktop-apps'),
   getUwpApps: () => ipcRenderer.invoke('get-uwp-apps'),
+  getWindowsFeatures: () => ipcRenderer.invoke('get-windows-features'),
 
   // Safe Actions
   createRestorePoint: () => ipcRenderer.invoke('create-restore-point'),

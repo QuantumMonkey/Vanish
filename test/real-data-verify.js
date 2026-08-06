@@ -951,6 +951,18 @@ function runPowerShellSnippet(script) {
   });
 }
 
+// Same, but hands back what the snippet printed - for ground-truth counts.
+function runPowerShellCapture(script) {
+  return new Promise((resolve) => {
+    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
+    let out = '';
+    let err = '';
+    ps.stdout.on('data', (d) => { out += d.toString(); });
+    ps.stderr.on('data', (d) => { err += d.toString(); });
+    ps.on('close', (code) => resolve({ ok: code === 0, stdout: out, error: err.trim() }));
+  });
+}
+
 function plantBrokenEntry() {
   return runPowerShellSnippet(
     `New-Item -Path '${PLANTED_KEY}' -Force | Out-Null; ` +
@@ -1197,6 +1209,234 @@ async function sectionStartupItems() {
   }
 }
 
+// --- windows optional features (7oo.7) -------------------------------------
+async function sectionWindowsFeatures() {
+  heading('Windows optional features: listed, counted, and never falsely actionable');
+  await goToTab('all-apps');
+
+  // Ground truth from the machine, independent of the engine.
+  const truthOut = await runPowerShellCapture(
+    '@(Get-CimInstance -ClassName Win32_OptionalFeature).Count'
+  );
+  const truthCount = parseInt(String(truthOut.stdout).trim(), 10);
+  console.log(`  (Windows reports ${truthCount} optional features)`);
+
+  const before = await js(`document.querySelectorAll('#apps-tbody .app-row').length`);
+
+  const toggled = await js(`(async () => {
+    const box = document.getElementById('chk-show-features');
+    if (!box) return { missing: true };
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    // The query runs on demand, so give it real time.
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      if (typeof featuresLoaded !== 'undefined' && featuresLoaded) break;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    return {
+      missing: false,
+      loaded: typeof windowsFeatures !== 'undefined' ? windowsFeatures.length : -1,
+      rows: document.querySelectorAll('#apps-tbody .app-row').length,
+      featureRows: document.querySelectorAll('#apps-tbody .badge-type.feature').length,
+      badge: (document.getElementById('features-count') || {}).textContent,
+      status: document.getElementById('filter-status-text').textContent,
+      states: (typeof windowsFeatures !== 'undefined')
+        ? Array.from(new Set(windowsFeatures.map((f) => f.state))) : []
+    };
+  })()`);
+
+  if (toggled.missing) {
+    assert(false, 'the app list offers a Windows features toggle', 'no #chk-show-features control');
+    return;
+  }
+
+  assert(
+    Number.isFinite(truthCount) && toggled.loaded === truthCount,
+    'every optional feature Windows reports is listed',
+    `engine ${toggled.loaded} vs Windows ${truthCount}`
+  );
+  assert(
+    toggled.featureRows === toggled.loaded,
+    'each one renders as a row marked as a feature',
+    `${toggled.featureRows} feature rows for ${toggled.loaded} features`
+  );
+  assert(
+    toggled.rows === before + toggled.loaded,
+    'features are added to the list rather than replacing the applications',
+    `${before} -> ${toggled.rows}`
+  );
+  assert(
+    /Windows feature/i.test(toggled.status),
+    'the caption says the list now includes Windows features',
+    toggled.status
+  );
+  assert(
+    String(toggled.badge) === String(toggled.loaded),
+    'the toggle shows the real count',
+    `badge "${toggled.badge}" vs ${toggled.loaded}`
+  );
+  // Real enabled/disabled state, not a placeholder.
+  assert(
+    toggled.states.some((s) => /enabled/i.test(s)) && toggled.states.length > 1,
+    'features carry their real on/off state',
+    `states seen: ${toggled.states.join(', ')}`
+  );
+
+  // Selecting one must not offer an uninstall it cannot perform.
+  const picked = await js(`(() => {
+    const badge = document.querySelector('#apps-tbody .badge-type.feature');
+    if (!badge) return { ok: false };
+    badge.closest('tr').click();
+    return { ok: true };
+  })()`);
+  if (picked.ok) {
+    await sleep(400);
+    const panel = await js(`(() => ({
+      label: document.querySelector('#btn-start-uninstall span').textContent.trim(),
+      note: document.getElementById('det-note-text').textContent,
+      noteShown: document.getElementById('det-note').style.display !== 'none'
+    }))()`);
+    assert(
+      panel.label !== 'Clean Uninstall',
+      'a feature does not present an uninstall action Vanish cannot perform',
+      `button reads "${panel.label}"`
+    );
+    assert(
+      panel.noteShown && /optionalfeatures\.exe|Turn Windows features/i.test(panel.note),
+      'and it names where the user can actually change it',
+      panel.note
+    );
+  }
+
+  // Turning it back off must restore the default view exactly.
+  const off = await js(`(async () => {
+    const box = document.getElementById('chk-show-features');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    await new Promise((r) => setTimeout(r, 500));
+    return document.querySelectorAll('#apps-tbody .app-row').length;
+  })()`);
+  assert(off === before, 'turning the toggle off restores the default view', `${off} vs ${before}`);
+}
+
+// --- quarantine details (7oo.9) --------------------------------------------
+async function sectionQuarantine() {
+  heading('Quarantine: does an entry answer what a worried person asks first?');
+  await goToTab('quarantine');
+  await sleep(1200);
+
+  const live = await js(`(() => ({
+    entries: document.querySelectorAll('#vault-entries .vault-entry').length,
+    emptyShown: document.getElementById('vault-empty').style.display !== 'none',
+    errorShown: document.getElementById('vault-error').style.display !== 'none',
+    errorText: document.getElementById('vault-error-text').textContent
+  }))()`);
+
+  assert(!live.errorShown, 'the vault reads without error', live.errorText);
+  console.log(`  (the real vault on this machine holds ${live.entries} entr${live.entries === 1 ? 'y' : 'ies'})`);
+
+  if (live.entries === 0) {
+    assert(live.emptyShown, 'an empty vault says so rather than showing a blank panel');
+  }
+
+  // 7oo.9 is a presentation defect, and the operator's vault is empty because
+  // the app was too broken to have quarantined anything. So drive the REAL
+  // renderer with entries in the real manifest shape, under both retention
+  // settings - that is the code path a user hits, and the fate line is the
+  // whole point of the fix, so it has to be exercised both ways.
+  const rendered = await js(`(() => {
+    const iso = (daysAgo) => new Date(Date.now() - daysAgo * 86400000).toISOString();
+    const sample = {
+      id: 'harness-entry',
+      sourceApp: 'Some Removed Application',
+      origin: 'system-clean/context-menus',
+      status: 'quarantined',
+      createdAt: iso(3),
+      sizeBytes: 4 * 1024 * 1024,
+      vaultPath: 'C:\\\\Users\\\\Operator\\\\AppData\\\\Roaming\\\\vanish\\\\vault\\\\harness-entry',
+      files: [{ originalPath: 'C:\\\\Program Files\\\\Some App\\\\leftover.dll', status: 'quarantined' }],
+      registry: [{ keyPath: 'HKLM\\\\Software\\\\Some App', status: 'quarantined' }]
+    };
+
+    const readBack = () => {
+      const el = document.querySelector('#vault-entries .vault-entry');
+      return {
+        summary: el.querySelector('.vault-entry-summary').textContent.replace(/\\s+/g, ' ').trim(),
+        from: el.querySelector('.vault-entry-from').textContent.replace(/\\s+/g, ' ').trim(),
+        fate: el.querySelector('.vault-entry-fate').textContent.replace(/\\s+/g, ' ').trim(),
+        fateKind: el.querySelector('.vault-entry-fate').className,
+        restoreButton: !!el.querySelector('[data-action="restore"]'),
+        collapsedText: el.querySelector('.vault-entry-header').textContent.replace(/\\s+/g, ' ').trim()
+      };
+    };
+
+    const host = document.getElementById('vault-entries');
+    const saved = { auto: appSettings.autoPurgeEnabled, days: appSettings.autoPurgeRetentionDays };
+
+    appSettings.autoPurgeEnabled = false;
+    host.innerHTML = renderVaultEntry(sample);
+    const kept = readBack();
+
+    appSettings.autoPurgeEnabled = true;
+    appSettings.autoPurgeRetentionDays = 30;
+    host.innerHTML = renderVaultEntry(sample);
+    const expiring = readBack();
+
+    appSettings.autoPurgeEnabled = saved.auto;
+    appSettings.autoPurgeRetentionDays = saved.days;
+    host.innerHTML = '';
+    return { kept, expiring };
+  })()`);
+
+  const { kept, expiring } = rendered;
+
+  // What it was, and when - in words, without expanding anything.
+  assert(
+    /removed 3 days ago/i.test(kept.summary),
+    'the entry says when it happened in human terms, not just a timestamp',
+    kept.summary
+  );
+  // Where it came from.
+  assert(
+    /Program Files/i.test(kept.from),
+    'the original location is visible without expanding the entry',
+    kept.from
+  );
+  // Which surface did it - in the user's words, not the internal route.
+  assert(
+    /System Clean/i.test(kept.summary) && !/system-clean\//i.test(kept.summary),
+    'it names the surface that removed it in plain words, not an internal route',
+    kept.summary
+  );
+  // Can I get it back.
+  assert(kept.restoreButton, 'restoring is offered directly on the entry');
+
+  // What happens if I do nothing - the question the screen never answered.
+  assert(
+    /until you/i.test(kept.fate),
+    'with automatic purge off, the entry says it will simply stay',
+    kept.fate
+  );
+  assert(
+    /calm/.test(kept.fateKind),
+    'and says it calmly rather than as a warning',
+    kept.fateKind
+  );
+  assert(
+    /deleted permanently on .+ in 27 days/i.test(expiring.fate),
+    'with automatic purge on, it states the actual date and the days remaining',
+    expiring.fate
+  );
+  assert(
+    /warn/.test(expiring.fateKind),
+    'and marks that as something to be aware of',
+    expiring.fateKind
+  );
+
+  await goToTab('all-apps');
+}
+
 // --- every tab survives real data ------------------------------------------
 async function sectionTabs() {
   heading('Every tab renders with real data behind it');
@@ -1239,6 +1479,8 @@ const SECTIONS = {
   force: sectionForceUninstall,
   clean: sectionSystemClean,
   startup: sectionStartupItems,
+  features: sectionWindowsFeatures,
+  quarantine: sectionQuarantine,
   tabs: sectionTabs
 };
 

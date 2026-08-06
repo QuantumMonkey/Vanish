@@ -466,6 +466,70 @@ function Get-InstalledApps {
     return @($apps | Sort-Object name)
 }
 
+# 1b. Windows optional features (7oo.7)
+#
+# Operator: "all programs should have a toggle to see whether windows features
+# should be shown or not, the ones we enable and disable from the hidden menu."
+# That is optionalfeatures.exe - neither a desktop app nor a Store app, so
+# Vanish could not see them at all.
+#
+# Win32_OptionalFeature, NOT Get-WindowsOptionalFeature. The DISM cmdlet is the
+# obvious choice and fails with "The requested operation requires elevation",
+# which would make this list unavailable in exactly the mode this app is
+# designed to be useful in. The CIM class returns the same 135 features on this
+# machine, unelevated, in about a second.
+#
+# Read-only by design. Turning an OS feature on or off is a genuinely
+# destructive, reboot-adjacent action and is not offered here; each entry says
+# where it is managed instead (Rule 24).
+function Get-WindowsFeatures {
+    $features = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    # InstallState: 1 Enabled, 2 Disabled, 3 Absent (payload removed), 4 Unknown
+    $stateLabels = @{ 1 = 'Enabled'; 2 = 'Disabled'; 3 = 'Not installed'; 4 = 'Unknown' }
+
+    try {
+        foreach ($f in (Get-CimInstance -ClassName Win32_OptionalFeature -ErrorAction Stop)) {
+            $state = [int]$f.InstallState
+            $label = if ($stateLabels.ContainsKey($state)) { $stateLabels[$state] } else { 'Unknown' }
+            $display = if ($f.Caption) { [string]$f.Caption } else { [string]$f.Name }
+
+            $features.Add([PSCustomObject]@{
+                id                   = "FEATURE_$([string]$f.Name)"
+                name                 = $display
+                featureName          = [string]$f.Name
+                publisher            = 'Microsoft Windows'
+                version              = $label
+                installDate          = $null
+                installLocation      = ''
+                registryPath         = ''
+                icon                 = ''
+                type                 = 'Feature'
+                sizeBytes            = 0
+                state                = $label
+                enabled              = ($state -eq 1)
+                classification       = 'feature'
+                classificationReason = "A Windows optional feature, currently $($label.ToLower()). Vanish lists these; turning them on or off is done in Windows' own 'Turn Windows features on or off' dialog (optionalfeatures.exe)."
+                removalNote          = ''
+                protected            = $false
+                protectionReason     = ''
+                actionable           = $false
+                family               = "microsoft|$([string]$f.Name)"
+            })
+        }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message; features = @() }
+    }
+
+    $list = @($features | Sort-Object name)
+    return @{
+        success  = $true
+        features = $list
+        total    = $list.Count
+        enabled  = @($list | Where-Object { $_.enabled }).Count
+    }
+}
+
 # 2. Fetch Installed UWP Apps
 function Get-UwpApps {
     $apps = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -3780,6 +3844,9 @@ if ($Action) {
         }
         "list-uwp" {
             Get-UwpApps | ConvertTo-Json -Depth 5
+        }
+        "list-windows-features" {
+            Get-WindowsFeatures | ConvertTo-Json -Depth 5
         }
         "restore-point" {
             Create-RestorePoint -p $Params

@@ -68,6 +68,7 @@ function stub(method, defaultValue) {
 contextBridge.exposeInMainWorld('api', {
   getDesktopApps: stub('getDesktopApps', apps),
   getUwpApps: stub('getUwpApps', []),
+  getWindowsFeatures: stub('getWindowsFeatures', { success: true, features: [], total: 0, enabled: 0 }),
   createRestorePoint: stub('createRestorePoint', { success: true }),
   scanLeftovers: stub('scanLeftovers', { files: [], registry: [] }),
   purgeRemnants: stub('purgeRemnants', { success: true, quarantinedCount: 0, files: [], registry: [] }),

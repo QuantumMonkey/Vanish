@@ -288,6 +288,17 @@ ipcMain.handle('get-uwp-apps', async () => {
   }
 });
 
+// 7oo.7: Windows optional features. Read-only, and deliberately available in
+// Audit Mode - the engine uses the CIM class rather than the DISM cmdlet
+// precisely so this works unelevated.
+ipcMain.handle('get-windows-features', async () => {
+  try {
+    return await runPowerShell('list-windows-features');
+  } catch (error) {
+    return { success: false, error: error.message, features: [] };
+  }
+});
+
 fullModeOnly('create-restore-point', async () => {
   try {
     return await runPowerShell('restore-point');
