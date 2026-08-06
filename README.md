@@ -111,10 +111,42 @@ cd Vanish
 npm ci
 npm start
 
-# Run the local verification suite (290/290 unelevated; 2 of 14 suites need
+# Run the local verification suite (314/314 unelevated; 2 of 14 suites need
 # Full Mode - run from an elevated shell for the full picture):
 npm test
+
+# Run it against YOUR machine, with the real engine and real data. Slower,
+# read-only, and the one that matters - see below:
+npx electron test/real-data-verify.js
 ```
+
+### Two kinds of test, and why the second one exists
+
+`npm test` drives a fixture: one fake application, clean fields, instant
+responses. It is fast, it runs anywhere, and on 2026-08-06 it reported
+**312 of 312 passing while the app was visibly broken** — 60 of 151 installed
+programs invisible, the Storage panel rendering nothing at all, and the
+uninstall buttons sitting 250px below the bottom of the window. Fixture-shaped
+tests validate fixture-shaped reality.
+
+`test/real-data-verify.js` runs the real preload against the real backend on
+the machine you are sitting at, and asserts what a user would actually see.
+Its ground truth comes from `test/fixtures/real-machine-truth.ps1`, which
+queries the machine with its own independent queries — a harness that asks the
+code under test what reality looks like can only ever agree with itself. It
+prints what it could **not** verify at the end of every run.
+
+```powershell
+npx electron test/real-data-verify.js                      # everything
+npx electron test/real-data-verify.js --only=storage,force  # named sections
+npx electron test/real-data-verify.js --sweep               # 800x600, 1080x720, 1440x900
+npx electron test/real-data-verify.js --plant               # proves broken-entry detection
+```
+
+It is deliberately outside `npm test`: it is slow, its results depend on what
+is installed, and its failures are meant to be read rather than counted.
+`--plant` creates one clearly-named broken uninstall entry under HKCU and
+removes it again; everything else is read-only.
 
 ## Documentation
 

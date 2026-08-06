@@ -18,7 +18,18 @@ let mainWindow;
 // bootstrap runs exactly as it always did except that no window is created and
 // no start-up side effect that writes to the machine fires. The harness supplies
 // its own window, with its own title, so it can never be mistaken for the app.
-const headlessHarness = process.env.VANISH_HEADLESS_HARNESS === '1';
+//
+// SECURITY: gated on app.isPackaged, and that gate is the point rather than
+// belt-and-braces. One of the start-up side effects this suppresses is
+// secure-data-dir, which locks the directory holding manifest.json, queue.json
+// and the .reg restore manifests - files the ELEVATED engine reads as
+// instructions. A standard user who can write them has a privilege escalation
+// path (security review 2026-08-03, Vuln 2). An environment variable that
+// silently disables that hardening in a shipped, elevated build is a weakness
+// even if setting it already implies some access, so in a packaged build these
+// test hatches do not exist at all.
+const testHatchesAllowed = !app.isPackaged;
+const headlessHarness = testHatchesAllowed && process.env.VANISH_HEADLESS_HARNESS === '1';
 
 // ==========================================
 // ELEVATION TIERS (promptgate Rule 3, REQ-04, NFR-02)
@@ -117,7 +128,9 @@ const bootstrapped = app.whenReady().then(async () => {
   // automated suite that loads this file directly (test/tier-verify.js and
   // its siblings) would hang an unattended run on a live UAC prompt if this
   // setting were ever left 'full' on the machine from real use.
-  const autoElevateDisabled = process.env.VANISH_DISABLE_AUTO_ELEVATE === '1';
+  // Same packaging gate as headlessHarness above: a test hatch that changes
+  // elevation behaviour must not be settable against a shipped build.
+  const autoElevateDisabled = testHatchesAllowed && process.env.VANISH_DISABLE_AUTO_ELEVATE === '1';
   if (!autoElevateDisabled && !isFullMode() && store.readSettings().startupMode === 'full') {
     const relaunch = await attemptElevatedRelaunch('startup-auto');
     if (relaunch.success) {

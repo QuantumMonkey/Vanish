@@ -1651,6 +1651,27 @@ app.whenReady().then(async () => {
     rendererErrors.join('\n')
   );
 
+  // A pass total that does not state its own boundary is the exact problem this
+  // file was built to end. Say what was NOT checked, every run, unprompted.
+  console.log('');
+  console.log('-'.repeat(72));
+  console.log('Not verified by this run:');
+  if (!truth.isAdmin) {
+    console.log('  * Every destructive path. This run was unelevated, so nothing that');
+    console.log('    actually uninstalls, purges, quarantines or restores was executed');
+    console.log('    end to end - only that it is correctly refused. Re-run from an');
+    console.log('    elevated shell to cover those, and read what it removes first.');
+  } else {
+    console.log('  * Destructive paths were REACHABLE in this run (elevated). The');
+    console.log('    sections here are still read-only by design; being elevated does');
+    console.log('    not mean an uninstall was actually performed.');
+  }
+  console.log('  * Anything not installed on this machine. These results describe one');
+  console.log(`    Windows ${process.getSystemVersion ? process.getSystemVersion() : ''} box with ${truth.entryCount} uninstall entries and`);
+  console.log(`    ${truth.diskCount} fixed drive(s). A clean-VM pass (TASK-17) is a different question.`);
+  console.log('  * The quarantine section drives the real renderer with representative');
+  console.log('    entries when the vault is empty; it does not prove a real restore.');
+
   console.log('');
   console.log('='.repeat(72));
   console.log(`Result: ${pass} passed, ${fail} failed`);

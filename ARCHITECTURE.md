@@ -86,6 +86,7 @@ Every destructive channel below is wrapped in `fullModeOnly()` ([main.js](main.j
 |---|---|---|---|---|
 | `getDesktopApps()` | `get-desktop-apps` | | `runPowerShell('list-desktop')` | `Get-InstalledApps` |
 | `getUwpApps()` | `get-uwp-apps` | | `runPowerShell('list-uwp')` | `Get-UwpApps` |
+| `getWindowsFeatures()` | `get-windows-features` | | read-only, works in Audit Mode | `Get-WindowsFeatures` (`Win32_OptionalFeature`, not the DISM cmdlet, which requires elevation) |
 | `createRestorePoint()` | `create-restore-point` | ✅ | `runPowerShell('restore-point')` | `Create-RestorePoint` |
 | `scanLeftovers(params)` | `scan-leftovers` | | `runPowerShell('scan-leftovers', …)` | `Scan-Leftovers` |
 | `purgeRemnants(remnants)` | `purge-remnants` | ✅ | `vault.quarantine(...)` — routes through the vault, never a direct delete (INV-1) | `Invoke-QuarantineItems` |
@@ -112,6 +113,7 @@ Every destructive channel below is wrapped in `fullModeOnly()` ([main.js](main.j
 | `queueStart({acknowledgedIds})` | `queue-start` | ✅ | `queue.start(...)` — per-item live re-read + trust gate before each uninstall | `read-uninstall-entry`, `run-uninstaller` per item |
 | `queuePause()` | `queue-pause` | ✅ | `queue.pause()` | — |
 | `onQueueUpdate(cb)` | `queue-update` (main→renderer push) | | every state transition, not polled | — |
+| `onScanProgress(cb)` | `scan-progress` (main→renderer push) | | interim scan state. `scanner.ps1` writes progress to **stderr** behind a marker so stdout stays pure JSON and no existing result contract can be corrupted; `main.js` parses it line-buffered and forwards to the requesting sender. Reports measured facts only — stages completed, seconds elapsed — never a predicted percentage (Rule 9) | `Write-ScanProgress` |
 | `findBrokenEntries()` | `find-broken-entries` | | read-only, works in Audit Mode | `Find-BrokenUninstallEntries` |
 | `cleanerScan(params)` | `cleaner-scan` | | read-only | `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, other profiles) |
 | `cleanerPurge(params)` | `cleaner-purge` | ✅ | routes through the vault, same as `purge-remnants` | `Invoke-QuarantineItems` / `Set-PathEntries` |
@@ -168,5 +170,6 @@ Complete until the clean Windows 10 (1607+) and Windows 11 VM pass in TASK-17.
 | Data directory moved out of the shared Electron/Chromium profile | ✅ Implemented — state lives in a `vanish-state` subdirectory nothing but Vanish writes, migrated once from any earlier layout ([lib/store.js](lib/store.js); the shared-profile ACL conflict this fixes is `vanish-uninstaller-z2a`) |
 | `/cso` security audit — command injection, restore-destination guard, data-dir ACL, dependency pinning | ✅ Fixed — see the **Security** section of [CHANGELOG.md](CHANGELOG.md); `vanish-uninstaller-lwz`/`2xt`/`z2a`/`703` |
 | DOM-level UI test coverage of the main flows (wizard, quarantine, queue, System Clean) | ✅ Implemented — `test/ui-interaction-verify.js` + `test/ui-interaction-full-verify.js`, hit-testing the real clickable target rather than the engine/IPC layer alone (`vanish-uninstaller-7y0`) |
+| Verification against real machine state | ✅ Implemented — `test/real-data-verify.js` (`vanish-uninstaller-7oo.10`). The suites above all drive `test/fixtures/stub-preload.js`: one fake application, clean fields, instant responses. That gap is not academic — it is how 312/312 stayed green while 60 of 151 installed programs were invisible, Storage had never once rendered, and the uninstall buttons sat 250px below the window. This harness runs the real preload against the real backend, takes its ground truth from an independent PowerShell probe (`test/fixtures/real-machine-truth.ps1`) so it cannot merely agree with the code under test, and prints what it could **not** verify at the end of every run. `main.js` honours `VANISH_HEADLESS_HARNESS=1` (development builds only) so no diagnostic can spawn a window mistakable for the app |
 
 *Version note: the repo follows a `RELEASE.MAJOR.MINOR` scheme defined in [docs/RELEASING.md](docs/RELEASING.md). Last tagged release is 0.2.1 per [CHANGELOG.md](CHANGELOG.md); everything in this document beyond that — the entire quarantine vault, both elevation tiers, Stages 2/3/6/9, Force Uninstall, and the `/cso` fixes — is unreleased work-in-progress at working version 0.3.0 (`package.json`), gated on the TASK-17 VM pass before it tags.*
