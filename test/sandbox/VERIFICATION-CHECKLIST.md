@@ -50,9 +50,14 @@ Record result and close `vanish-uninstaller-kt0` if all pass.
 
 ## 3. beads-1qp -- Force Uninstall against a real broken app
 
-- [ ] Install a small real app (anything installable without extra
-      licensing -- e.g. 7-Zip, Notepad++, a portable-installer freeware
-      tool). Confirm it shows up in Programs and Features.
+Chrome is installed automatically by `sandbox-setup.ps1` (winget, silent) --
+7-Zip was the original suggestion but uninstalls too cleanly to exercise
+leftover-scan/quarantine meaningfully. Confirm it landed before starting:
+
+- [ ] Chrome shows up in Programs and Features (check the setup window's
+      output too, in case winget wasn't available in this Sandbox image and
+      it fell back to a direct download -- or failed both ways, in which
+      case install anything real by hand before continuing).
 - [ ] Manually delete its uninstaller executable (find the path from its
       registry uninstall string, delete the .exe, leave the registry
       entry).

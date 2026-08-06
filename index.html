@@ -113,8 +113,22 @@
           <div class="search-container">
             <i class="fa-solid fa-magnifying-glass search-icon"></i>
             <input type="text" class="search-input" id="search-bar" placeholder="Search apps by name or publisher...">
+            <!-- A search/filter typed before the initial app list finishes
+                 loading (which can genuinely take 10+ seconds) otherwise
+                 applied silently once it did, with nothing on screen
+                 explaining why the list was short (operator report
+                 2026-08-05, reproduced: typing "edge" mid-load left only 2
+                 of 163 apps visible with no indication a filter was
+                 active). Absolutely positioned so it never adds height to
+                 the layout - a fixed-position sidebar button lower on this
+                 same page clipped off-window the first time this was tried
+                 as a normal flex row. -->
+            <div class="filter-status-caption" id="filter-status-row">
+              <span id="filter-status-text">Showing all applications</span>
+              <button class="btn-clear-filters-inline" id="btn-clear-filters" style="display: none;">Clear</button>
+            </div>
           </div>
-          
+
           <div class="header-controls">
             <!-- Desktop / UWP toggle selector -->
             <div class="toggle-group" id="type-toggle">

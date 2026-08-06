@@ -339,6 +339,7 @@ async function loadApplications() {
   elements.statTotalApps.textContent = '...';
   elements.statUwpApps.textContent = '...';
   elements.statTotalSize.textContent = '...';
+  updateFilterStatus(0);
 
   try {
     const [desktopApps, uwpApps] = await Promise.all([
@@ -450,6 +451,30 @@ function filterAndRenderApps() {
   });
   
   renderTable(filtered);
+  updateFilterStatus(filtered.length);
+}
+
+// Makes an active search/type filter impossible to miss - including one
+// typed before the initial (10+ second) app-list load finished, which used
+// to apply silently with zero on-screen explanation for why the list was
+// short (operator report 2026-08-05).
+function updateFilterStatus(shownCount) {
+  const row = document.getElementById('filter-status-row');
+  const text = document.getElementById('filter-status-text');
+  const clearBtn = document.getElementById('btn-clear-filters');
+  if (!row || !text || !clearBtn) return;
+
+  const isFiltered = filterText.trim() !== '' || filterType !== 'all';
+  row.classList.toggle('filtered', isFiltered);
+  clearBtn.style.display = isFiltered ? '' : 'none';
+
+  if (!isFiltered) {
+    text.textContent = allApps.length === 0
+      ? 'Loading applications...'
+      : `Showing all ${allApps.length} applications`;
+  } else {
+    text.textContent = `Showing ${shownCount} of ${allApps.length} applications`;
+  }
 }
 
 // Render dynamic rows in table
@@ -548,6 +573,16 @@ function setupFilters() {
   // Sort selector
   elements.sortSelector.addEventListener('change', (e) => {
     sortOption = e.target.value;
+    filterAndRenderApps();
+  });
+
+  document.getElementById('btn-clear-filters').addEventListener('click', () => {
+    filterText = '';
+    filterType = 'all';
+    elements.searchBar.value = '';
+    document.querySelectorAll('#type-toggle .toggle-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.getAttribute('data-type') === 'all');
+    });
     filterAndRenderApps();
   });
 }

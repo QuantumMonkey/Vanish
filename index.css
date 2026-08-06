@@ -326,6 +326,35 @@ body {
   width: 320px;
 }
 
+.filter-status-caption {
+  position: absolute;
+  top: 100%;
+  left: 4px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-gray);
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.filter-status-caption.filtered {
+  color: var(--color-primary);
+}
+
+.btn-clear-filters-inline {
+  pointer-events: all;
+  background: none;
+  border: none;
+  color: var(--color-primary);
+  font-size: 11px;
+  text-decoration: underline;
+  cursor: pointer;
+  padding: 0;
+}
+
 .search-input {
   width: 100%;
   padding: 12px 16px 12px 42px;

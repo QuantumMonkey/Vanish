@@ -167,6 +167,53 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 500));
   await assertClickable(win, '#apps-tbody .app-row', 'the normal app list is back for the rest of this suite');
 
+  // --- Filter status: an active search must never be invisible ------------
+  // Found running the real app 2026-08-05: typing into the search box while
+  // the initial (10+ second, real machine) load was still in flight left a
+  // silent filter active once it finished - "only 2 of 163 apps" with
+  // nothing on screen explaining why. This is the fix, not the load-time
+  // race itself: whatever narrows the list must always say so.
+  console.log('');
+  console.log('Filter status: an active filter is always visible, never silent');
+
+  const defaultStatus = await win.webContents.executeJavaScript(`(() => ({
+    text: document.getElementById('filter-status-text').textContent,
+    filtered: document.getElementById('filter-status-row').classList.contains('filtered'),
+    clearVisible: document.getElementById('btn-clear-filters').style.display !== 'none'
+  }))()`);
+  assert(defaultStatus.text.includes('Showing all'), 'unfiltered state says "showing all", not a bare count');
+  assert(defaultStatus.filtered === false, 'unfiltered state carries no "filtered" styling');
+  assert(defaultStatus.clearVisible === false, 'no Clear button when nothing is filtered');
+
+  await win.webContents.executeJavaScript(`(() => {
+    const el = document.getElementById('search-bar');
+    el.value = 'nothing matches this';
+    el.dispatchEvent(new Event('input'));
+  })()`);
+  await new Promise((r) => setTimeout(r, 200));
+
+  const filteredStatus = await win.webContents.executeJavaScript(`(() => ({
+    text: document.getElementById('filter-status-text').textContent,
+    filtered: document.getElementById('filter-status-row').classList.contains('filtered'),
+    clearVisible: document.getElementById('btn-clear-filters').style.display !== 'none'
+  }))()`);
+  assert(filteredStatus.text.includes('Showing 0 of'), 'a narrowing search says exactly how narrow, and out of how many');
+  assert(filteredStatus.filtered === true, 'a filtered state is visually marked');
+  assert(filteredStatus.clearVisible === true, 'Clear button appears once something is filtered');
+
+  await assertClickable(win, '#btn-clear-filters', 'the Clear filter button is actually clickable');
+  await win.webContents.executeJavaScript(`document.getElementById('btn-clear-filters').click()`);
+  await new Promise((r) => setTimeout(r, 200));
+
+  const clearedStatus = await win.webContents.executeJavaScript(`(() => ({
+    text: document.getElementById('filter-status-text').textContent,
+    searchValue: document.getElementById('search-bar').value,
+    rows: document.querySelectorAll('#apps-tbody .app-row').length
+  }))()`);
+  assert(clearedStatus.searchValue === '', 'Clear filter empties the search box, not just internal state');
+  assert(clearedStatus.text.includes('Showing all'), 'status returns to "showing all" after clearing');
+  assert(clearedStatus.rows === 1, 'the app list itself reappears after clearing');
+
   // --- An invisible overlay must never capture clicks ---------------------
   console.log('');
   console.log('Hidden overlays do not swallow clicks (the defect this suite exists for)');
