@@ -253,6 +253,7 @@ async function sectionInventory(truth) {
     return desktop.map((a) => ({
       name: a.name, publisher: a.publisher, registryPath: a.registryPath,
       classification: a.classification || null,
+      classificationReason: a.classificationReason || '',
       protected: a.protected === true,
       protectionReason: a.protectionReason || ''
     }));
@@ -283,22 +284,53 @@ async function sectionInventory(truth) {
   );
 
   // A user must be able to uninstall an application that happens to be
-  // published by Microsoft. Only genuine OS components may be held back.
+  // published by Microsoft. Only genuine OS components may be held back, and
+  // "Microsoft published it" is not evidence of that.
+  const ORDINARY_MICROSOFT = /^(Microsoft Edge|Microsoft Office|Microsoft OneDrive|Microsoft Teams|Microsoft Visual Studio Code|Windows Subsystem for Linux)/i;
   const microsoftApps = truth.entries.filter((e) =>
-    /^Microsoft (Edge|Office|OneDrive|Teams|Visual Studio Code)/i.test(e.name) && e.uninstallerExists);
+    ORDINARY_MICROSOFT.test(e.name) && e.uninstallerExists && !/WebView2|Runtime|Redistributable/i.test(e.name));
   if (microsoftApps.length === 0) {
     skip('ordinary Microsoft applications are uninstallable', 'none installed on this machine');
   } else {
+    console.log(`  (checking ${microsoftApps.length}: ${microsoftApps.map((m) => m.name).join(', ')})`);
     const held = microsoftApps.filter((m) => {
       const row = engine.find((a) => String(a.name).toLowerCase() === String(m.name).toLowerCase());
-      return !row || row.protected === true;
+      return !row || row.protected === true || row.classification !== 'application';
     });
     assert(
       held.length === 0,
-      'ordinary Microsoft applications are listed and not protected',
-      held.map((h) => h.name).join(', ')
+      'ordinary Microsoft applications are listed as applications and not protected',
+      held.map((h) => {
+        const row = engine.find((a) => String(a.name).toLowerCase() === String(h.name).toLowerCase());
+        return row ? `${h.name} -> ${row.classification}${row.protected ? ' PROTECTED' : ''}` : `${h.name} -> missing`;
+      }).join('\n')
     );
   }
+
+  // Every classification the engine hands back must be one the UI knows how to
+  // present, and every component must justify itself.
+  const KNOWN = new Set(['application', 'component', 'update']);
+  const unknownClass = engine.filter((a) => !KNOWN.has(a.classification));
+  assert(
+    unknownClass.length === 0,
+    'every classification is one the renderer understands',
+    unknownClass.map((u) => `${u.name} -> ${u.classification}`).join('\n')
+  );
+
+  const unexplained = engine.filter((a) => a.classification === 'component' && !a.classificationReason.trim());
+  assert(
+    unexplained.length === 0,
+    'every component states why it is not a standalone application',
+    unexplained.map((u) => u.name).join('\n')
+  );
+
+  const applications = engine.filter((a) => a.classification === 'application');
+  console.log(`  (${applications.length} applications, ${engine.length - applications.length} components/updates)`);
+  assert(
+    applications.length >= 20,
+    'the default list is still a real list once components are separated out',
+    `only ${applications.length} applications`
+  );
 
   // Rule 24: whatever protection survives must say WHY, in the payload, not as
   // a greyed-out control with no explanation.
@@ -309,14 +341,52 @@ async function sectionInventory(truth) {
     silentlyProtected.map((s) => s.name).join(', ')
   );
 
-  // Anything the engine hides from the default view has to be reachable and
-  // counted, never silently dropped.
-  const classified = engine.filter((a) => a.classification);
+  // Anything the engine holds back from the default view has to be reachable
+  // and counted on screen - a narrowed list that reads as a complete one is the
+  // whole defect.
+  const ui = await js(`(() => {
+    const status = document.getElementById('filter-status-text').textContent;
+    const badge = document.getElementById('components-count');
+    const box = document.getElementById('chk-show-components');
+    return {
+      status,
+      badge: badge ? badge.textContent : null,
+      toggleExists: !!box,
+      rows: document.querySelectorAll('#apps-tbody .app-row').length
+    };
+  })()`);
+
+  assert(ui.toggleExists, 'the list offers a way to bring components into view');
   assert(
-    classified.length === engine.length,
-    'every entry carries a classification the UI can filter on',
-    `${engine.length - classified.length} of ${engine.length} entries have no classification`
+    /component/i.test(ui.status) || ui.badge === '0',
+    'the caption says how many entries the default view is holding back',
+    `caption: "${ui.status}"`
   );
+
+  // And the toggle has to actually work against real data.
+  if (ui.toggleExists) {
+    const withComponents = await js(`(async () => {
+      const box = document.getElementById('chk-show-components');
+      box.checked = true;
+      box.dispatchEvent(new Event('change'));
+      await new Promise((r) => setTimeout(r, 400));
+      const rows = document.querySelectorAll('#apps-tbody .app-row').length;
+      box.checked = false;
+      box.dispatchEvent(new Event('change'));
+      await new Promise((r) => setTimeout(r, 400));
+      return { rows, backTo: document.querySelectorAll('#apps-tbody .app-row').length };
+    })()`);
+    assert(
+      withComponents.rows > ui.rows,
+      'turning components on actually reveals more rows',
+      `${ui.rows} -> ${withComponents.rows}`
+    );
+    assert(
+      withComponents.backTo === ui.rows,
+      'turning it back off restores the default view',
+      `${withComponents.backTo} vs ${ui.rows}`
+    );
+  }
 
   return { engine, missing };
 }
@@ -328,27 +398,43 @@ async function sectionAppList(listState) {
   const dom = await js(`(() => {
     const container = document.querySelector('.apps-list-container');
     const rows = document.querySelectorAll('#apps-tbody .app-row');
+    const loaded = (typeof allApps !== 'undefined') ? allApps : [];
+    const applications = loaded.filter((a) => a.classification === 'application');
     return {
       rows: rows.length,
-      allApps: (typeof allApps !== 'undefined') ? allApps.length : -1,
+      loaded: loaded.length,
+      applications: applications.length,
+      hidden: loaded.length - applications.length,
       scrollHeight: container ? container.scrollHeight : 0,
       clientHeight: container ? container.clientHeight : 0,
       status: document.getElementById('filter-status-text').textContent
     };
   })()`);
 
-  console.log(`  (${dom.rows} rows rendered, list is ${dom.scrollHeight}px tall in a ${dom.clientHeight}px viewport)`);
+  console.log(`  (${dom.rows} rows rendered from ${dom.loaded} loaded entries, list is ${dom.scrollHeight}px tall in a ${dom.clientHeight}px viewport)`);
 
-  assert(dom.rows === dom.allApps, 'every loaded application has a row', `${dom.rows} rows for ${dom.allApps} apps`);
+  // The default view is applications; components are classified and reachable
+  // behind their own toggle (7oo.3). What must never happen is a row going
+  // missing without the caption admitting it.
+  assert(
+    dom.rows === dom.applications,
+    'every loaded application has a row',
+    `${dom.rows} rows for ${dom.applications} applications (${dom.loaded} entries loaded)`
+  );
   assert(
     dom.scrollHeight > dom.clientHeight,
     'the list is long enough to scroll - the condition the fixture suites never reach',
     `scrollHeight ${dom.scrollHeight} <= clientHeight ${dom.clientHeight}`
   );
   assert(
-    dom.status.includes(String(dom.allApps)),
-    'the filter caption states the real total',
+    dom.status.includes(String(dom.applications)),
+    'the filter caption states the real total on show',
     dom.status
+  );
+  assert(
+    dom.hidden === 0 || dom.status.includes(String(dom.hidden)),
+    'the filter caption states how many entries are being held back',
+    `${dom.hidden} hidden, caption says: "${dom.status}"`
   );
   console.log(`  (initial load took ${(listState.elapsedMs / 1000).toFixed(1)}s)`);
 
@@ -685,10 +771,21 @@ async function sectionRedundancy() {
 async function sectionForceUninstall(truth) {
   heading('Force Uninstall: the list matches what is genuinely broken');
 
-  // Ground truth, derived independently: an entry is broken when Windows has no
-  // way to uninstall it, or the uninstaller it names is gone.
+  // Ground truth, derived independently of the engine.
+  //
+  // "Broken" means an entry that PRESENTS ITSELF as a removable application and
+  // whose removal path is dead. A component was never independently removable,
+  // so "it has no uninstaller" is its normal shape, not a fault: the fifteen
+  // NVIDIA container rows on this machine are bookkeeping for the driver
+  // package, and offering to force-uninstall them is precisely the "wrong
+  // entries which cant be uninstalled" half of the operator's report.
+  const looksLikeComponent = (e) =>
+    !e.uninstallString ||
+    !!e.parentKeyName ||
+    /Runtime|Redistributable|_redist|redist |WebView2|Prerequisites?|\sComponents?$/i.test(e.name);
+
   const trulyBroken = truth.entries.filter((e) =>
-    !e.uninstallString || (!e.uninstallerExists && e.uninstallerPath));
+    !looksLikeComponent(e) && !e.uninstallerExists && e.uninstallerPath);
 
   await js(`document.querySelector('.nav-item[data-tab="force-uninstall"]').click(); true;`);
   const started = Date.now();
@@ -737,6 +834,99 @@ async function sectionForceUninstall(truth) {
   await assertClickable('#btn-rescan-broken', 'Re-scan is clickable');
   await assertClickable('#force-name-input', 'the manual search box is reachable');
   await assertClickable('#btn-force-scan', 'the manual Scan button is clickable');
+
+  // A machine with nothing broken cannot prove the DETECTION works - it only
+  // proves nothing was falsely reported. --plant creates one genuinely broken
+  // entry under HKCU (no elevation, our own key, removed again in the finally
+  // below) so the positive path is demonstrated rather than assumed.
+  if (!process.argv.includes('--plant')) {
+    skip('a genuinely broken entry is detected end to end', 'pass --plant to prove the positive path');
+    return;
+  }
+
+  console.log('  planting one broken uninstall entry under HKCU...');
+  const planted = await plantBrokenEntry();
+  if (!planted.ok) {
+    assert(false, 'the harness could plant a broken entry', planted.error);
+    return;
+  }
+
+  try {
+    await js(`document.getElementById('btn-rescan-broken').click(); true;`);
+    const rescanStart = Date.now();
+    while (Date.now() - rescanStart < 180000) {
+      const loading = await js(`document.getElementById('broken-loading').style.display !== 'none'`);
+      if (!loading) break;
+      await sleep(500);
+    }
+
+    const after = await js(`(() => ({
+      names: Array.from(document.querySelectorAll('#broken-list .vault-entry .vault-entry-app'))
+        .map((el) => el.textContent.trim().split('\\n')[0].trim()),
+      inAppList: (typeof allApps !== 'undefined')
+        ? allApps.filter((a) => a.name === ${JSON.stringify(PLANTED_NAME)})
+            .map((a) => ({ classification: a.classification, actionable: a.actionable }))
+        : []
+    }))()`);
+
+    assert(
+      after.names.some((n) => n.includes(PLANTED_NAME)),
+      'a genuinely broken entry is detected and listed',
+      `Force Uninstall listed: ${after.names.join(', ') || '(nothing)'}`
+    );
+    if (after.names.some((n) => n.includes(PLANTED_NAME))) {
+      await assertClickable('#broken-list .vault-entry [data-force-entry]', 'the detected entry offers a working action');
+    }
+
+    // The same entry must also be an ordinary application in the main list -
+    // the two surfaces read one classified inventory now, so they cannot
+    // disagree the way they used to.
+    await js(`loadApplications(); true;`);
+    await waitForAppList();
+    const listed = await js(`(typeof allApps !== 'undefined')
+      ? allApps.filter((a) => a.name === ${JSON.stringify(PLANTED_NAME)})
+          .map((a) => ({ classification: a.classification, actionable: a.actionable }))
+      : []`);
+    assert(
+      listed.length === 1 && listed[0].classification === 'application' && listed[0].actionable === false,
+      'the same entry appears in the app list as an application whose uninstaller is gone',
+      JSON.stringify(listed)
+    );
+  } finally {
+    const removed = await removePlantedEntry();
+    assert(removed.ok, 'the harness removed its planted entry again', removed.error);
+  }
+}
+
+// --- planted probe (only with --plant) -------------------------------------
+
+const PLANTED_NAME = 'Vanish Harness Probe (safe to delete)';
+const PLANTED_KEY = 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\VanishRealDataProbe';
+
+function runPowerShellSnippet(script) {
+  return new Promise((resolve) => {
+    const ps = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script]);
+    let err = '';
+    ps.stderr.on('data', (d) => { err += d.toString(); });
+    ps.on('close', (code) => resolve({ ok: code === 0, error: err.trim() }));
+  });
+}
+
+function plantBrokenEntry() {
+  return runPowerShellSnippet(
+    `New-Item -Path '${PLANTED_KEY}' -Force | Out-Null; ` +
+    `New-ItemProperty -Path '${PLANTED_KEY}' -Name DisplayName -Value '${PLANTED_NAME}' -PropertyType String -Force | Out-Null; ` +
+    `New-ItemProperty -Path '${PLANTED_KEY}' -Name Publisher -Value 'Vanish test harness' -PropertyType String -Force | Out-Null; ` +
+    `New-ItemProperty -Path '${PLANTED_KEY}' -Name DisplayVersion -Value '0.0.0' -PropertyType String -Force | Out-Null; ` +
+    `New-ItemProperty -Path '${PLANTED_KEY}' -Name UninstallString ` +
+    `-Value '"C:\\Program Files\\VanishHarnessNoSuchApp\\uninstall.exe" /S' -PropertyType String -Force | Out-Null`
+  );
+}
+
+function removePlantedEntry() {
+  return runPowerShellSnippet(
+    `if (Test-Path '${PLANTED_KEY}') { Remove-Item -Path '${PLANTED_KEY}' -Recurse -Force }`
+  );
 }
 
 // --- system clean (7oo.5) --------------------------------------------------

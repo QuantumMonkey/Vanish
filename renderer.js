@@ -6,6 +6,10 @@ let selectedApp = null;
 let activeTab = 'all-apps';
 let filterText = '';
 let filterType = 'all';
+// 7oo.3: the default list is the things a person recognises as applications.
+// Components are classified and counted, never dropped - this flag is how they
+// come into view.
+let showComponents = false;
 let sortOption = 'name-asc';
 let isAdmin = false;
 
@@ -321,6 +325,19 @@ async function requestElevation(overlay) {
   toast('Elevation was declined. Vanish stays in Audit Mode.', 'warn');
 }
 
+// 7oo.3: the protected set is now tiny and evidence-backed - Windows servicing
+// components, not "anything Microsoft published". When it does refuse, it
+// refuses by name and with the reason, never as a silently inert button.
+function guardProtected() {
+  if (!selectedApp || selectedApp.protected !== true) return true;
+  toast(
+    `${selectedApp.name} is held back: ${selectedApp.protectionReason || 'Windows needs it to service this machine.'}`,
+    'warn',
+    8000
+  );
+  return false;
+}
+
 // Reused by every destructive UI path so a locked control can never act.
 function guardFullMode() {
   if (isAdmin) return true;
@@ -354,7 +371,14 @@ async function loadApplications() {
       name: String(app.name ?? 'Unknown'),
       publisher: String(app.publisher ?? 'Unknown Publisher'),
       version: String(app.version ?? 'Unknown'),
-      type: String(app.type ?? 'Desktop')
+      type: String(app.type ?? 'Desktop'),
+      // UWP packages have no uninstall-hive classification of their own; they
+      // are all standalone applications by construction.
+      classification: String(app.classification ?? 'application'),
+      classificationReason: String(app.classificationReason ?? ''),
+      removalNote: String(app.removalNote ?? ''),
+      protected: app.protected === true,
+      protectionReason: String(app.protectionReason ?? '')
     }));
 
     updateDashboardStats();
@@ -392,24 +416,34 @@ function formatBytes(bytes, decimals = 2) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
 }
 
+// Everything the user would call an application. Components and update rows are
+// real and reachable, but they are not what "you have N applications" means.
+function visibleApps() {
+  return showComponents ? allApps : allApps.filter((a) => a.classification === 'application');
+}
+
 // Update stats count & size
 function updateDashboardStats() {
-  const totalCount = allApps.length;
-  const uwpCount = allApps.filter(app => app.type === 'UWP').length;
-  
+  const shown = visibleApps();
+  const uwpCount = shown.filter(app => app.type === 'UWP').length;
+  const componentCount = allApps.length - allApps.filter((a) => a.classification === 'application').length;
+
   let totalBytes = 0;
-  allApps.forEach(app => {
+  shown.forEach(app => {
     if (app.sizeBytes) totalBytes += app.sizeBytes;
   });
-  
-  elements.statTotalApps.textContent = totalCount;
+
+  elements.statTotalApps.textContent = shown.length;
   elements.statUwpApps.textContent = uwpCount;
   elements.statTotalSize.textContent = formatBytes(totalBytes, 1);
+
+  const badge = document.getElementById('components-count');
+  if (badge) badge.textContent = componentCount;
 }
 
 // Filter and Sort Handler
 function filterAndRenderApps() {
-  let filtered = allApps.filter(app => {
+  let filtered = visibleApps().filter(app => {
     // 1. Search term match
     const term = filterText.toLowerCase();
     const matchesSearch = app.name.toLowerCase().includes(term) || 
@@ -468,12 +502,19 @@ function updateFilterStatus(shownCount) {
   row.classList.toggle('filtered', isFiltered);
   clearBtn.style.display = isFiltered ? '' : 'none';
 
+  const pool = visibleApps().length;
+  // The component split is a filter like any other, so it has to admit itself.
+  // The whole reason 60 entries could vanish for good is that a narrowed list
+  // read as a complete one.
+  const hidden = showComponents ? 0 : allApps.length - pool;
+  const hiddenSuffix = hidden > 0 ? ` (${hidden} component${hidden === 1 ? '' : 's'} hidden)` : '';
+
   if (!isFiltered) {
     text.textContent = allApps.length === 0
       ? 'Loading applications...'
-      : `Showing all ${allApps.length} applications`;
+      : `Showing all ${pool} applications${hiddenSuffix}`;
   } else {
-    text.textContent = `Showing ${shownCount} of ${allApps.length} applications`;
+    text.textContent = `Showing ${shownCount} of ${pool} applications${hiddenSuffix}`;
   }
 }
 
@@ -548,7 +589,31 @@ function selectApp(app, rowElement) {
   elements.detPath.textContent = app.installLocation || 'Unknown';
   elements.detReg.textContent = app.registryPath || 'Unknown';
   elements.detType.textContent = app.type === 'UWP' ? 'Universal Windows Platform (UWP)' : 'Classic Desktop Executable';
-  
+
+  // Why this entry is classified as it is, why Windows hides its uninstall
+  // button, or why Vanish holds it back. Whichever applies, the user reads the
+  // actual reason instead of guessing at a greyed-out button (Rule 24).
+  const note = document.getElementById('det-note');
+  const noteText = document.getElementById('det-note-text');
+  if (note && noteText) {
+    const reasons = [app.protectionReason, app.classificationReason, app.removalNote]
+      .map((r) => String(r || '').trim())
+      .filter(Boolean);
+    noteText.textContent = reasons.join(' ');
+    note.style.display = reasons.length ? '' : 'none';
+    note.classList.toggle('protected', app.protected === true);
+  }
+
+  // A protected entry is the one case where the action is genuinely refused, so
+  // the button has to say so rather than looking available.
+  const uninstallBtn = elements.btnStartUninstall;
+  if (uninstallBtn) {
+    uninstallBtn.classList.toggle('entry-protected', app.protected === true);
+    uninstallBtn.querySelector('span').textContent = app.protected
+      ? 'Protected by Vanish'
+      : 'Clean Uninstall';
+  }
+
   // Show details panel
   elements.detailsSidebar.classList.add('active');
 }
@@ -570,6 +635,16 @@ function setupFilters() {
     }
   });
   
+  // Components toggle (7oo.3)
+  const componentsBox = document.getElementById('chk-show-components');
+  if (componentsBox) {
+    componentsBox.addEventListener('change', (e) => {
+      showComponents = e.target.checked;
+      updateDashboardStats();
+      filterAndRenderApps();
+    });
+  }
+
   // Sort selector
   elements.sortSelector.addEventListener('change', (e) => {
     sortOption = e.target.value;
@@ -777,6 +852,7 @@ async function loadAboutPanel() {
 function setupDetailsPanel() {
   elements.btnStartUninstall.addEventListener('click', () => {
     if (!guardFullMode()) return;
+    if (!guardProtected()) return;
     if (selectedApp) {
       openUninstallWizard(selectedApp);
     }
@@ -786,6 +862,7 @@ function setupDetailsPanel() {
   if (btnQueue) {
     btnQueue.addEventListener('click', () => {
       if (!guardFullMode()) return;
+      if (!guardProtected()) return;
       if (selectedApp) queueAddApp(selectedApp);
     });
   }

@@ -48,66 +48,386 @@ function Format-InstallDate {
     }
 }
 
-# 1. Fetch Installed Desktop Applications
-function Get-InstalledApps {
-    $regPaths = @(
-        @{ Path = "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"; Hive = "HKLM" },
-        @{ Path = "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*"; Hive = "HKLM6432" },
-        @{ Path = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*"; Hive = "HKCU" }
+# ==========================================
+# 1. INSTALLED DESKTOP APPLICATIONS (REQ-01, 7oo.3)
+# ==========================================
+#
+# WHAT CHANGED AND WHY (operator audit 2026-08-06):
+#
+#   "system installs are discouraged to touch, meaning software windows needs
+#    to survive, not every ms product. but this is just ridiculous."
+#
+# The old reader dropped, silently and permanently, every entry with
+# SystemComponent=1 or a ParentKeyName. On the operator's own machine that hid
+# 60 of 151 entries - Windows Subsystem for Linux, the ASUS utilities, the
+# NVIDIA component rows, both Python installations' feature entries, every
+# Visual C++ runtime. The app then reported a confident "86 applications" for a
+# machine with 151 registry entries, and its Force Uninstall surface inherited
+# the same blind spot, so anything hidden from the inventory was also unfixable.
+#
+# Two separate mistakes were tangled together in that one filter:
+#
+#   1. "Windows needs this" was conflated with "Microsoft published this" and
+#      with "the vendor set a flag." A vendor setting SystemComponent=1 is
+#      saying "this is not a standalone product in my installer's model" - it is
+#      not saying "removing this breaks Windows," and it certainly does not say
+#      that about Kaspersky or ASUS Aura.
+#   2. Not-a-standalone-product was implemented as DELETE FROM THE LIST rather
+#      than as a classification. Anything invisible cannot be explained,
+#      counted, searched for, or acted on.
+#
+# So: nothing is dropped any more. Every display-named entry comes back, carries
+# a classification the UI can filter on, and - where it is held back - says
+# exactly why (promptgate Rule 24). Protection is now a narrow, evidence-backed
+# claim about Windows servicing, not a publisher check. Office, Teams, Edge,
+# OneDrive, Visual Studio and WSL are ordinary uninstallable applications, and
+# there is a test asserting they stay that way.
+
+# An entry Windows itself relies on to service the machine. Deliberately tiny,
+# and deliberately about function rather than publisher: everything else that
+# Microsoft happens to ship is an ordinary application.
+$script:OsComponentRules = @(
+    @{ Pattern = 'Update Health Tools';
+       Reason  = 'Part of the Windows Update client. Removing it stops this machine from receiving quality updates.' },
+    @{ Pattern = '^Windows Update ';
+       Reason  = 'Part of the Windows Update client. Removing it stops this machine from receiving quality updates.' },
+    @{ Pattern = '^Microsoft Windows Desktop Runtime.*required by Windows';
+       Reason  = 'Runtime that a Windows-supplied component is bound to.' }
+)
+
+# Shared runtimes: real software, removable, but installed BY other applications
+# rather than by the user. Classified as components so the default list is the
+# things a person recognises - never hidden, never protected.
+$script:SharedRuntimePattern =
+    'Visual C\+\+ .*(Runtime|Redistributable)|Visual Basic/C\+\+ Runtime|' +
+    '\.NET (Host|Runtime|Host FX Resolver)|Desktop Runtime|WebView2|' +
+    '_redist|redist |Redistributable|Prerequisites|Runtime Library|DirectX'
+
+$script:UpdateNamePattern = 'Security Update|Hotfix|^Update for |\(KB\d{6,}\)'
+
+# Strip the bitness/scope suffixes installers append, so "Python 3.13.0
+# (64-bit)" and "Python 3.13.0 Core Interpreter (64-bit)" can be seen as parent
+# and child.
+function Get-EntryNameStem {
+    param([string]$name)
+    if ([string]::IsNullOrWhiteSpace($name)) { return "" }
+    $s = [string]$name
+    $s = $s -replace '\s*\((64-bit|32-bit|x64|x86|user|machine|per-user)\)\s*$', ''
+    return $s.Trim()
+}
+
+# Which PRODUCT FAMILY an entry belongs to (7oo.6).
+#
+# "Microsoft Edge", "Microsoft Edge Update" and "Microsoft Edge WebView2
+# Runtime" are one product, its updater and its embedded runtime. Counting them
+# as three browser installations and advising the user to "keep only one" is
+# wrong advice about their own machine, which is what the keyword matcher did.
+#
+# The key is vendor + first product word, both taken from the registry rather
+# than guessed: the publisher gives the vendor, and the product word is the
+# first meaningful token of the display name once the vendor prefix, version
+# numbers and role words (Update, Runtime, Service, SDK...) are removed.
+#
+# The trade-off is deliberate and stated: this also folds sibling products from
+# one vendor together (Kaspersky and Kaspersky VPN; Chrome and Chrome Remote
+# Desktop). For "do you have redundant software" that is the answer a person
+# actually wants - they are not two competing antivirus products - and being too
+# eager to merge only ever costs a suggestion, while being too eager to split
+# hands out bad advice about what to uninstall.
+$script:VendorNoiseWords = @(
+    'corporation','corp','inc','llc','ltd','limited','gmbh','co','sa','ao','oy','ab',
+    'lab','labs','software','foundation','technologies','technology','systems','group','the'
+)
+$script:ProductRoleWords = @(
+    'update','updater','runtime','redistributable','redist','helper','service','services',
+    'sdk','webview','webview2','installer','launcher','bootstrapper','prerequisite',
+    'prerequisites','client','agent','manager','framework','host','driver','drivers',
+    'components','component','tools','tool','plugin','plugins','extension','extensions'
+)
+
+function Get-ProductFamilyKey {
+    param([string]$name, [string]$publisher)
+
+    $normalise = {
+        param([string]$text)
+        $t = ([string]$text).ToLowerInvariant()
+        $t = $t -replace '\(.*?\)', ' '
+        $t = $t -replace '\bv?\d+([.\-_]\d+)*\b', ' '
+        $t = $t -replace '[^a-z]+', ' '
+        return @($t -split '\s+' | Where-Object { $_ })
+    }
+
+    $vendorTokens = @((& $normalise $publisher) | Where-Object { $script:VendorNoiseWords -notcontains $_ })
+    $vendor = if ($vendorTokens.Count -gt 0) { $vendorTokens[0] } else { 'unknown' }
+
+    $nameTokens = @(& $normalise $name)
+    # Drop a leading vendor prefix ("Microsoft Edge" -> "edge") and role words,
+    # so the updater and the product land on the same key.
+    $productTokens = @($nameTokens | Where-Object {
+        $_ -ne $vendor -and $script:ProductRoleWords -notcontains $_ -and $script:VendorNoiseWords -notcontains $_
+    })
+
+    $product = if ($productTokens.Count -gt 0) { $productTokens[0] }
+               elseif ($nameTokens.Count -gt 0) { $nameTokens[0] }
+               else { 'unknown' }
+
+    return "$vendor|$product"
+}
+
+# One open per key, every value read at once. The per-value helpers elsewhere in
+# this file reopen the key for each read, which is fine for one lookup and
+# wasteful across 150 entries x 12 values.
+function Get-UninstallRegistryEntries {
+    $views = @(
+        @{ Hive = 'LocalMachine'; View = 'Registry64'; Label = 'HKLM (64-bit)'; IdPrefix = 'HKLM' },
+        @{ Hive = 'LocalMachine'; View = 'Registry32'; Label = 'HKLM (32-bit)'; IdPrefix = 'HKLM6432' },
+        @{ Hive = 'CurrentUser';  View = 'Registry64'; Label = 'HKCU';          IdPrefix = 'HKCU' }
     )
+    $sub = 'Software\Microsoft\Windows\CurrentVersion\Uninstall'
+    $entries = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    $apps = [System.Collections.Generic.List[PSCustomObject]]::new()
-
-    foreach ($item in $regPaths) {
-        if (Test-Path (Split-Path $item.Path)) {
-            try {
-                $rawApps = Get-ItemProperty -Path $item.Path -ErrorAction SilentlyContinue
-                foreach ($app in $rawApps) {
-                    # Filter out updates, system components, and apps without display names
-                    if (-not $app.DisplayName) { continue }
-                    if ($app.SystemComponent -eq 1) { continue }
-                    if ($app.ParentKeyName) { continue }
-                    if ($app.DisplayName -match "Security Update" -or $app.DisplayName -match "Hotfix") { continue }
-
-                    # Try to extract install date
-                    $date = Format-InstallDate $app.InstallDate
-                    if (-not $date -and $app.PSChildName -match '^\d{8}$') {
-                        $date = Format-InstallDate $app.PSChildName
-                    }
-
-                    # Determine estimated size in MB
-                    $sizeBytes = 0
-                    if ($app.EstimatedSize) {
-                        # EstimatedSize is in KB
-                        $sizeBytes = [double]$app.EstimatedSize * 1024
-                    }
-
-                    # Unique ID is registry child name + Hive
-                    $id = "$($item.Hive)_$($app.PSChildName)"
-
+    foreach ($v in $views) {
+        $root = Open-RegistryView -hive $v.Hive -subKey $sub -view $v.View
+        if (-not $root) { continue }
+        try {
+            foreach ($childName in $root.GetSubKeyNames()) {
+                $key = $null
+                try { $key = $root.OpenSubKey($childName) } catch { $key = $null }
+                if (-not $key) { continue }
+                try {
                     # Registry values are not guaranteed to be REG_SZ: a
                     # REG_MULTI_SZ DisplayName arrives as String[] and used to
                     # break the whole renderer list. Coerce every display field.
-                    $apps.Add([PSCustomObject]@{
-                        id              = $id
-                        name            = [string]$app.DisplayName
-                        publisher       = if ($app.Publisher) { [string]$app.Publisher } else { "Unknown Publisher" }
-                        version         = if ($app.DisplayVersion) { [string]$app.DisplayVersion } else { "Unknown" }
-                        installDate     = $date
-                        uninstallString = [string]$app.UninstallString
-                        installLocation = [string]$app.InstallLocation
-                        icon            = [string]$app.DisplayIcon
-                        registryPath    = [string]$app.PSPath
-                        type            = "Desktop"
+                    $displayName = [string]$key.GetValue('DisplayName')
+                    if ([string]::IsNullOrWhiteSpace($displayName)) { continue }
+
+                    $installDate = Format-InstallDate ([string]$key.GetValue('InstallDate'))
+                    if (-not $installDate -and $childName -match '^\d{8}$') {
+                        $installDate = Format-InstallDate $childName
+                    }
+
+                    $sizeBytes = 0
+                    $estimated = $key.GetValue('EstimatedSize')
+                    if ($estimated) { $sizeBytes = [double]$estimated * 1024 }
+
+                    $entries.Add([PSCustomObject]@{
+                        id              = "$($v.IdPrefix)_$childName"
+                        keyName         = $childName
+                        hiveLabel       = $v.Label
+                        registryPath    = (Get-ViewRegPath -hive $v.Hive -subKey "$sub\$childName" -view $v.View)
+                        name            = $displayName
+                        stem            = (Get-EntryNameStem $displayName)
+                        publisher       = if ($key.GetValue('Publisher')) { [string]$key.GetValue('Publisher') } else { "Unknown Publisher" }
+                        version         = if ($key.GetValue('DisplayVersion')) { [string]$key.GetValue('DisplayVersion') } else { "Unknown" }
+                        installDate     = $installDate
+                        uninstallString = [string]$key.GetValue('UninstallString')
+                        installLocation = [string]$key.GetValue('InstallLocation')
+                        icon            = [string]$key.GetValue('DisplayIcon')
+                        systemComponent = ($null -ne $key.GetValue('SystemComponent') -and [int]$key.GetValue('SystemComponent') -eq 1)
+                        noRemove        = ($null -ne $key.GetValue('NoRemove') -and [int]$key.GetValue('NoRemove') -eq 1)
+                        parentKeyName   = [string]$key.GetValue('ParentKeyName')
+                        parentDisplay   = [string]$key.GetValue('ParentDisplayName')
                         sizeBytes       = $sizeBytes
+                        type            = "Desktop"
                     })
+                } catch {
+                } finally {
+                    $key.Close()
                 }
-            } catch {}
+            }
+        } catch {
+        } finally {
+            $root.Close()
         }
     }
-    
-    # Sort by name
-    return $apps | Sort-Object name
+
+    return $entries
+}
+
+# Decide what each entry IS. Every branch records a reason, because a
+# classification the user cannot see the basis for is just another silent filter.
+function Add-EntryClassification {
+    param([object[]]$entries)
+
+    if (-not $entries -or $entries.Count -eq 0) { return @() }
+
+    # Candidate parents: entries that look like standalone products. A feature
+    # row ("Python 3.13.0 Core Interpreter") is recognised by its parent bundle
+    # ("Python 3.13.0") also being installed, which is evidence rather than a
+    # guess about naming.
+    $parentStems = @{}
+    foreach ($e in $entries) {
+        if ($e.systemComponent -or $e.parentKeyName) { continue }
+        if ([string]::IsNullOrWhiteSpace($e.stem)) { continue }
+        if (-not $parentStems.ContainsKey($e.stem)) { $parentStems[$e.stem] = $e.name }
+    }
+
+    # The same product often owns more than one uninstall key: a 64-bit and a
+    # 32-bit view of one installer, or a bundle record beside the product record.
+    # Exactly one of them is the row a user should act on. Pick it - preferring
+    # the one the vendor did NOT flag as a system component, then the one that
+    # knows its own size - and mark the rest as second records rather than
+    # showing the same application several times.
+    $primaryByStem = @{}
+    foreach ($e in $entries) {
+        if ([string]::IsNullOrWhiteSpace($e.stem)) { continue }
+        $current = $primaryByStem[$e.stem]
+        if (-not $current) { $primaryByStem[$e.stem] = $e; continue }
+        $betterFlag = ((-not $e.systemComponent) -and $current.systemComponent)
+        $sameFlag   = ($e.systemComponent -eq $current.systemComponent)
+        if ($betterFlag -or ($sameFlag -and $e.sizeBytes -gt $current.sizeBytes)) {
+            $primaryByStem[$e.stem] = $e
+        }
+    }
+
+    foreach ($e in $entries) {
+        $classification = 'application'
+        $reason         = ''
+        $isProtected    = $false
+        $protectReason  = ''
+
+        # Does the recorded uninstaller actually exist? msiexec entries resolve
+        # through the MSI database rather than a path on disk.
+        $uninstallerPath = $null
+        $uninstallerOk   = $false
+        if (-not [string]::IsNullOrWhiteSpace($e.uninstallString)) {
+            $split = Split-UninstallString ([string]$e.uninstallString)
+            $uninstallerPath = $split.executable
+            if ("$($e.uninstallString)" -match 'msiexec') {
+                $uninstallerOk = $true
+            } elseif ($uninstallerPath -and (Test-ExecutableExists ([System.Environment]::ExpandEnvironmentVariables($uninstallerPath)))) {
+                $uninstallerOk = $true
+            }
+        }
+
+        if ($e.name -match $script:UpdateNamePattern) {
+            $classification = 'update'
+            $reason = 'A Windows update or hotfix entry, not an installed application.'
+        }
+        elseif ($e.parentKeyName) {
+            $classification = 'component'
+            $parentLabel = if ($e.parentDisplay) { $e.parentDisplay } else { $e.parentKeyName }
+            $reason = "Installed as part of $parentLabel - remove that instead."
+        }
+        elseif ($e.systemComponent -and -not $uninstallerOk) {
+            # BOTH halves matter, and getting this wrong in either direction is
+            # a defect the operator actually reported:
+            #
+            #   SystemComponent=1 alone is not grounds for anything. The vendor
+            #   is saying "not a standalone product in my installer's model",
+            #   and Windows Subsystem for Linux, Kaspersky and the Python
+            #   bundles all set it while being perfectly ordinary applications.
+            #
+            #   No working removal path alone is not grounds either - an entry
+            #   the user CAN see in Programs and Features and CANNOT remove is
+            #   precisely what Force Uninstall exists to rescue.
+            #
+            # Together they mean something specific: a bookkeeping row that
+            # Windows already hides and that was never independently removable.
+            # The fifteen NVIDIA container rows on the operator's machine are
+            # this exactly, and listing them as things to force-uninstall was
+            # the "shows wrong entries which cant be uninstalled" half of 7oo.2.
+            $classification = 'component'
+            $reason = 'Marked a system component by its publisher and it has no removal path of its own; it belongs to another product.'
+        }
+        elseif ($e.name -match $script:SharedRuntimePattern) {
+            $classification = 'component'
+            $reason = 'A shared runtime installed by other applications, which may stop working without it.'
+        }
+        elseif ($e.name -match '\s(Component|Components)$') {
+            $classification = 'component'
+            $reason = 'The publisher named this entry a component of a larger product.'
+        }
+        elseif ($primaryByStem[$e.stem] -and $primaryByStem[$e.stem].id -ne $e.id) {
+            $classification = 'component'
+            $primary = $primaryByStem[$e.stem]
+            $where = if ($primary.hiveLabel -ne $e.hiveLabel) { " under $($primary.hiveLabel)" } else { "" }
+            $reason = "A duplicate registry record for $($e.name); the entry to act on is the one$where."
+        }
+        else {
+            # A feature row of a bundle that is itself installed.
+            #
+            # The parent stem must carry a VERSION for this to fire. That is what
+            # separates "Python 3.13.0 Core Interpreter (64-bit)" - a feature row
+            # that repeats its bundle's version - from "Kaspersky VPN", which
+            # merely starts with the name of a sibling product. Without the
+            # version guard, Kaspersky VPN was reclassified as a feature of
+            # Kaspersky and disappeared from the list entirely, which is the same
+            # defect this whole rewrite exists to end. The asymmetry is
+            # deliberate: an extra row costs a glance, a missing product costs
+            # the user the ability to uninstall it.
+            foreach ($stem in $parentStems.Keys) {
+                if ($stem -eq $e.stem) { continue }
+                if ($stem -notmatch '\d') { continue }
+                if ($e.stem.StartsWith("$stem ", [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $classification = 'component'
+                    $reason = "A feature of $($parentStems[$stem]) - uninstall that to remove this."
+                    break
+                }
+            }
+        }
+
+        # NoRemove is deliberately NOT a reason to hide or protect anything.
+        # It only tells Windows to omit the uninstall button in Settings, and
+        # doing what Windows will not - with consent, and with an undo - is the
+        # entire point of this application. Microsoft Edge and Kaspersky both
+        # set it. Surface it as a note so the user knows why Settings would not
+        # offer this, and let them decide (promptgate Rule 24).
+        $removalNote = ''
+        if ($e.noRemove) {
+            $removalNote = 'Windows hides the uninstall button for this entry (NoRemove). Vanish can still run its uninstaller.'
+        }
+
+        # Protection is a separate axis from classification, and a narrow one.
+        foreach ($rule in $script:OsComponentRules) {
+            if ($e.name -match $rule.Pattern) {
+                $isProtected   = $true
+                $protectReason = $rule.Reason
+                break
+            }
+        }
+
+        $e | Add-Member -NotePropertyName classification       -NotePropertyValue $classification -Force
+        $e | Add-Member -NotePropertyName classificationReason -NotePropertyValue $reason         -Force
+        $e | Add-Member -NotePropertyName removalNote          -NotePropertyValue $removalNote    -Force
+        $e | Add-Member -NotePropertyName protected            -NotePropertyValue $isProtected    -Force
+        $e | Add-Member -NotePropertyName protectionReason     -NotePropertyValue $protectReason  -Force
+        $e | Add-Member -NotePropertyName uninstallerPath      -NotePropertyValue $uninstallerPath -Force
+        $e | Add-Member -NotePropertyName actionable           -NotePropertyValue $uninstallerOk  -Force
+        $e | Add-Member -NotePropertyName family               -NotePropertyValue (Get-ProductFamilyKey $e.name $e.publisher) -Force
+    }
+
+    return $entries
+}
+
+function Get-InstalledApps {
+    $entries = Add-EntryClassification (Get-UninstallRegistryEntries)
+
+    $apps = foreach ($e in $entries) {
+        [PSCustomObject]@{
+            id                   = $e.id
+            name                 = $e.name
+            publisher            = $e.publisher
+            version              = $e.version
+            installDate          = $e.installDate
+            uninstallString      = $e.uninstallString
+            installLocation      = $e.installLocation
+            icon                 = $e.icon
+            registryPath         = $e.registryPath
+            hiveLabel            = $e.hiveLabel
+            type                 = "Desktop"
+            sizeBytes            = $e.sizeBytes
+            classification       = $e.classification
+            classificationReason = $e.classificationReason
+            removalNote          = $e.removalNote
+            protected            = $e.protected
+            protectionReason     = $e.protectionReason
+            actionable           = $e.actionable
+            family               = $e.family
+        }
+    }
+
+    return @($apps | Sort-Object name)
 }
 
 # 2. Fetch Installed UWP Apps
@@ -722,31 +1042,67 @@ function Get-SoftwareRedundancy {
     $groups = [System.Collections.Generic.List[PSCustomObject]]::new()
 
     foreach ($catName in $categories.Keys) {
-        $keywords  = $categories[$catName]
-        $matched   = [System.Collections.Generic.List[PSCustomObject]]::new()
+        $keywords = $categories[$catName]
+
+        # Collapse to PRODUCT FAMILIES, not registry rows (7oo.6). Edge, Edge
+        # Update and the WebView2 runtime are one browser; reporting "3 web
+        # browsers installed - consider keeping only one" is wrong advice about
+        # the user's own machine, and it is what the old row-counting produced.
+        $families = [ordered]@{}
 
         foreach ($app in $installedApps) {
+            # Components and update rows are never evidence of a second
+            # installation - they belong to something already counted.
+            if ($app.classification -ne 'application') { continue }
+
             $nameLower = $app.name.ToLower()
+            $matches = $false
             foreach ($kw in $keywords) {
-                if ($nameLower -like "*$kw*") {
-                    $matched.Add([PSCustomObject]@{
-                        id        = $app.id
-                        name      = $app.name
-                        publisher = $app.publisher
-                        version   = $app.version
-                        sizeBytes = $app.sizeBytes
-                    })
-                    break  # don't double-count an app matching multiple keywords in same category
+                if ($nameLower -like "*$kw*") { $matches = $true; break }
+            }
+            if (-not $matches) { continue }
+
+            # Key on the VENDOR half of the family key, not the whole thing.
+            # Redundancy means two products competing for the same job, and one
+            # vendor's own products are not competing with each other: Kaspersky
+            # and Kaspersky VPN matched the antivirus keywords and were reported
+            # as "2 antivirus applications - keep only one", and Office plus the
+            # Teams Meeting Add-in as "2 office suites". Both are advice that
+            # would break the user's machine if followed.
+            $key = ([string]$app.family).Split('|')[0]
+            if (-not $families.Contains($key)) {
+                $families[$key] = [PSCustomObject]@{
+                    id         = $app.id
+                    name       = $app.name
+                    publisher  = $app.publisher
+                    version    = $app.version
+                    sizeBytes  = $app.sizeBytes
+                    family     = $key
+                    entryCount = 1
+                }
+            } else {
+                # Keep the largest install as the representative - that is the
+                # one worth acting on - and remember how many rows it covers.
+                $existing = $families[$key]
+                $existing.entryCount = $existing.entryCount + 1
+                if ($app.sizeBytes -gt $existing.sizeBytes) {
+                    $existing.name      = $app.name
+                    $existing.id        = $app.id
+                    $existing.version   = $app.version
+                    $existing.sizeBytes = $app.sizeBytes
                 }
             }
         }
 
+        $matched = @($families.Values)
+
+        # Redundancy means two DIFFERENT products doing the same job.
         if ($matched.Count -gt 1) {
             $groups.Add([PSCustomObject]@{
                 category = $catName
                 count    = $matched.Count
                 apps     = $matched
-                tip      = "You have $($matched.Count) $catName applications installed. Consider keeping only one."
+                tip      = "You have $($matched.Count) different $catName applications installed. Consider keeping only one."
             })
         }
     }
@@ -3166,78 +3522,72 @@ function Set-PathEntries {
 function Find-BrokenUninstallEntries {
     $findings = [System.Collections.Generic.List[object]]::new()
 
-    $hives = @(
-        @{ Hive = 'LocalMachine'; Sub = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';               View = 'Registry64'; Label = 'HKLM (64-bit)' },
-        @{ Hive = 'LocalMachine'; Sub = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';               View = 'Registry32'; Label = 'HKLM (32-bit)' },
-        @{ Hive = 'CurrentUser';  Sub = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';               View = 'Registry64'; Label = 'HKCU' }
-    )
+    # Read the machine ONCE, through the same classified inventory the app list
+    # uses. This used to be a second, independent registry sweep that reapplied
+    # the old SystemComponent/ParentKeyName drops by hand, and the comment above
+    # it claimed "so the two lists agree" while guaranteeing the opposite: an
+    # entry hidden from the inventory was also hidden from the surface whose
+    # whole job is rescuing entries nobody else can remove.
+    $entries = Add-EntryClassification (Get-UninstallRegistryEntries)
 
-    foreach ($hive in $hives) {
-        foreach ($childName in (Get-RegistrySubKeyNamesInView -hive $hive.Hive -subKey $hive.Sub -view $hive.View)) {
-            $keyPath = "$($hive.Sub)\$childName"
+    foreach ($e in $entries) {
+        # Updates are serviced by Windows, not force-uninstalled by us.
+        if ($e.classification -eq 'update') { continue }
 
-            $displayName = Get-RegistryValueInView -hive $hive.Hive -subKey $keyPath -name 'DisplayName' -view $hive.View
-            if ([string]::IsNullOrWhiteSpace($displayName)) { continue }
+        # A component was never independently removable in the first place, so
+        # "its uninstaller is missing" is not a fault to be fixed - it is the
+        # normal shape of a bookkeeping row. Listing the fifteen NVIDIA
+        # container entries as things to force-uninstall is exactly the "shows
+        # wrong entries which cant be uninstalled" the operator reported.
+        if ($e.classification -eq 'component') { continue }
 
-            # Same exclusions the main inventory uses, so the two lists agree.
-            $systemComponent = Get-RegistryValueInView -hive $hive.Hive -subKey $keyPath -name 'SystemComponent' -view $hive.View
-            if ($null -ne $systemComponent -and [int]$systemComponent -eq 1) { continue }
-            $parentKey = Get-RegistryValueInView -hive $hive.Hive -subKey $keyPath -name 'ParentKeyName' -view $hive.View
-            if ($parentKey) { continue }
-            if ($displayName -match 'Security Update|Hotfix|^Update for') { continue }
+        # Protected entries are Windows' own servicing plumbing. Offering to
+        # force them out is not a feature.
+        if ($e.protected) { continue }
 
-            $uninstallString = Get-RegistryValueInView -hive $hive.Hive -subKey $keyPath -name 'UninstallString' -view $hive.View
-            $installLocation = Get-RegistryValueInView -hive $hive.Hive -subKey $keyPath -name 'InstallLocation' -view $hive.View
-            $publisher       = Get-RegistryValueInView -hive $hive.Hive -subKey $keyPath -name 'Publisher' -view $hive.View
+        $reasons = [System.Collections.Generic.List[string]]::new()
 
-            $reasons = [System.Collections.Generic.List[string]]::new()
-            $uninstallerPath = $null
-            $uninstallerOk = $false
-
-            if ([string]::IsNullOrWhiteSpace($uninstallString)) {
-                $reasons.Add("no UninstallString - Windows has no way to uninstall this")
-            } else {
-                $split = Split-UninstallString ([string]$uninstallString)
-                $uninstallerPath = $split.executable
-                # An msiexec entry is only as good as its registered product.
-                if ("$uninstallString" -match 'msiexec') {
-                    $uninstallerOk = $true
-                } elseif ($uninstallerPath -and (Test-ExecutableExists ([System.Environment]::ExpandEnvironmentVariables($uninstallerPath)))) {
-                    $uninstallerOk = $true
-                } else {
-                    $reasons.Add("uninstaller is missing: $uninstallerPath")
-                }
-            }
-
-            if (-not [string]::IsNullOrWhiteSpace($installLocation)) {
-                $expanded = [System.Environment]::ExpandEnvironmentVariables([string]$installLocation)
-                if (-not (Test-Path -LiteralPath $expanded -ErrorAction SilentlyContinue)) {
-                    $reasons.Add("install folder is gone: $expanded")
-                }
-            }
-
-            if ($reasons.Count -eq 0) { continue }
-
-            $findings.Add(@{
-                id              = "broken|$($hive.Label)|$childName"
-                displayName     = [string]$displayName
-                publisher       = if ($publisher) { [string]$publisher } else { "Unknown Publisher" }
-                hiveLabel       = $hive.Label
-                registryPath    = Get-ViewRegPath -hive $hive.Hive -subKey $keyPath -view $hive.View
-                uninstallString = [string]$uninstallString
-                uninstallerPath = $uninstallerPath
-                uninstallerOk   = $uninstallerOk
-                installLocation = [string]$installLocation
-                reasons         = @($reasons)
-                evidence        = ($reasons -join "; ")
-            })
+        if ([string]::IsNullOrWhiteSpace($e.uninstallString)) {
+            $reasons.Add("no UninstallString - Windows has no way to uninstall this")
+        } elseif (-not $e.actionable) {
+            $reasons.Add("uninstaller is missing: $($e.uninstallerPath)")
         }
+
+        if (-not [string]::IsNullOrWhiteSpace($e.installLocation)) {
+            $expanded = [System.Environment]::ExpandEnvironmentVariables([string]$e.installLocation)
+            if (-not (Test-Path -LiteralPath $expanded -ErrorAction SilentlyContinue)) {
+                $reasons.Add("install folder is gone: $expanded")
+            }
+        }
+
+        if ($reasons.Count -eq 0) { continue }
+
+        $findings.Add(@{
+            id              = "broken|$($e.hiveLabel)|$($e.keyName)"
+            displayName     = [string]$e.name
+            publisher       = [string]$e.publisher
+            hiveLabel       = $e.hiveLabel
+            registryPath    = $e.registryPath
+            uninstallString = [string]$e.uninstallString
+            uninstallerPath = $e.uninstallerPath
+            uninstallerOk   = $e.actionable
+            installLocation = [string]$e.installLocation
+            classification  = $e.classification
+            reasons         = @($reasons)
+            evidence        = ($reasons -join "; ")
+        })
     }
 
+    # What was considered and deliberately left out, so an empty or short list is
+    # an answer rather than a shrug.
+    $skipped = @($entries | Where-Object { $_.classification -ne 'application' -or $_.protected })
+
     return @{
-        success  = $true
-        findings = $findings
-        total    = $findings.Count
+        success       = $true
+        findings      = $findings
+        total         = $findings.Count
+        examinedCount = $entries.Count
+        skippedCount  = $skipped.Count
     }
 }
 

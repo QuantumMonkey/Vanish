@@ -765,6 +765,87 @@ body {
   background: var(--border-glass);
 }
 
+/* 7oo.3 / Rule 24: the reason an entry is classified, hidden from Settings, or
+   held back - shown as text, never implied by a disabled control. */
+.details-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: hsla(217, 91%, 60%, 0.08);
+  border: 1px solid hsla(217, 91%, 60%, 0.22);
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--text-gray);
+  max-height: 22vh;
+  overflow-y: auto;
+}
+.details-note i { color: var(--color-primary); margin-top: 2px; flex-shrink: 0; }
+.details-note.protected {
+  background: hsla(38, 92%, 60%, 0.09);
+  border-color: hsla(38, 92%, 60%, 0.28);
+}
+.details-note.protected i { color: var(--color-warning); }
+
+/* A protected entry's action is refused, and looks refused. */
+.btn-primary.entry-protected {
+  background: hsla(38, 92%, 60%, 0.16);
+  border: 1px solid hsla(38, 92%, 60%, 0.35);
+  color: var(--color-warning);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+.btn-primary.entry-protected:hover { transform: none; box-shadow: none; }
+
+/* Components toggle in the list header. */
+.components-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.components-toggle input { display: none; }
+.components-toggle .slider {
+  position: relative;
+  width: 34px;
+  height: 18px;
+  border-radius: 99px;
+  background: hsla(222, 40%, 25%, 0.8);
+  border: 1px solid var(--border-glass);
+  transition: var(--transition-smooth);
+  flex-shrink: 0;
+}
+.components-toggle .slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--text-gray);
+  transition: var(--transition-smooth);
+}
+.components-toggle input:checked + .slider {
+  background: var(--color-primary-glow);
+  border-color: hsla(217, 91%, 60%, 0.5);
+}
+.components-toggle input:checked + .slider::before {
+  transform: translateX(16px);
+  background: var(--color-primary);
+}
+.components-toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-gray);
+}
+
 /* This is the part that scrolls. min-height:0 is load-bearing: without it a
    flex item refuses to shrink below its content and the overflow escapes the
    panel again, which is the whole defect. */

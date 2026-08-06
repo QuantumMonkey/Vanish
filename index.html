@@ -137,6 +137,18 @@
               <button class="toggle-btn" data-type="uwp">Windows Apps</button>
             </div>
 
+            <!-- 7oo.3: components are classified, never dropped. This is how
+                 the user reaches them - and the count is always on screen, so
+                 "88 applications" can never quietly mean "and 73 we hid". -->
+            <label class="components-toggle" id="components-toggle" title="Runtimes, feature rows and duplicate registry records that belong to another product">
+              <input type="checkbox" id="chk-show-components">
+              <span class="slider"></span>
+              <span class="components-toggle-label">
+                Components
+                <span class="audit-badge" id="components-count">0</span>
+              </span>
+            </label>
+
             <!-- Sorting -->
             <select class="select-custom" id="sort-selector">
               <option value="name-asc">Name (A - Z)</option>
@@ -250,6 +262,13 @@
                 <span class="details-label">Installer Type</span>
                 <span class="details-value" id="det-type">Desktop</span>
               </div>
+            </div>
+
+            <!-- Rule 24: anything held back says why, in the panel, rather than
+                 being a greyed-out control with no explanation. -->
+            <div class="details-note" id="det-note" style="display: none;">
+              <i class="fa-solid fa-circle-info"></i>
+              <span id="det-note-text"></span>
             </div>
 
             <button class="btn-primary" id="btn-start-uninstall" data-destructive="true">
