@@ -60,6 +60,7 @@ const TRUTH_SCRIPT = path.join(__dirname, 'fixtures', 'real-machine-truth.ps1');
 let pass = 0;
 let fail = 0;
 const failures = [];
+const rendererErrors = [];
 let section = '';
 
 function assert(condition, label, detail) {
@@ -87,6 +88,35 @@ function skip(label, why) {
 // ---------------------------------------------------------------- utilities
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Sections must not inherit whatever tab the previous one left behind - an
+// early version measured the app list while the Health Advisor was on screen
+// and reported every element as having no box.
+async function goToTab(tab) {
+  await js(`document.querySelector('.nav-item[data-tab="${tab}"]').click(); true;`);
+  const started = Date.now();
+  while (Date.now() - started < 10000) {
+    const shown = await js(`(() => {
+      const el = document.querySelector('.nav-item[data-tab="${tab}"]');
+      return el && el.classList.contains('active');
+    })()`);
+    if (shown) break;
+    await sleep(200);
+  }
+  await sleep(500);
+}
+
+// The Health Advisor genuinely takes seconds against real CIM queries; a fixed
+// sleep either flakes or wastes time.
+async function waitForAuditContent(timeoutMs = 180000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const done = await js(`document.getElementById('audit-content').style.display !== 'none'`);
+    if (done) return Date.now() - started;
+    await sleep(400);
+  }
+  return -1;
+}
 
 function runTruthProbe() {
   return new Promise((resolve, reject) => {
@@ -395,6 +425,19 @@ async function sectionInventory(truth) {
 async function sectionAppList(listState) {
   heading('Application list: real length, real geometry');
 
+  // Leaving the tab and coming back must not re-enumerate the machine. This
+  // caught a 10-15 second full rescan firing on every single visit, which
+  // blanked the list and discarded the user's sort and search each time.
+  const scansBefore = callsTo('get-desktop-apps');
+  await goToTab('audit');
+  await goToTab('all-apps');
+  await sleep(1500);
+  assert(
+    callsTo('get-desktop-apps') === scansBefore,
+    'returning to the application list does not re-scan the machine',
+    `${callsTo('get-desktop-apps') - scansBefore} extra full enumeration(s) fired just from switching tabs`
+  );
+
   const dom = await js(`(() => {
     const container = document.querySelector('.apps-list-container');
     const rows = document.querySelectorAll('#apps-tbody .app-row');
@@ -656,15 +699,11 @@ async function sectionWizard() {
 async function sectionHealthAdvisor(truth) {
   heading('Health Advisor: system overview and storage');
 
-  await js(`document.querySelector('.nav-item[data-tab="audit"]').click(); true;`);
-
-  const started = Date.now();
-  while (Date.now() - started < 180000) {
-    const done = await js(`document.getElementById('audit-content').style.display !== 'none'`);
-    if (done) break;
-    await sleep(500);
-  }
-  console.log(`  (audit data took ${((Date.now() - started) / 1000).toFixed(1)}s)`);
+  await goToTab('audit');
+  const auditMs = await waitForAuditContent();
+  assert(auditMs >= 0, 'the Health Advisor finished loading', 'audit content never became visible');
+  if (auditMs < 0) return;
+  console.log(`  (audit data took ${(auditMs / 1000).toFixed(1)}s)`);
 
   const audit = await js(`(() => {
     const grid = document.getElementById('audit-sysinfo-grid');
@@ -787,7 +826,7 @@ async function sectionForceUninstall(truth) {
   const trulyBroken = truth.entries.filter((e) =>
     !looksLikeComponent(e) && !e.uninstallerExists && e.uninstallerPath);
 
-  await js(`document.querySelector('.nav-item[data-tab="force-uninstall"]').click(); true;`);
+  await goToTab('force-uninstall');
   const started = Date.now();
   while (Date.now() - started < 180000) {
     const loading = await js(`document.getElementById('broken-loading').style.display !== 'none'`);
@@ -933,8 +972,7 @@ function removePlantedEntry() {
 async function sectionSystemClean() {
   heading('System Clean: scan once, and say when a count is still partial');
 
-  await js(`document.querySelector('.nav-item[data-tab="system-clean"]').click(); true;`);
-  await sleep(800);
+  await goToTab('system-clean');
 
   const ids = await js(`(typeof CLEANERS !== 'undefined') ? CLEANERS.filter((c) => !c.needsKeyword).map((c) => c.id) : []`);
   if (!ids || ids.length === 0) {
@@ -1030,17 +1068,47 @@ async function sectionStartupItems() {
   const startup = await js(`window.api.getStartupItems()`);
   const items = (startup && startup.items) || [];
   const orphans = items.filter((i) => i.exeExists === false);
-  console.log(`  (${items.length} startup items, ${orphans.length} orphaned)`);
+  console.log(`  (${items.length} startup items, ${orphans.length} orphaned, orphan count reported as ${JSON.stringify(startup.orphans)})`);
 
-  await js(`document.querySelector('.nav-item[data-tab="audit"]').click(); true;`);
-  await sleep(1200);
+  // A count that serialises as null reads as 0 downstream and hides the badge.
+  assert(
+    typeof startup.orphans === 'number' && startup.orphans === orphans.length,
+    'the reported orphan count is a real number that matches the items',
+    `reported ${JSON.stringify(startup.orphans)}, items say ${orphans.length}`
+  );
+
+  // Reporting a healthy entry as orphaned is the app telling the user something
+  // false about their own machine. Verify each claim against the filesystem.
+  const wronglyFlagged = [];
+  for (const o of orphans) {
+    if (!o.exePath) continue;
+    const exists = await runPowerShellSnippet(
+      `if (Test-Path -LiteralPath ${JSON.stringify(o.exePath)}) { exit 0 } else { exit 3 }`
+    );
+    if (exists.ok) wronglyFlagged.push(`${o.name} -> ${o.exePath} exists`);
+  }
+  assert(
+    wronglyFlagged.length === 0,
+    'every entry reported as orphaned really is missing from disk',
+    wronglyFlagged.join('\n')
+  );
+
+  await goToTab('audit');
+  const auditMs = await waitForAuditContent();
+  assert(auditMs >= 0, 'the Health Advisor finished loading', 'audit content never became visible');
+  if (auditMs < 0) return;
 
   const rendered = await js(`(() => {
-    const rows = Array.from(document.querySelectorAll('#audit-startup-tbody tr'));
+    const rows = Array.from(document.querySelectorAll('#audit-startup-tbody tr.app-row'));
+    const suggestions = Array.from(document.querySelectorAll('#audit-startup-tbody .startup-suggestion'));
+    const note = document.getElementById('audit-startup-note');
     return {
       rows: rows.length,
       orphanRows: rows.filter((r) => r.querySelector('.status-dot.orphan')).length,
       actionable: rows.filter((r) => r.querySelector('button, a, input')).length,
+      suggestions: suggestions.length,
+      suggestionText: suggestions.map((s) => s.textContent.replace(/\\s+/g, ' ').trim()),
+      noteText: note ? note.textContent.trim() : '',
       badgeShown: document.getElementById('audit-orphan-count').style.display !== 'none'
     };
   })()`);
@@ -1052,13 +1120,35 @@ async function sectionStartupItems() {
     `${rendered.orphanRows} marked vs ${orphans.length} found`
   );
 
-  if (orphans.length === 0) {
-    skip('orphaned startup items are actionable', 'no orphans on this machine');
+  // The contract (7oo.4): a finding is EITHER actionable - a button that really
+  // resolves it - OR informational, saying so and naming a concrete next step.
+  // What is forbidden is the middle: a control that renders and does nothing.
+  if (rendered.actionable > 0) {
+    skip('startup findings are informational', `${rendered.actionable} rows carry controls - they must be verified to work`);
   } else {
     assert(
-      rendered.actionable > 0,
-      'an orphaned startup item offers something the user can actually do about it',
-      'the table reports orphans and offers no control on any row'
+      rendered.noteText.length > 0,
+      'the panel states plainly that it reports startup items rather than changing them',
+      `note is empty`
+    );
+  }
+
+  if (orphans.length === 0) {
+    skip('orphaned startup items carry a next step', 'no orphans on this machine');
+  } else {
+    assert(
+      rendered.suggestions === orphans.length,
+      'every orphaned startup item carries a suggestion on screen',
+      `${rendered.suggestions} suggestions for ${orphans.length} orphans`
+    );
+    // A suggestion that does not name where to go is not a suggestion.
+    const vague = rendered.suggestionText.filter(
+      (t) => !/taskschd\.msc|services\.msc|sc\.exe|HKLM|HKCU|Run/i.test(t)
+    );
+    assert(
+      vague.length === 0,
+      'each suggestion names the concrete place the entry is managed',
+      vague.join('\n')
     );
     assert(rendered.badgeShown, 'the orphan count badge is visible when orphans exist');
   }
@@ -1189,6 +1279,15 @@ app.whenReady().then(async () => {
     }
   });
 
+  // A renderer exception used to surface here only as "0 rows", several
+  // assertions downstream of the actual cause. Surface it where it happens.
+  win.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    if (level < 2) return; // warnings and errors only
+    const where = sourceId ? `${sourceId.split('/').pop()}:${line}` : '';
+    console.log(`  [renderer ${level === 2 ? 'warn' : 'error'}] ${message} ${where}`);
+    if (level >= 3) rendererErrors.push(`${message} (${where})`);
+  });
+
   await win.loadFile(path.join(ROOT, 'index.html'));
 
   console.log('');
@@ -1252,6 +1351,15 @@ app.whenReady().then(async () => {
       }
     }
   }
+
+  // An uncaught renderer exception is a failure whether or not an assertion
+  // happened to notice it.
+  section = 'renderer console';
+  assert(
+    rendererErrors.length === 0,
+    'the renderer logged no errors during the run',
+    rendererErrors.join('\n')
+  );
 
   console.log('');
   console.log('='.repeat(72));

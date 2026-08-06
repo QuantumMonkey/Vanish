@@ -925,6 +925,40 @@ function Get-SystemDiagnostics {
     }
 }
 
+# Pull the executable out of a startup command line (7oo.4).
+#
+# Each of the three sources below used to do its own extraction, and two of them
+# were wrong in ways that manufactured orphans out of healthy entries. On the
+# operator's machine 2 of 3 reported orphans did not exist:
+#
+#   - A scheduled task's Execute value arrives ALREADY QUOTED, and was used
+#     verbatim. Test-Path on '"C:\...\RtkAudUService64.exe"' - quotes included -
+#     is always false, so a perfectly healthy Realtek audio task was reported as
+#     orphaned. Same for the Perplexity updater.
+#   - The registry/service regex '^([^\s]+\.exe)' cannot match an unquoted path
+#     containing spaces, which is most of Program Files, so those went the other
+#     way and were never checked at all.
+#
+# Reporting a healthy entry as broken is worse than missing one: it is the app
+# telling the user something false about their machine, in the same panel that
+# asks them to trust it. One resolver, shared, using the same quoting rules the
+# uninstall pipeline already relies on.
+function Resolve-StartupExecutable {
+    param([string]$command)
+    if ([string]::IsNullOrWhiteSpace($command)) { return $null }
+
+    $c = $command.Trim()
+    # rundll32/cmd wrappers name a host binary, not the startup target itself,
+    # but the host is what has to exist for the entry to run at all.
+    $split = Split-UninstallString $c
+    $exe = $split.executable
+    if ([string]::IsNullOrWhiteSpace($exe)) { return $null }
+
+    $exe = $exe.Trim().Trim('"').Trim()
+    if ([string]::IsNullOrWhiteSpace($exe)) { return $null }
+    return [System.Environment]::ExpandEnvironmentVariables($exe)
+}
+
 # 7. Startup Item Enumerator (Registry Run keys + Task Scheduler + Auto-start Services)
 function Get-StartupItems {
     $items = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -944,18 +978,16 @@ function Get-StartupItems {
                 if ($props) {
                     $props.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object {
                         $cmd = $_.Value.ToString()
-                        # Attempt to resolve executable path from the command string
-                        $exePath = $null
-                        if ($cmd -match '"([^"]+\.exe)"') { $exePath = $Matches[1] }
-                        elseif ($cmd -match '^([^\s]+\.exe)') { $exePath = $Matches[1] }
+                        $exePath = Resolve-StartupExecutable $cmd
                         $items.Add([PSCustomObject]@{
                             name        = $_.Name
                             command     = $cmd
                             exePath     = $exePath
-                            exeExists   = if ($exePath) { Test-Path $exePath } else { $null }
+                            exeExists   = if ($exePath) { Test-ExecutableExists $exePath } else { $null }
                             source      = "Registry"
                             sourceDetail = $hive.Hive
                             enabled     = $true
+                            managePath  = "$($hive.Path)\$($_.Name)"
                         })
                     }
                 }
@@ -972,15 +1004,17 @@ function Get-StartupItems {
         } | Select-Object -First 80  # cap to avoid very long scans
         foreach ($task in $tasks) {
             $action   = $task.Actions | Select-Object -First 1
-            $exePath  = if ($action) { $action.Execute } else { $null }
+            # $action.Execute arrives already quoted for paths with spaces.
+            $exePath  = if ($action) { Resolve-StartupExecutable ([string]$action.Execute) } else { $null }
             $items.Add([PSCustomObject]@{
                 name         = $task.TaskName
-                command      = if ($action) { "$($action.Execute) $($action.Arguments)" } else { "" }
+                command      = if ($action) { "$($action.Execute) $($action.Arguments)".Trim() } else { "" }
                 exePath      = $exePath
-                exeExists    = if ($exePath) { Test-Path $exePath } else { $null }
+                exeExists    = if ($exePath) { Test-ExecutableExists $exePath } else { $null }
                 source       = "TaskScheduler"
                 sourceDetail = $task.TaskPath
                 enabled      = ($task.State -eq 'Ready' -or $task.State -eq 'Running')
+                managePath   = "$($task.TaskPath)$($task.TaskName)"
             })
         }
     } catch {}
@@ -989,11 +1023,8 @@ function Get-StartupItems {
     try {
         $services = Get-CimInstance -Query "SELECT Name, DisplayName, PathName, StartMode, State FROM Win32_Service WHERE StartMode='Auto'" -ErrorAction SilentlyContinue
         foreach ($svc in $services) {
-            # Skip Windows-native services
-            $exePath = $null
-            if ($svc.PathName -match '"([^"]+\.exe)"') { $exePath = $Matches[1] }
-            elseif ($svc.PathName -match '^([^\s]+\.exe)') { $exePath = $Matches[1] }
-            
+            $exePath = Resolve-StartupExecutable ([string]$svc.PathName)
+
             # Heuristic: skip services whose executables live under System32/SysWOW64
             $isMsPath = $exePath -and ($exePath -like "*\System32\*" -or $exePath -like "*\SysWOW64\*" -or $exePath -like "*\Windows\*")
             if ($isMsPath) { continue }
@@ -1002,18 +1033,52 @@ function Get-StartupItems {
                 name         = $svc.DisplayName
                 command      = $svc.PathName
                 exePath      = $exePath
-                exeExists    = if ($exePath) { Test-Path $exePath } else { $null }
+                exeExists    = if ($exePath) { Test-ExecutableExists $exePath } else { $null }
                 source       = "Service"
                 sourceDetail = "StartMode=Auto | State=$($svc.State)"
                 enabled      = ($svc.State -eq 'Running')
+                managePath   = [string]$svc.Name
             })
         }
     } catch {}
 
+    # 7oo.4 / Rule 24. This surface is DETECTION ONLY, and saying so is part of
+    # the contract: the operator's report was "startup items being shown as
+    # orphaned are not addressable, no suggestions". A finding with no action
+    # and no explanation teaches the user the app is decorative, which is worse
+    # than not showing it. Each item now carries the concrete place its own kind
+    # of entry is managed, so "informational" comes with somewhere to go.
+    foreach ($item in $items) {
+        $suggestion = switch ($item.source) {
+            'Registry' {
+                "Managed in the registry Run key. Uninstalling the owning application is the clean fix; " +
+                "otherwise remove the value at $($item.managePath)."
+            }
+            'TaskScheduler' {
+                "Managed in Task Scheduler. Open taskschd.msc and disable or delete the task at $($item.managePath)."
+            }
+            'Service' {
+                "Managed as a Windows service. Open services.msc and set '$($item.name)' to Manual or Disabled, " +
+                "or run: sc.exe config $($item.managePath) start= demand"
+            }
+            default { "" }
+        }
+        $item | Add-Member -NotePropertyName suggestion -NotePropertyValue $suggestion -Force
+    }
+
+    # @() around the pipeline is load-bearing, not style. Where-Object returns a
+    # bare object when exactly one item matches, and .Count on that serialises
+    # as null - so a machine with precisely one orphaned startup item reported
+    # "null orphaned", the renderer read it as 0, and the badge stayed hidden.
+    # This machine has exactly one. Wrapping forces an array in every case.
     return @{
-        items = $items
-        total = $items.Count
-        orphans = ($items | Where-Object { $_.exeExists -eq $false }).Count
+        items          = $items
+        total          = @($items).Count
+        orphans        = @($items | Where-Object { $_.exeExists -eq $false }).Count
+        # The renderer states this verbatim rather than implying capability the
+        # engine does not have.
+        detectionOnly  = $true
+        detectionNote  = 'Vanish reports startup items; it does not change them yet. Each row says where its kind of entry is managed.'
     }
 }
 

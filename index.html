@@ -334,7 +334,10 @@
                 <span class="audit-badge" id="audit-startup-count">0</span>
                 <span class="audit-badge danger" id="audit-orphan-count" style="display:none;">0 orphaned</span>
               </div>
-              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 10px;">Registry Run keys, logon-triggered Scheduled Tasks, and third-party auto-start services.</div>
+              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 4px;">Registry Run keys, logon-triggered Scheduled Tasks, and third-party auto-start services.</div>
+              <!-- 7oo.4 / Rule 24: state the limit of this surface rather than
+                   letting a table imply it can change things. -->
+              <div class="panel-inline-note" id="audit-startup-note"></div>
               <div id="audit-startup-table-wrap" style="overflow-x: auto;">
                 <table class="apps-table" id="audit-startup-table">
                   <thead>

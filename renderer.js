@@ -699,7 +699,21 @@ function switchTab(tabName) {
     elements.typeToggle.style.opacity = '1';
     elements.sortSelector.disabled = false;
     elements.detailsSidebar.classList.remove('active');
-    loadApplications();
+    // Returning to this tab is not new evidence about the machine, so it does
+    // not re-scan it. Enumerating desktop + UWP applications takes 10-15
+    // seconds on a real machine; re-running that on every visit blanked the
+    // list, threw away the user's sort and search, and made the app feel like
+    // it was thinking rather than working (7oo.5, same class as the System
+    // Clean re-scan). Re-render what is already loaded; scan only if we have
+    // never successfully loaded, and after an action that actually changed the
+    // machine - closeUninstallWizard and the queue already call
+    // loadApplications() directly for exactly that reason.
+    if (allApps.length === 0) {
+      loadApplications();
+    } else {
+      updateDashboardStats();
+      filterAndRenderApps();
+    }
     return;
   }
 
@@ -1607,6 +1621,14 @@ function renderStartupTable(startup) {
     orphanBadge.style.display = orphans > 0 ? 'inline-flex' : 'none';
   }
 
+  // 7oo.4 / Rule 24: this surface detects, it does not change anything. Say so
+  // once, plainly, instead of letting the user infer capability from a table.
+  const noteEl = document.getElementById('audit-startup-note');
+  if (noteEl) {
+    noteEl.textContent = startup.detectionNote ||
+      'Vanish reports startup items; it does not change them yet.';
+  }
+
   if (items.length === 0) {
     tbody.innerHTML = `
       <tr>
@@ -1635,8 +1657,25 @@ function renderStartupTable(startup) {
       ? (item.command || '').slice(0, 80) + '...'
       : (item.command || '-');
 
+    // An orphan the user is told about but given nothing to do with is the
+    // defect this fixes. Every orphaned row now carries the concrete place its
+    // own kind of entry is managed.
+    const suggestionRow = item.exeExists === false && item.suggestion
+      ? `<tr class="startup-suggestion-row">
+           <td colspan="4">
+             <div class="startup-suggestion">
+               <i class="fa-solid fa-lightbulb"></i>
+               <div>
+                 <div><strong>Its program is gone from ${esc(item.exePath || 'disk')}, so this entry does nothing at every start-up.</strong></div>
+                 <div>${esc(item.suggestion)}</div>
+               </div>
+             </div>
+           </td>
+         </tr>`
+      : '';
+
     return `
-      <tr class="app-row">
+      <tr class="app-row${item.exeExists === false ? ' is-orphan' : ''}">
         <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(item.name)}</td>
         <td><span class="source-badge ${esc(sourceClass)}">${esc(sourceLabel)}</span></td>
         <td>
@@ -1645,6 +1684,7 @@ function renderStartupTable(startup) {
         </td>
         <td class="mono" style="color: var(--text-muted); word-break: break-all;" title="${esc(item.command || '')}">${esc(cmdShort)}</td>
       </tr>
+      ${suggestionRow}
     `;
   }).join('');
 }
