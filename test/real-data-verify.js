@@ -979,26 +979,69 @@ async function sectionSystemClean() {
     skip('System Clean', 'no cleaner sections rendered');
     return;
   }
-  const target = ids[0];
+  // Exercise the cleaner most likely to be slow, so the progress contract is
+  // actually tested rather than skipped. "associations" walks every ProgId in
+  // HKCR; "context-menus" now finishes in about a second.
+  const target = ids.includes('associations') ? 'associations' : ids[0];
   const sel = `#cleaner-${target}`;
   console.log(`  (${ids.length} cleaners; exercising "${target}")`);
 
   const before = callsTo('cleaner-scan');
   await js(`scanCleaner(${JSON.stringify(target)}); true;`);
 
+  // 6g2: while the scan runs, the panel must keep saying something that
+  // demonstrably changes. A spinner over static text is what made a 180-second
+  // sweep indistinguishable from a hang.
+  const progressSamples = [];
+  let badgeWhileScanning = null;
   const started = Date.now();
-  while (Date.now() - started < 180000) {
-    const busy = await js(`(() => {
+  while (Date.now() - started < 300000) {
+    const snap = await js(`(() => {
       const el = document.querySelector(${JSON.stringify(sel)});
-      return el ? /fa-spin/i.test(el.innerHTML) : false;
+      if (!el) return { busy: false };
+      const progress = document.getElementById('cleaner-progress-${target}');
+      const badge = document.getElementById('cleaner-count-${target}');
+      return {
+        busy: /fa-spin/i.test(el.innerHTML),
+        text: progress ? progress.textContent.trim() : '',
+        badge: badge ? badge.textContent.trim() : ''
+      };
     })()`);
-    if (!busy) break;
-    await sleep(500);
+    if (!snap.busy) break;
+    if (snap.text) progressSamples.push(snap.text);
+    if (badgeWhileScanning === null && snap.badge) badgeWhileScanning = snap.badge;
+    await sleep(1200);
   }
   const afterScan = callsTo('cleaner-scan');
-  console.log(`  (first scan took ${((Date.now() - started) / 1000).toFixed(1)}s, ${afterScan - before} engine call(s))`);
+  const elapsed = (Date.now() - started) / 1000;
+  console.log(`  (first scan took ${elapsed.toFixed(1)}s, ${afterScan - before} engine call(s))`);
+  if (progressSamples.length) {
+    console.log(`  (first progress line: "${progressSamples[0]}")`);
+    console.log(`  (last  progress line: "${progressSamples[progressSamples.length - 1]}")`);
+  }
 
   assert(afterScan - before === 1, 'one scan request produces exactly one engine call', `${afterScan - before} calls`);
+
+  if (elapsed < 3) {
+    skip('a long scan reports progress while it runs', `this cleaner finished in ${elapsed.toFixed(1)}s`);
+  } else {
+    const distinct = new Set(progressSamples);
+    assert(
+      progressSamples.length > 0,
+      'the panel says something while the scan runs',
+      'no progress element was rendered'
+    );
+    assert(
+      distinct.size > 1,
+      'what it says actually changes - a static line is indistinguishable from a hang',
+      `${progressSamples.length} samples, all identical: "${progressSamples[0] || ''}"`
+    );
+    assert(
+      badgeWhileScanning !== null && !/^\d+$/.test(badgeWhileScanning),
+      'the count is not presented as a final number while the scan is still running',
+      `badge read "${badgeWhileScanning}" mid-scan`
+    );
+  }
 
   const snapshot = () => js(`(() => {
     const el = document.querySelector(${JSON.stringify(sel)});
@@ -1275,7 +1318,12 @@ app.whenReady().then(async () => {
       preload: path.join(ROOT, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      offscreen: true
+      offscreen: true,
+      // Chromium freezes timers in a hidden page, so an elapsed-time counter
+      // measured here would read 0s forever and the harness would report a
+      // working ticker as broken. The real window is visible and never
+      // throttled; this only removes an artefact of measuring offscreen.
+      backgroundThrottling: false
     }
   });
 

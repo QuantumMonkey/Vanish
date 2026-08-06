@@ -590,16 +590,36 @@ app.whenReady().then(async () => {
   assert(purgeDialog.active === true, 'purging cleaner findings is confirmed before anything is removed');
   await assertClickable(win, '#btn-confirm-ok', 'the cleaner purge confirm button is clickable');
 
+  // 7oo.5 changed this contract deliberately. Purging used to end in a full
+  // re-scan to discover something the app already knew - that the items it had
+  // just quarantined were gone - and on the operator's machine that re-scan was
+  // minutes long. The view now updates in place. The assertion's intent is
+  // unchanged (no stale rows after a purge); what it must NOT do any more is
+  // require a second engine round trip to get there.
   await queueResponse(win, 'cleanerPurge', { success: true, quarantinedCount: 2 });
-  await queueResponse(win, 'cleanerScan', { success: true, findings: [] });
+  const scansBeforePurge = await win.webContents.executeJavaScript(
+    `window.__test.callCount('cleanerScan')`
+  );
   await click(win, '#btn-confirm-ok');
   await wait(700);
 
   const afterPurge = await win.webContents.executeJavaScript(`(() => {
     const body = document.getElementById('cleaner-body-context-menus');
-    return { text: body.textContent || '' };
+    return {
+      text: body.textContent || '',
+      rows: body.querySelectorAll('.finding-row').length,
+      scans: window.__test.callCount('cleanerScan')
+    };
   })()`);
-  assert(afterPurge.text.includes('No orphans found'), 'a re-scan after purging shows the clean state, not stale rows');
+  assert(afterPurge.rows === 0, 'purged findings leave the list immediately, no stale rows');
+  assert(
+    afterPurge.text.includes('moved to quarantine'),
+    'the panel says what happened to them rather than going blank'
+  );
+  assert(
+    afterPurge.scans === scansBeforePurge,
+    'and it does that without re-running the scan'
+  );
 
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);

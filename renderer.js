@@ -60,6 +60,90 @@ function toast(message, kind = 'info', timeout = 4200) {
   setTimeout(() => el.remove(), timeout);
 }
 
+// ==========================================
+// SCAN PROGRESS (6g2, 7oo.5)
+// ==========================================
+// A scan that shows a spinner and one line of static text for three minutes is
+// indistinguishable from a hang. Two layers, because they fail differently:
+//
+//   1. An elapsed-time ticker. Always available, needs nothing from the engine,
+//      and answers "is this thing alive" for every scan in the app.
+//   2. Live stage reporting from scanner.ps1 where it emits it, which answers
+//      "how far along, and has it found anything yet".
+//
+// Rule 9: both report measured facts - seconds actually elapsed, stages
+// actually completed. Neither predicts a percentage or a finish time.
+
+const scanTickers = new Map();
+
+function describeElapsed(seconds) {
+  if (seconds < 60) return `${seconds}s`;
+  const mins = Math.floor(seconds / 60);
+  return `${mins}m ${String(seconds % 60).padStart(2, '0')}s`;
+}
+
+// `element` is the line that gets rewritten; `baseText` is what it says before
+// anything more specific is known.
+function startScanTicker(key, element, baseText) {
+  stopScanTicker(key);
+  if (!element) return;
+
+  const state = { started: Date.now(), element, baseText, progress: null, timer: null };
+
+  const paint = () => {
+    const seconds = Math.round((Date.now() - state.started) / 1000);
+    const parts = [];
+    if (state.progress && state.progress.stage) {
+      parts.push(`${state.progress.stage}`);
+      if (state.progress.total > 0) {
+        parts.push(`step ${state.progress.done} of ${state.progress.total}`);
+      }
+      if (state.progress.found > 0) {
+        parts.push(`${state.progress.found} found so far`);
+      }
+    } else {
+      parts.push(state.baseText);
+    }
+    parts.push(describeElapsed(seconds));
+    element.textContent = parts.join(' - ');
+  };
+
+  state.paint = paint;
+  paint();
+  state.timer = setInterval(paint, 1000);
+  scanTickers.set(key, state);
+}
+
+function updateScanTicker(key, progress) {
+  const state = scanTickers.get(key);
+  if (!state) return;
+  state.progress = progress;
+  // Repaint immediately rather than waiting up to a second for the next tick -
+  // and so that new stage information still lands even where the interval is
+  // throttled (a minimised or background window).
+  if (state.paint) state.paint();
+}
+
+function stopScanTicker(key) {
+  const state = scanTickers.get(key);
+  if (!state) return;
+  clearInterval(state.timer);
+  scanTickers.delete(key);
+}
+
+// Route engine progress to whichever ticker is waiting on that scan.
+function setupScanProgress() {
+  if (!window.api.onScanProgress) return;
+  window.api.onScanProgress((payload) => {
+    if (!payload) return;
+    if (payload.scan === 'cleaner' && payload.cleaner) {
+      updateScanTicker(`cleaner:${payload.cleaner}`, payload);
+    } else if (payload.scan) {
+      updateScanTicker(payload.scan, payload);
+    }
+  });
+}
+
 // Promise-based confirm. `typed` makes it a double-confirm for irreversible acts.
 function confirmDialog({ title, body, confirmLabel = 'Confirm', typed = null }) {
   return new Promise((resolve) => {
@@ -229,6 +313,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupQueuePanel();
   setupSettingsTab();
   setupForceUninstall();
+  setupScanProgress();
 
   await loadSettings();
   await checkElevation();
@@ -2600,7 +2685,10 @@ const cleanerState = {};
 
 function setupCleanTab() {
   CLEANERS.forEach((c) => {
-    cleanerState[c.id] = { findings: [], scanned: false, loading: false, error: null, note: null };
+    cleanerState[c.id] = {
+      findings: [], scanned: false, loading: false, error: null, note: null,
+      selected: new Set(), resolvedCount: 0, scannedAt: null
+    };
   });
 
   document.getElementById('btn-scan-all-cleaners').addEventListener('click', async () => {
@@ -2653,12 +2741,37 @@ function renderCleanerSections() {
   applyTierLocks();
 }
 
+// 7oo.5: a number on screen must never look final while its scan is still
+// running. The badge says "scanning" until the engine has actually returned,
+// because "even if 1 issue is showing but it is still scanning" was reported as
+// a count the operator could not trust.
+function updateCleanerBadge(cleanerId) {
+  const state = cleanerState[cleanerId];
+  const badge = document.getElementById(`cleaner-count-${cleanerId}`);
+  if (!badge || !state) return;
+
+  if (state.loading) {
+    badge.textContent = 'scanning';
+    badge.className = 'audit-badge scanning';
+    badge.style.display = 'inline-flex';
+    return;
+  }
+
+  badge.textContent = state.findings.length;
+  badge.style.display = state.scanned ? 'inline-flex' : 'none';
+  badge.className = state.findings.length > 0 ? 'audit-badge danger' : 'audit-badge';
+}
+
 async function scanCleaner(cleanerId, options = {}) {
   const cleaner = CLEANERS.find((c) => c.id === cleanerId);
   const state = cleanerState[cleanerId];
+  // Re-entrancy guard: a second scan of the same cleaner while one is in flight
+  // doubles the work and races two results into one view.
+  if (state.loading) return;
   state.loading = true;
   state.error = null;
   renderCleanerBody(cleaner);
+  updateCleanerBadge(cleanerId);
 
   const params = { cleaner: cleanerId };
   if (cleaner.needsKeyword) {
@@ -2668,25 +2781,38 @@ async function scanCleaner(cleanerId, options = {}) {
 
   const res = await window.api.cleanerScan(params);
   state.loading = false;
+  stopScanTicker(`cleaner:${cleanerId}`);
 
   if (!res || res.success !== true) {
     state.error = (res && res.error) || 'The scan engine did not respond.';
     state.findings = [];
   } else {
-    state.findings = res.findings || [];
+    // PowerShell's ConvertTo-Json emits a null element for any finding that
+    // came back empty from a sub-scan, and one null took the whole cleaner
+    // panel down with "Cannot read properties of null" the moment it rendered.
+    // Same defence the app list already applies to odd registry payloads: one
+    // malformed item must never cost the user the whole view.
+    state.findings = (res.findings || []).filter((f) => f && typeof f === 'object');
     state.note = res.note || null;
     state.scanned = true;
+    state.scannedAt = Date.now();
   }
 
-  const badge = document.getElementById(`cleaner-count-${cleanerId}`);
-  if (badge) {
-    badge.textContent = state.findings.length;
-    badge.style.display = state.scanned ? 'inline-flex' : 'none';
-    badge.className = state.findings.length > 0 ? 'audit-badge danger' : 'audit-badge';
-  }
+  updateCleanerBadge(cleanerId);
 
   if (options.expand !== false) document.getElementById(`cleaner-${cleanerId}`).classList.add('expanded');
   renderCleanerBody(cleaner);
+}
+
+// Results now persist across interactions instead of being re-derived, so the
+// view has to be honest about how old they are.
+function scanAgeLabel(state) {
+  if (!state.scannedAt) return '';
+  const seconds = Math.round((Date.now() - state.scannedAt) / 1000);
+  const when = seconds < 60
+    ? 'just now'
+    : `${Math.floor(seconds / 60)} minute(s) ago`;
+  return `<span style="font-size: 11.5px; color: var(--text-muted);">Scanned ${when}</span>`;
 }
 
 function renderCleanerBody(cleaner) {
@@ -2702,7 +2828,17 @@ function renderCleanerBody(cleaner) {
     : '';
 
   if (state.loading) {
-    body.innerHTML = `${keywordRow}<div class="panel-state"><i class="fa-solid fa-spinner fa-spin"></i><div>Scanning...</div></div>`;
+    body.innerHTML = `${keywordRow}<div class="panel-state">
+      <i class="fa-solid fa-spinner fa-spin"></i>
+      <div id="cleaner-progress-${esc(cleaner.id)}">Scanning...</div>
+    </div>`;
+    // The ticker is re-attached on every re-render because renderCleanerBody
+    // replaces the element it writes into.
+    startScanTicker(
+      `cleaner:${cleaner.id}`,
+      document.getElementById(`cleaner-progress-${cleaner.id}`),
+      'Scanning'
+    );
     return;
   }
 
@@ -2725,13 +2861,17 @@ function renderCleanerBody(cleaner) {
   }
 
   if (state.findings.length === 0) {
+    const cleared = state.resolvedCount > 0
+      ? `All ${state.resolvedCount} finding(s) have been moved to quarantine.`
+      : esc(state.note || 'No orphans found.');
     body.innerHTML = `${keywordRow}
       <div class="panel-state">
         <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
-        <div>${esc(state.note || 'No orphans found.')}</div>
+        <div>${cleared}</div>
       </div>
       <div class="cleaner-actions">
         <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}"><i class="fa-solid fa-rotate-right"></i> Re-scan</button>
+        ${scanAgeLabel(state)}
       </div>`;
     wireCleanerBody(cleaner);
     return;
@@ -2746,7 +2886,7 @@ function renderCleanerBody(cleaner) {
         .map(
           (f, index) => `
         <div class="finding-row">
-          <input type="checkbox" data-finding="${esc(index)}" ${f.removable === false ? 'disabled' : ''}>
+          <input type="checkbox" data-finding="${esc(index)}" ${f.removable === false ? 'disabled' : ''}${state.selected && state.selected.has(f.id) ? ' checked' : ''}>
           <div class="finding-main">
             <div class="finding-label">${esc(f.label)}</div>
             <div class="finding-evidence">${esc(f.evidence)}${f.registryPath ? ' &middot; ' + esc(f.registryPath) : ''}</div>
@@ -2760,6 +2900,7 @@ function renderCleanerBody(cleaner) {
     <div class="cleaner-actions">
       <button class="btn-sec btn-compact" data-select-all="${esc(cleaner.id)}">Select all</button>
       <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}"><i class="fa-solid fa-rotate-right"></i> Re-scan</button>
+      ${scanAgeLabel(state)}
       ${
         removable.length > 0
           ? `<button class="btn-danger btn-compact" data-purge="${esc(cleaner.id)}" data-destructive="true">
@@ -2775,6 +2916,24 @@ function renderCleanerBody(cleaner) {
 function wireCleanerBody(cleaner) {
   const body = document.getElementById(`cleaner-body-${cleaner.id}`);
   if (!body) return;
+  const state = cleanerState[cleaner.id];
+
+  // 7oo.5: what the user ticked is their work, and renderCleanerBody rebuilds
+  // this subtree on every re-render - collapsing the section, or leaving the
+  // tab and coming back, silently threw the selection away. Selection lives in
+  // state now, keyed by finding id rather than row index, so it also survives
+  // the list changing underneath it.
+  if (state) {
+    if (!state.selected) state.selected = new Set();
+    body.querySelectorAll('input[data-finding]').forEach((box) => {
+      box.addEventListener('change', () => {
+        const finding = state.findings[parseInt(box.getAttribute('data-finding'), 10)];
+        if (!finding) return;
+        if (box.checked) state.selected.add(finding.id);
+        else state.selected.delete(finding.id);
+      });
+    });
+  }
 
   body.querySelectorAll('[data-scan]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
@@ -2787,10 +2946,13 @@ function wireCleanerBody(cleaner) {
   if (selectAll) {
     selectAll.addEventListener('click', (e) => {
       e.stopPropagation();
-      const boxes = body.querySelectorAll('input[type="checkbox"]:not([disabled])');
+      const boxes = body.querySelectorAll('input[data-finding]:not([disabled])');
       const allChecked = Array.from(boxes).every((b) => b.checked);
       boxes.forEach((b) => {
         b.checked = !allChecked;
+        // dispatch so the same listener above keeps state in step - otherwise
+        // Select all ticks the boxes and the persisted selection disagrees.
+        b.dispatchEvent(new Event('change'));
       });
     });
   }
@@ -2835,12 +2997,25 @@ async function purgeCleaner(cleanerId) {
 
   if (!res || res.success !== true) {
     toast(`Nothing was removed: ${(res && res.error) || 'unknown error'}`, 'error', 8000);
-  } else {
-    const count = res.quarantinedCount ?? selected.length;
-    toast(`${count} item(s) moved to quarantine. Restore them any time from the Quarantine tab.`, 'success', 6000);
+    return;
   }
 
-  await scanCleaner(cleanerId);
+  const count = res.quarantinedCount ?? selected.length;
+  toast(`${count} item(s) moved to quarantine. Restore them any time from the Quarantine tab.`, 'success', 6000);
+
+  // 7oo.5: update the view for what just happened instead of re-running the
+  // whole scan. This used to end in `await scanCleaner(cleanerId)` - a fresh
+  // full sweep, measured at 180 seconds for context menus on the operator's
+  // machine - to learn something the app already knew: the items it just
+  // quarantined are gone. Quarantining is a change WE made, so the result is
+  // not in doubt, and re-deriving it from scratch was pure waiting.
+  const purgedIds = new Set(selected.map((f) => f.id));
+  state.findings = state.findings.filter((f) => !purgedIds.has(f.id));
+  if (state.selected) purgedIds.forEach((id) => state.selected.delete(id));
+  state.resolvedCount = (state.resolvedCount || 0) + count;
+
+  renderCleanerBody(CLEANERS.find((c) => c.id === cleanerId));
+  updateCleanerBadge(cleanerId);
 }
 
 // ==========================================

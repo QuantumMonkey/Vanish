@@ -69,6 +69,15 @@ contextBridge.exposeInMainWorld('api', {
   cleanerScan: (params) => ipcRenderer.invoke('cleaner-scan', params),
   cleanerPurge: (params) => ipcRenderer.invoke('cleaner-purge', params),
 
+  // 6g2 - interim state while a long scan runs. Before this, queue-update was
+  // the only push channel in the app and every scan was silent until it
+  // finished, which on a real machine is minutes.
+  onScanProgress: (callback) => {
+    const listener = (event, payload) => callback(payload);
+    ipcRenderer.on('scan-progress', listener);
+    return () => ipcRenderer.removeListener('scan-progress', listener);
+  },
+
   // Titlebar / Frame Controls
   minimizeWindow: () => ipcRenderer.send('window-minimize'),
   maximizeWindow: () => ipcRenderer.send('window-maximize'),

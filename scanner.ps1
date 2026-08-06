@@ -18,6 +18,42 @@ if ($ParamsBase64) {
 }
 
 
+# ==========================================
+# SCAN PROGRESS (6g2)
+# ==========================================
+# Every scan in this app was a plain request/response: the engine ran for as
+# long as it ran - a context-menu sweep measured at 180 seconds on the
+# operator's machine - and the UI showed a spinner and one line of static text
+# the whole time, indistinguishable from a hang.
+#
+# Progress goes to STDERR, deliberately. stdout carries the JSON result and
+# nothing may be allowed to corrupt it; main.js already collects stderr
+# separately and only reads it when the exit code is non-zero, so adding lines
+# there cannot change any existing contract. Each line is a self-describing JSON
+# object behind a marker, so a partial write is discarded rather than misread.
+#
+# Rule 9: these are counts of work actually completed, never an estimated
+# percentage or a predicted time. "6 of 12 registry roots" is a fact; "45%
+# complete, 20 seconds remaining" would be an invention.
+$script:ProgressMarker = '@@VANISH-PROGRESS@@'
+
+function Write-ScanProgress {
+    param(
+        [string]$stage,
+        [int]$done = 0,
+        [int]$total = 0,
+        [int]$found = 0
+    )
+    try {
+        $payload = @{ stage = $stage; done = $done; total = $total; found = $found } |
+            ConvertTo-Json -Depth 3 -Compress
+        [Console]::Error.WriteLine("$script:ProgressMarker$payload")
+        [Console]::Error.Flush()
+    } catch {
+        # Progress reporting must never be able to fail a scan.
+    }
+}
+
 # Helper to convert folder size to bytes
 function Get-FolderSize {
     param([string]$path)
@@ -2988,6 +3024,40 @@ function Set-MsiServerState {
 # provider paths. Every Stage 6/9 scan goes through these helpers with an
 # explicit view so nothing hides behind WOW64 redirection.
 
+# Base keys are cached per hive+view for the life of the process.
+#
+# OpenBaseKey is the expensive half of a registry read - for ClassesRoot
+# especially, which Windows synthesises by merging HKLM\Software\Classes with
+# HKCU\Software\Classes - and every single value lookup was paying it. The
+# context-menu cleaner does six roots x two views x N handlers x up to six
+# server lookups, so this ran thousands of times in one scan and the sweep did
+# not finish inside five minutes on the operator's machine.
+#
+# Safe because these handles are read-only and process-lifetime: scanner.ps1 is
+# spawned per action and exits, so there is no long-lived stale handle to worry
+# about. Callers still .Close() whatever they are handed, which is why the
+# empty-subKey case below opens a private handle rather than lending the cached
+# one out to be closed.
+$script:RegistryBaseKeys = @{}
+
+function Get-CachedRegistryBaseKey {
+    param([string]$hive, [string]$view)
+    $cacheKey = "$hive|$view"
+    if ($script:RegistryBaseKeys.ContainsKey($cacheKey)) {
+        return $script:RegistryBaseKeys[$cacheKey]
+    }
+    $base = $null
+    try {
+        $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+            [Microsoft.Win32.RegistryHive]::$hive,
+            [Microsoft.Win32.RegistryView]::$view)
+    } catch {
+        $base = $null
+    }
+    $script:RegistryBaseKeys[$cacheKey] = $base
+    return $base
+}
+
 function Open-RegistryView {
     param(
         [ValidateSet('ClassesRoot','CurrentUser','LocalMachine','Users','CurrentConfig')]
@@ -2997,10 +3067,14 @@ function Open-RegistryView {
         [string]$view = 'Registry64'
     )
     try {
-        $hiveEnum = [Microsoft.Win32.RegistryHive]::$hive
-        $viewEnum = [Microsoft.Win32.RegistryView]::$view
-        $base = [Microsoft.Win32.RegistryKey]::OpenBaseKey($hiveEnum, $viewEnum)
-        if ([string]::IsNullOrEmpty($subKey)) { return $base }
+        if ([string]::IsNullOrEmpty($subKey)) {
+            # The caller owns and closes this one, so it must not be the cache's.
+            return [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+                [Microsoft.Win32.RegistryHive]::$hive,
+                [Microsoft.Win32.RegistryView]::$view)
+        }
+        $base = Get-CachedRegistryBaseKey -hive $hive -view $view
+        if (-not $base) { return $null }
         return $base.OpenSubKey($subKey)
     } catch {
         return $null
@@ -3191,8 +3265,13 @@ function Find-OrphanContextMenus {
         @{ Path = 'AllFilesystemObjects\shellex\ContextMenuHandlers'; Label = 'Filesystem objects' }
     )
 
+    $stageTotal = 2 * $roots.Count
+    $stageDone = 0
+
     foreach ($view in @('Registry64','Registry32')) {
         foreach ($root in $roots) {
+            $stageDone++
+            Write-ScanProgress -stage "$($root.Label) ($view)" -done $stageDone -total $stageTotal -found $findings.Count
             foreach ($handlerName in (Get-RegistrySubKeyNamesInView -hive 'ClassesRoot' -subKey $root.Path -view $view)) {
                 $handlerPath = "$($root.Path)\$handlerName"
                 $clsid = Get-RegistryValueInView -hive 'ClassesRoot' -subKey $handlerPath -name "" -view $view
@@ -3376,7 +3455,19 @@ function Find-DeadAssociations {
     foreach ($view in @('Registry64','Registry32')) {
         $progIds = @(Get-RegistrySubKeyNamesInView -hive 'ClassesRoot' -subKey '' -view $view)
 
+        # HKCR carries tens of thousands of ProgIds, so this is the scan most
+        # likely to leave a user staring at a spinner. Report every few hundred
+        # rather than every entry - a progress line per item costs more than the
+        # work it describes.
+        $checked = 0
+        $reportEvery = 250
+
         foreach ($progId in $progIds) {
+            $checked++
+            if ($checked % $reportEvery -eq 0) {
+                Write-ScanProgress -stage "File associations ($view)" -done $checked -total $progIds.Count -found $findings.Count
+            }
+
             # Extensions themselves point at a ProgId; handlers live under it.
             if ($progId.StartsWith('.')) { continue }
             if ($progId -eq 'CLSID' -or $progId -eq 'Wow6432Node' -or $progId -eq 'Installer') { continue }
@@ -3498,6 +3589,26 @@ function Set-FindingRemovability {
     return $findings
 }
 
+# A scan that found nothing must return an EMPTY list, not a list holding one
+# null.
+#
+# PowerShell collapses an empty pipeline to $null, and @($null) is an array of
+# length one whose single element is null. That null crossed IPC as a JSON null
+# and took the whole System Clean panel down the moment it rendered - "Cannot
+# read properties of null (reading 'removable')" - on a machine whose context
+# menus are perfectly clean. The stub suite never saw it because its fixtures
+# always return at least one finding.
+function ConvertTo-FindingList {
+    param([object]$findings)
+    $list = @(@($findings) | Where-Object { $null -ne $_ })
+    # The leading comma is load-bearing. `return @()` unrolls an empty array to
+    # nothing on the way out, the hashtable field becomes $null, and the JSON
+    # carries "findings": null - which is the same one-element-null the caller
+    # was trying to avoid, just arrived by a different route. Wrapping in a
+    # single-element outer array stops the unrolling.
+    return ,$list
+}
+
 function Invoke-CleanerScan {
     param([object]$p)
 
@@ -3505,14 +3616,14 @@ function Invoke-CleanerScan {
 
     try {
         switch ($cleaner) {
-            "context-menus" { return @{ success = $true; cleaner = $cleaner; findings = @(Set-FindingRemovability (Find-OrphanContextMenus)) } }
-            "services"      { return @{ success = $true; cleaner = $cleaner; findings = @(Find-OrphanServices) } }
-            "drivers"       { return @{ success = $true; cleaner = $cleaner; findings = @(Find-OrphanDriverPackages) } }
-            "path"          { return @{ success = $true; cleaner = $cleaner; findings = @(Find-DeadPathEntries) } }
-            "associations"  { return @{ success = $true; cleaner = $cleaner; findings = @(Set-FindingRemovability (Find-DeadAssociations)) } }
+            "context-menus" { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Set-FindingRemovability (Find-OrphanContextMenus))) } }
+            "services"      { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanServices)) } }
+            "drivers"       { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanDriverPackages)) } }
+            "path"          { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-DeadPathEntries)) } }
+            "associations"  { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Set-FindingRemovability (Find-DeadAssociations))) } }
             "profiles"      {
                 $res = Find-OtherProfileRemnants -p $p
-                if ($res.success) { return @{ success = $true; cleaner = $cleaner; findings = @($res.findings); note = $res.note } }
+                if ($res.success) { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $res.findings); note = $res.note } }
                 return @{ success = $false; cleaner = $cleaner; error = $res.error }
             }
             default { return @{ success = $false; error = "Unknown cleaner '$cleaner'." } }

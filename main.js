@@ -192,8 +192,15 @@ app.on('window-all-closed', () => {
   if (process.platform !== 'darwin' && !headlessHarness) app.quit();
 });
 
+// 6g2: scanner.ps1 emits progress lines on stderr behind this marker. stdout
+// stays pure JSON, so nothing here can corrupt an existing result contract.
+const PROGRESS_MARKER = '@@VANISH-PROGRESS@@';
+
 // Helper to run scanner.ps1 functions
-function runPowerShell(action, params = {}) {
+//
+// `onProgress` receives each progress record the engine emits while it works.
+// Passing it is optional; every existing caller keeps its old behaviour.
+function runPowerShell(action, params = {}, onProgress = null) {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, 'scanner.ps1');
     const paramsJson = JSON.stringify(params);
@@ -210,6 +217,7 @@ function runPowerShell(action, params = {}) {
     const ps = spawn('powershell.exe', args);
     let stdout = '';
     let stderr = '';
+    let stderrPending = '';
 
     ps.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -217,6 +225,23 @@ function runPowerShell(action, params = {}) {
 
     ps.stderr.on('data', (data) => {
       stderr += data.toString();
+      if (!onProgress) return;
+
+      // Line-buffered: a chunk boundary can land mid-line, and half a JSON
+      // object must be held rather than parsed.
+      stderrPending += data.toString();
+      const lines = stderrPending.split(/\r?\n/);
+      stderrPending = lines.pop();
+
+      for (const line of lines) {
+        const at = line.indexOf(PROGRESS_MARKER);
+        if (at === -1) continue;
+        try {
+          onProgress(JSON.parse(line.slice(at + PROGRESS_MARKER.length)));
+        } catch {
+          // A malformed progress line is never worth failing a scan over.
+        }
+      }
     });
 
     ps.on('close', (code) => {
@@ -232,6 +257,16 @@ function runPowerShell(action, params = {}) {
       }
     });
   });
+}
+
+// 6g2: push interim scan state back to whichever window asked. Sent to the
+// requesting sender rather than a stored window reference so a harness window
+// receives its own progress and the real window is never written to by a
+// diagnostic.
+function sendScanProgress(event, payload) {
+  const sender = event && event.sender;
+  if (!sender || sender.isDestroyed()) return;
+  sender.send('scan-progress', payload);
 }
 
 // IPC Handlers
@@ -720,8 +755,11 @@ ipcMain.handle('find-broken-entries', async () => {
 
 // Scanning is read-only and allowed in Audit Mode.
 ipcMain.handle('cleaner-scan', async (event, params) => {
+  const cleaner = (params && params.cleaner) || 'unknown';
   try {
-    return await runPowerShell('cleaner-scan', params || {});
+    return await runPowerShell('cleaner-scan', params || {}, (progress) =>
+      sendScanProgress(event, { scan: 'cleaner', cleaner, ...progress })
+    );
   } catch (error) {
     return { success: false, error: error.message, findings: [] };
   }

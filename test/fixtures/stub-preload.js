@@ -48,8 +48,17 @@ function nextResponse(method, fallback) {
   return fallback;
 }
 
+// How many times each method was actually called. "Did interacting with this
+// screen re-run the scan?" is only answerable by counting what crossed the
+// bridge, and several of this app's worst behaviours - a full re-enumeration on
+// every tab visit, a minutes-long re-scan after every purge - were invisible
+// precisely because nothing counted.
+const callCounts = {};
+const scanProgressListeners = [];
+
 function stub(method, defaultValue) {
   return async (...args) => {
+    callCounts[method] = (callCounts[method] || 0) + 1;
     const r = nextResponse(method, defaultValue);
     if (r && typeof r === 'object' && '__reject' in r) throw new Error(r.__reject);
     return typeof r === 'function' ? r(...args) : r;
@@ -127,6 +136,16 @@ contextBridge.exposeInMainWorld('api', {
   findBrokenEntries: stub('findBrokenEntries', { success: true, total: 0, findings: [] }),
   cleanerScan: stub('cleanerScan', { success: true, findings: [] }),
   cleanerPurge: stub('cleanerPurge', { success: true, quarantinedCount: 1 }),
+  // 6g2 progress channel. The fixture keeps the same shape as the real preload
+  // so the renderer takes the same code path here as it does in the app, and
+  // __test.emitScanProgress lets a test drive it.
+  onScanProgress: (callback) => {
+    scanProgressListeners.push(callback);
+    return () => {
+      const at = scanProgressListeners.indexOf(callback);
+      if (at !== -1) scanProgressListeners.splice(at, 1);
+    };
+  },
   minimizeWindow: () => {},
   maximizeWindow: () => {},
   closeWindow: () => {},
@@ -142,5 +161,12 @@ contextBridge.exposeInMainWorld('__test', {
   // Kept for the existing SEC-1 dialog test: a thin wrapper over the same queue.
   setNextUninstallResponse: (response) => {
     responseQueues.uninstallNative = [response];
+  },
+  emitScanProgress: (payload) => {
+    scanProgressListeners.forEach((cb) => cb(payload));
+  },
+  callCount: (method) => callCounts[method] || 0,
+  resetCallCounts: () => {
+    Object.keys(callCounts).forEach((k) => delete callCounts[k]);
   }
 });
