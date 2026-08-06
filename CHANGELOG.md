@@ -10,6 +10,70 @@ full decision rules.
 
 ## [Unreleased]
 
+### Fixed — epic 7oo: the operator audit of 2026-08-06
+
+The verdict that started this was "we have an aesthetic product with poor ux and
+minimal functionality". Ten defects, all of them invisible to a 312/312 green
+suite because every UI test ran against a one-app fixture. Each number below was
+measured on a real machine, and `test/real-data-verify.js` re-measures it.
+
+* **Real-data harness** (`7oo.10`). A second harness class that runs the real
+  preload against the real backend and asserts what a user would actually see.
+  Ground truth comes from `test/fixtures/real-machine-truth.ps1`, which reads
+  the machine with its own queries — a harness that asks the code under test
+  what reality looks like can only ever agree with itself. It reproduced six of
+  the defects below before any of them were fixed. `main.js` gained
+  `VANISH_HEADLESS_HARNESS=1` so no diagnostic can spawn a window mistakable for
+  the app.
+* **Context-menu scan: 300s+ → 0.7s** (`7oo.5`). `Open-RegistryView` called
+  `OpenBaseKey` on every value lookup; for `ClassesRoot`, which Windows
+  synthesises by merging two hives, that is the expensive half of a read. Base
+  keys are now cached per hive+view.
+* **Storage panel showed nothing, ever** (`7oo.8`). The CIM query asked
+  `Win32_LogicalDisk` for `DriveLetter`, a `Win32_Volume` property. The whole
+  query was invalid, the `catch` swallowed it, and the panel reported no drives
+  on every machine since it shipped. Now renders 2 of 2 fixed drives here.
+* **60 of 151 installed entries were invisible** (`7oo.3`). `SystemComponent=1`
+  and `ParentKeyName` entries were dropped outright, hiding Windows Subsystem
+  for Linux, the vendor utilities, both Python installations and every runtime.
+  Nothing is dropped now: every entry is classified (application / component /
+  update) and every component states why. Protection is a narrow claim about
+  Windows servicing — one entry on this machine — not a publisher check.
+* **Uninstall actions rendered 250px below the window** (`7oo.1`). The details
+  panel scrolled as a whole while its buttons relied on `margin-top: auto`. The
+  info list scrolls now and the actions are structure; panel chrome is sized in
+  `vh`, verified at 800x600, 1080x720 and 1440x900.
+* **Force Uninstall disagreed with the app list** (`7oo.2`). It was a second
+  registry sweep that reapplied the old drops by hand, under a comment claiming
+  the two lists agreed. It reads the same classified inventory now.
+* **Redundancy counted one product as several** (`7oo.6`). Edge + Edge Update +
+  WebView2 read as three browsers. Grouped by vendor within a category now: 6
+  groups became 4, and the 4 that remain are real.
+* **Two of three "orphaned" startup items did not exist** (`7oo.4`). A scheduled
+  task's `Execute` value arrives already quoted and was used verbatim, so
+  `Test-Path` on a quoted path was always false. The orphan count also
+  serialised as `null` whenever exactly one item matched, hiding the badge.
+* **Live scan progress** (`6g2`). `queue-update` was the only push channel in
+  the app. `scanner.ps1` now emits progress on stderr behind a marker, `main.js`
+  forwards it, and the renderer shows measured facts only — "step 6250 of 6465,
+  294 found so far, 6s", never a predicted percentage (Rule 9).
+* **Purging no longer triggers a full rescan** (`7oo.5`), counts read "scanning"
+  until final, and a ticked selection survives collapsing and tab changes.
+
+### Added
+* **Windows optional features toggle** (`7oo.7`). The "Turn Windows features on
+  or off" list, previously invisible to Vanish. Uses `Win32_OptionalFeature`
+  rather than `Get-WindowsOptionalFeature` because the DISM cmdlet requires
+  elevation and would make the list useless in Audit Mode. Read-only: the
+  refusal names `optionalfeatures.exe`.
+* **Quarantine entries answer what happens if you do nothing** (`7oo.9`), read
+  from the live retention setting, plus what/where/when/can-I-undo without
+  expanding anything.
+* `test/fixtures/stub-preload.js` gained `callCount()` — "did interacting with
+  this screen re-run the scan?" is only answerable by counting what crossed the
+  bridge, and the worst behaviours here were invisible because nothing counted.
+
+
 > Rule 10 note: everything below is **In Progress**, not Complete. It is coded
 > and passes 290/290 assertions **unelevated** on Windows 11 build 26200
 > (`test\run-all.ps1`); 2 of 14 suites (Vault IPC, System Clean purges) require
