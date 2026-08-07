@@ -1912,6 +1912,8 @@ function renderNetworkActivity(net) {
 
     <div class="panel-inline-note">Looked at: ${examined.map(esc).join(' &middot; ')}${signalLine ? ` &middot; ${esc(signalLine)}` : ''}</div>
 
+    <div id="network-hold-row"></div>
+
     ${
       top.length
         ? `<div style="overflow-x: auto;">
@@ -1939,6 +1941,115 @@ function renderNetworkActivity(net) {
   }
 
   wireNetworkRefresh();
+  renderNetworkHold();
+}
+
+// bfh.2. A hold changes a machine-wide Windows policy and pauses other
+// people's transfers, so while it is on it must be impossible to miss - the
+// failure mode of a quiet background toggle is a user who never gets another
+// Windows update and has no idea why.
+async function renderNetworkHold() {
+  const row = document.getElementById('network-hold-row');
+  if (!row) return;
+
+  let state = null;
+  try {
+    state = await window.api.networkHoldState();
+  } catch {
+    return;
+  }
+
+  if (state && state.active) {
+    const heldJobs = ((state.record && state.record.bitsJobs) || []).length;
+    const since = state.record && state.record.startedAt
+      ? new Date(state.record.startedAt).toLocaleTimeString()
+      : null;
+
+    row.innerHTML = `
+      <div class="net-hold is-on">
+        <div class="net-hold-main">
+          <div class="net-hold-title"><i class="fa-solid fa-pause"></i> Background transfers are being held</div>
+          <div class="net-hold-detail">
+            Windows Update's background downloads are capped and
+            ${heldJobs === 0 ? 'no other transfer was running to pause' : `${heldJobs} background transfer(s) are paused`}${since ? `, since ${esc(since)}` : ''}.
+            Releasing puts every setting back exactly as it was. Vanish also releases it by itself if it is closed or crashes.
+          </div>
+        </div>
+        <button class="btn-primary btn-compact" id="btn-network-release" data-destructive="true">
+          <i class="fa-solid fa-play"></i> Release
+        </button>
+      </div>`;
+  } else {
+    row.innerHTML = `
+      <div class="net-hold">
+        <div class="net-hold-main">
+          <div class="net-hold-title">Hold background transfers</div>
+          <div class="net-hold-detail">
+            Caps Windows Update's background downloading and pauses background transfers that are running, until you
+            release it. It cannot give a program more speed - it only stops other things taking it - and it does
+            nothing about traffic from other devices on your network.
+          </div>
+        </div>
+        <button class="btn-sec btn-compact" id="btn-network-hold" data-destructive="true">
+          <i class="fa-solid fa-pause"></i> Hold
+        </button>
+      </div>`;
+  }
+
+  const hold = document.getElementById('btn-network-hold');
+  if (hold) hold.addEventListener('click', () => applyNetworkHold());
+  const release = document.getElementById('btn-network-release');
+  if (release) release.addEventListener('click', () => releaseNetworkHold());
+
+  applyTierLocks();
+}
+
+async function applyNetworkHold() {
+  if (!guardFullMode()) return;
+
+  const ok = await confirmDialog({
+    title: 'Hold background transfers?',
+    body:
+      "Windows Update's background downloads are capped, and background transfers that are running now are paused. " +
+      'Nothing is uninstalled and nothing is deleted. Every setting is written down before it is changed, so releasing ' +
+      'puts it all back - and Vanish releases it automatically if it closes or crashes while the hold is on.',
+    confirmLabel: 'Hold them'
+  });
+  if (!ok) return;
+
+  const res = await window.api.networkHoldApply();
+  if (!res || res.success !== true) {
+    toast(`Nothing was held: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
+    await renderNetworkHold();
+    return;
+  }
+
+  toast(
+    `Background transfers held. ${res.appliedCount} setting(s) changed, and every one of them is recorded so it can be put back.`,
+    'success',
+    6000
+  );
+  await renderNetworkHold();
+}
+
+async function releaseNetworkHold() {
+  if (!guardFullMode()) return;
+
+  const res = await window.api.networkHoldRevert();
+  if (!res || res.success !== true) {
+    // A partial release keeps its record on disk on purpose, so this is
+    // recoverable rather than stranded - say so instead of just failing.
+    toast(
+      `Some settings could not be put back: ${(res && res.error) || 'no reason given'}. Vanish still has the record and will try again next time it starts.`,
+      'error',
+      10000
+    );
+    await renderNetworkHold();
+    return;
+  }
+
+  toast('Background transfers released. Every setting is back where it was.', 'success', 5000);
+  await renderNetworkHold();
 }
 
 function wireNetworkRefresh() {

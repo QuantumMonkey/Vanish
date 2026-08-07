@@ -117,6 +117,9 @@ Every destructive channel below is wrapped in `fullModeOnly()` ([main.js](main.j
 | `findBrokenEntries()` | `find-broken-entries` | | read-only, works in Audit Mode | `Find-BrokenUninstallEntries` |
 | `cleanerScan(params)` | `cleaner-scan` | | read-only | `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, other profiles, left-over Store app data) |
 | `getNetworkActivity(params)` | `get-network-activity` | | read-only | `Get-NetworkActivity` — adapter byte-counter deltas and connections by owning process. Opens no socket (INV-4) and reports no per-process byte rate, which Windows cannot attribute without an ETW trace |
+| `networkHoldState()` | `network-hold-state` | | read-only | reads `network-hold.json`; no engine call |
+| `networkHoldApply()` | `network-hold-apply` | ✅ | capture → record written to disk → apply, so a crash at any point is recoverable | `Get-NetworkHoldCapture` then `Invoke-NetworkHoldApply` |
+| `networkHoldRevert()` | `network-hold-revert` | ✅ | restores from the on-disk record; a partial revert keeps the record for the next attempt | `Invoke-NetworkHoldRevert` |
 | `startupAction(params)` | `startup-action` | ✅ | registry and service writes export a manifest-only `.reg` to the vault first | `Remove-StartupRegistryValue` / `Set-StartupServiceManual` / `Set-StartupTaskEnabled` |
 | `cleanerPurge(params)` | `cleaner-purge` | ✅ | routes through the vault, same as `purge-remnants` | `Invoke-QuarantineItems` / `Set-PathEntries` |
 | `minimizeWindow()` / `maximizeWindow()` / `closeWindow()` | `window-*` (send) | | window controls | — |

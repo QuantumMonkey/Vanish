@@ -1542,6 +1542,40 @@ input:checked + .slider:before {
 
 .net-verdict-detail { font-size: 12px; color: var(--text-gray); line-height: 1.55; }
 
+/* A hold changes machine-wide policy, so its "on" state is loud on purpose. */
+.net-hold {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 10px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-dark-card);
+}
+
+.net-hold.is-on {
+  border-color: hsla(38, 90%, 55%, 0.45);
+  background: linear-gradient(180deg, hsla(38, 90%, 55%, 0.12), transparent);
+}
+
+.net-hold-main { flex: 1; min-width: 0; }
+
+.net-hold-title {
+  font-family: var(--font-title);
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-white);
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.net-hold.is-on .net-hold-title { color: var(--color-warning); }
+
+.net-hold-detail { font-size: 11.5px; color: var(--text-gray); line-height: 1.55; }
+
 /* Indeterminate wait bar. Used where the wait is Windows' and its length is
  * genuinely unknown, so a percentage would be an invention. */
 .wait-track {

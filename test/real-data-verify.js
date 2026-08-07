@@ -1288,7 +1288,7 @@ async function sectionStartupItems(truth) {
 // The panel's job is to reach a verdict, and the verdict that matters most is
 // the negative one. What it must never do is invent a per-program byte rate,
 // because that number would be unfalsifiable to the person reading it.
-async function sectionNetwork() {
+async function sectionNetwork(truth) {
   heading('Network activity: a verdict, and no invented per-app numbers');
 
   await goToTab('audit');
@@ -1371,6 +1371,44 @@ async function sectionNetwork() {
     'no program appears on screen that the engine did not report',
     `${view.rowCount} rows vs ${(engine.processes || []).length} reported`
   );
+
+  // bfh.2: the hold control. In Audit Mode it must be visibly inert rather
+  // than a button that fails when pressed, and the IPC must refuse it too.
+  const hold = await js(`(() => {
+    const row = document.getElementById('network-hold-row');
+    if (!row) return { missing: true };
+    const btn = row.querySelector('button');
+    return {
+      missing: false,
+      text: row.textContent.replace(/\\s+/g, ' ').trim(),
+      hasButton: Boolean(btn),
+      locked: btn ? btn.classList.contains('tier-locked') : false,
+      label: btn ? btn.textContent.trim() : ''
+    };
+  })()`);
+
+  assert(!hold.missing && hold.hasButton, 'the section offers a hold control', JSON.stringify(hold));
+  if (!hold.missing && hold.hasButton) {
+    // It must not overclaim: this cannot give anything more speed, and it
+    // cannot touch another device.
+    assert(
+      /cannot give|only stops other things|other devices/i.test(hold.text),
+      'the hold says what it cannot do, not just what it does',
+      hold.text
+    );
+
+    if (!truth.isAdmin) {
+      assert(hold.locked, 'in Audit Mode the hold is visibly inert', `button read "${hold.label}"`);
+      const refused = await js(`window.api.networkHoldApply()`);
+      assert(
+        refused && refused.success === false && /audit mode|full mode|administrator/i.test(String(refused.error)),
+        'and the engine refuses it by tier, not just the CSS',
+        JSON.stringify(refused)
+      );
+    } else {
+      skip('the Audit Mode refusal', 'this run is elevated');
+    }
+  }
 
   // Re-measuring is one engine call, and only for this section.
   const before = callsTo('get-network-activity');
@@ -1893,7 +1931,10 @@ app.whenReady().then(async () => {
     for (const name of names) {
       try {
         if (name === 'applist') await SECTIONS[name](listState);
-        else if (name === 'inventory' || name === 'storage' || name === 'force' || name === 'startup') await SECTIONS[name](truth);
+        // Sections that need ground truth about the machine (elevation, drive
+        // count, the real registry) take it as a parameter - it is a local in
+        // this function, so a section that forgets to declare it throws.
+        else if (['inventory', 'storage', 'force', 'startup', 'network'].includes(name)) await SECTIONS[name](truth);
         else await SECTIONS[name]();
       } catch (err) {
         section = name;

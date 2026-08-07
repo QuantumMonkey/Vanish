@@ -1546,6 +1546,200 @@ function Get-NetworkActivity {
     }
 }
 
+# --- bfh.2: holding background transfers ---------------------------------
+#
+# The only levers Windows gives a user-mode program over its own machine's
+# share of the connection, and they are levers over BACKGROUND traffic only:
+#
+#   Delivery Optimization - Windows Update's downloader, capped by policy to
+#     1% of measured bandwidth for background transfers. Foreground transfers
+#     (someone clicked install in the Store) are deliberately left alone: a
+#     download the user is waiting for is not what "hold the background" means.
+#   BITS - the transfer service updaters and installers queue work on. Jobs
+#     that are actively moving are suspended by id, and only those ids are
+#     resumed on release.
+#
+# What it is NOT: per-app shaping. That needs a kernel WFP callout driver and
+# is permanently out of scope for this stage. Nothing here promises a speed.
+#
+# The capture step is separate from the apply step ON PURPOSE. The caller
+# writes the captured prior state to disk BEFORE calling apply, so a crash
+# between the two leaves a machine that is unchanged, and a crash after leaves
+# a record that can put it back. Same rule as the vault: the restore manifest
+# exists before the mutation does (INV-1).
+
+$script:DoPolicyKey = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization'
+$script:DoHeldBackgroundPercent = 1
+
+function Get-NetworkHoldCapture {
+    # Read-only: safe in Audit Mode, and the UI uses it to describe what a hold
+    # would actually do before anyone commits to it.
+    $keyExisted = Test-Path -LiteralPath $script:DoPolicyKey
+    $values = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($name in @('DOPercentageMaxBackgroundBandwidth')) {
+        $existed = $false
+        $data = $null
+        if ($keyExisted) {
+            $prop = Get-ItemProperty -LiteralPath $script:DoPolicyKey -Name $name -ErrorAction SilentlyContinue
+            if ($prop -and $null -ne $prop.$name) {
+                $existed = $true
+                $data = [int]$prop.$name
+            }
+        }
+        $values.Add(@{ name = $name; existed = $existed; data = $data })
+    }
+
+    # Only jobs actually moving data are worth suspending. A job already
+    # suspended by its own owner must not be resumed by our release - it was
+    # not ours to touch, so it is never captured.
+    $jobs = [System.Collections.Generic.List[object]]::new()
+    $bitsError = $null
+    try {
+        $all = if (Test-IsElevated) { @(Get-BitsTransfer -AllUsers -ErrorAction Stop) }
+               else                 { @(Get-BitsTransfer -ErrorAction Stop) }
+        foreach ($job in $all) {
+            $state = [string]$job.JobState
+            if (@('Transferring','Connecting','Queued','TransientError') -notcontains $state) { continue }
+            $jobs.Add(@{
+                jobId       = [string]$job.JobId
+                displayName = [string]$job.DisplayName
+                state       = $state
+            })
+        }
+    } catch {
+        $bitsError = $_.Exception.Message
+    }
+
+    return @{
+        success        = $true
+        capturedAt     = (Get-Date).ToString('o')
+        doKeyExisted   = $keyExisted
+        doKeyPath      = $script:DoPolicyKey
+        doValues       = @($values)
+        bitsJobs       = @($jobs)
+        bitsError      = $bitsError
+        heldPercent    = $script:DoHeldBackgroundPercent
+        elevated       = (Test-IsElevated)
+    }
+}
+
+function Invoke-NetworkHoldApply {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required. Vanish is running in Audit Mode (read-only)." }
+    }
+    if (-not $p -or -not $p.record) {
+        return @{ success = $false; error = "Nothing was captured first, so there would be no way back. Refused." }
+    }
+
+    $applied = [System.Collections.Generic.List[object]]::new()
+    $failed  = [System.Collections.Generic.List[object]]::new()
+
+    try {
+        if (-not (Test-Path -LiteralPath $script:DoPolicyKey)) {
+            $null = New-Item -Path $script:DoPolicyKey -Force -ErrorAction Stop
+        }
+        Set-ItemProperty -LiteralPath $script:DoPolicyKey `
+            -Name 'DOPercentageMaxBackgroundBandwidth' `
+            -Value $script:DoHeldBackgroundPercent -Type DWord -ErrorAction Stop
+        $applied.Add(@{ kind = 'delivery-optimization'; detail = "background transfers capped at $($script:DoHeldBackgroundPercent)%" })
+    } catch {
+        $failed.Add(@{ kind = 'delivery-optimization'; error = $_.Exception.Message })
+    }
+
+    foreach ($job in @($p.record.bitsJobs)) {
+        if (-not $job -or [string]::IsNullOrWhiteSpace($job.jobId)) { continue }
+        try {
+            $live = Get-BitsTransfer -AllUsers -ErrorAction Stop | Where-Object { [string]$_.JobId -eq [string]$job.jobId }
+            if (-not $live) {
+                # Finished between capture and apply. Not an error, and not
+                # something release should try to resume.
+                $failed.Add(@{ kind = 'bits'; jobId = [string]$job.jobId; error = 'finished before it could be held' })
+                continue
+            }
+            Suspend-BitsTransfer -BitsJob $live -ErrorAction Stop
+            $applied.Add(@{ kind = 'bits'; jobId = [string]$job.jobId; detail = [string]$job.displayName })
+        } catch {
+            $failed.Add(@{ kind = 'bits'; jobId = [string]$job.jobId; error = $_.Exception.Message })
+        }
+    }
+
+    return @{
+        success      = ($applied.Count -gt 0)
+        applied      = @($applied)
+        failed       = @($failed)
+        appliedCount = $applied.Count
+    }
+}
+
+function Invoke-NetworkHoldRevert {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required to put these settings back." }
+    }
+    if (-not $p -or -not $p.record) {
+        return @{ success = $false; error = "No record of what was changed, so nothing can be put back." }
+    }
+
+    $restored = [System.Collections.Generic.List[object]]::new()
+    $failed   = [System.Collections.Generic.List[object]]::new()
+    $record   = $p.record
+
+    foreach ($value in @($record.doValues)) {
+        if (-not $value -or [string]::IsNullOrWhiteSpace($value.name)) { continue }
+        try {
+            if ($value.existed -eq $true) {
+                Set-ItemProperty -LiteralPath $script:DoPolicyKey -Name $value.name -Value ([int]$value.data) -Type DWord -ErrorAction Stop
+                $restored.Add(@{ kind = 'delivery-optimization'; detail = "$($value.name) put back to $($value.data)" })
+            } else {
+                Remove-ItemProperty -LiteralPath $script:DoPolicyKey -Name $value.name -ErrorAction SilentlyContinue
+                $restored.Add(@{ kind = 'delivery-optimization'; detail = "$($value.name) removed - it was not set before" })
+            }
+        } catch {
+            $failed.Add(@{ kind = 'delivery-optimization'; error = $_.Exception.Message })
+        }
+    }
+
+    # If Vanish created the policy key, Vanish removes it - but only when it is
+    # empty, because something else may have written to it in the meantime.
+    if ($record.doKeyExisted -ne $true) {
+        try {
+            $key = Get-Item -LiteralPath $script:DoPolicyKey -ErrorAction SilentlyContinue
+            if ($key -and $key.ValueCount -eq 0 -and $key.SubKeyCount -eq 0) {
+                Remove-Item -LiteralPath $script:DoPolicyKey -Force -ErrorAction Stop
+                $restored.Add(@{ kind = 'delivery-optimization'; detail = 'policy key removed - it did not exist before' })
+            }
+        } catch {
+            $failed.Add(@{ kind = 'delivery-optimization'; error = $_.Exception.Message })
+        }
+    }
+
+    foreach ($job in @($record.bitsJobs)) {
+        if (-not $job -or [string]::IsNullOrWhiteSpace($job.jobId)) { continue }
+        try {
+            $live = Get-BitsTransfer -AllUsers -ErrorAction Stop | Where-Object { [string]$_.JobId -eq [string]$job.jobId }
+            if (-not $live) {
+                $restored.Add(@{ kind = 'bits'; jobId = [string]$job.jobId; detail = 'no longer on this PC' })
+                continue
+            }
+            Resume-BitsTransfer -BitsJob $live -ErrorAction Stop
+            $restored.Add(@{ kind = 'bits'; jobId = [string]$job.jobId; detail = 'resumed' })
+        } catch {
+            $failed.Add(@{ kind = 'bits'; jobId = [string]$job.jobId; error = $_.Exception.Message })
+        }
+    }
+
+    return @{
+        success       = ($failed.Count -eq 0)
+        restored      = @($restored)
+        failed        = @($failed)
+        restoredCount = $restored.Count
+    }
+}
+
 # --- 7oo.11: acting on a startup item ------------------------------------
 #
 # Three deliberately narrow verbs, not one general-purpose one. Each validates
@@ -4698,6 +4892,15 @@ if ($Action) {
         }
         "get-network-activity" {
             Get-NetworkActivity -p $Params | ConvertTo-Json -Depth 6 -Compress
+        }
+        "network-hold-capture" {
+            Get-NetworkHoldCapture | ConvertTo-Json -Depth 6 -Compress
+        }
+        "network-hold-apply" {
+            Invoke-NetworkHoldApply -p $Params | ConvertTo-Json -Depth 6 -Compress
+        }
+        "network-hold-revert" {
+            Invoke-NetworkHoldRevert -p $Params | ConvertTo-Json -Depth 6 -Compress
         }
         "startup-remove-registry" {
             Remove-StartupRegistryValue -p $Params | ConvertTo-Json -Depth 4 -Compress

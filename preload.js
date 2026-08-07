@@ -70,6 +70,11 @@ contextBridge.exposeInMainWorld('api', {
   // anything on this machine is at all. Read-only, no network I/O.
   getNetworkActivity: (params) => ipcRenderer.invoke('get-network-activity', params),
 
+  // bfh.2 - hold background transfers, and put every setting back on release.
+  networkHoldState: () => ipcRenderer.invoke('network-hold-state'),
+  networkHoldApply: () => ipcRenderer.invoke('network-hold-apply'),
+  networkHoldRevert: () => ipcRenderer.invoke('network-hold-revert'),
+
   // 7oo.11 - acting on a startup item (remove Run value / service to manual /
   // disable or enable a scheduled task)
   startupAction: (params) => ipcRenderer.invoke('startup-action', params),

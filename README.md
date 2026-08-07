@@ -4,7 +4,7 @@
 
 Vanish maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts down the leftovers that uninstallers leave behind, quarantines everything it removes so it can be put back, and audits system health — startup bloat, orphaned autostart entries, redundant software, locked files, a bulk uninstall queue. Everything runs locally. Nothing leaves your machine.
 
-> Working version 0.3.0, Core tier feature-complete. Passes 361/361 assertions **unelevated** (`npm test`); 2 of 16 suites need Full Mode and have not run this session. Not yet **Complete** by this project's own bar — see [Status](#status) below before you rely on it.
+> Working version 0.3.0, Core tier feature-complete. Passes 371/371 assertions **unelevated** (`npm test`); 2 of 16 suites need Full Mode and have not run this session. Not yet **Complete** by this project's own bar — see [Status](#status) below before you rely on it.
 
 <!-- DEMO GIF PLACEHOLDER
 Record with ScreenToGif: 30–60s showing scan → app select → wizard →
@@ -55,6 +55,7 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Force Uninstall — detects and removes entries that can no longer uninstall themselves, still routed through the vault | [scanner.ps1](scanner.ps1) `Find-BrokenUninstallEntries` |
 | Health Advisor: CIM-based system diagnostics (OS, CPU, RAM, GPU, disks, uptime) | [scanner.ps1](scanner.ps1) `Get-SystemDiagnostics` |
 | Network activity — which programs hold connections, and a verdict including "nothing on this PC is using the network". Reads local byte counters only; it never opens a socket, and never claims a per-program byte rate Windows cannot attribute | [scanner.ps1](scanner.ps1) `Get-NetworkActivity` |
+| Hold background transfers — caps Windows Update's background downloading and pauses running background transfers, with every changed setting written to disk before it is touched, and released automatically if Vanish closes or crashes while a hold is on | [scanner.ps1](scanner.ps1) `Invoke-NetworkHoldApply` |
 | Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services — with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
 | Software redundancy detection: 14 category clusters (browsers, PDF readers, AV tools…) flagging duplicate installs | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
 | Search, type filter, and sort (name/size/date) over the full app inventory | [renderer.js](renderer.js) `filterAndRenderApps` |

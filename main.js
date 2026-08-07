@@ -220,6 +220,14 @@ const bootstrapped = app.whenReady().then(async () => {
     vault.autoPurgeSweep().catch((err) => console.error('Auto-purge sweep failed:', err.message));
   }
 
+  // bfh.2, Rule 3: a network hold that outlived the session that made it gets
+  // released now, without being asked. Leaving Windows Update capped at 1%
+  // because Vanish crashed is exactly "left the system in a worse state than
+  // before", and the user would have no way to know why updates stopped.
+  if (isFullMode() && !headlessHarness) {
+    releaseStaleNetworkHold().catch((err) => console.error('Could not release a leftover network hold:', err.message));
+  }
+
   if (headlessHarness) return;
 
   createWindow();
@@ -861,6 +869,127 @@ ipcMain.handle('get-startup-items', async () => {
   } catch (error) {
     console.error('Error getting startup items:', error);
     return { items: [], total: 0, orphans: 0, error: error.message };
+  }
+});
+
+// bfh.2: holding background transfers.
+//
+// The ordering is the whole design. Capture first, WRITE THE RECORD TO DISK,
+// then change anything. A crash between capture and apply leaves a machine
+// nobody touched; a crash after apply leaves a file that says exactly what to
+// put back, and the next start puts it back. Same rule as the vault: the
+// restore manifest exists before the mutation does.
+function readHoldRecord() {
+  return store.readJson(store.networkHoldPath(), null);
+}
+
+// Called once at startup. A record on disk means a previous session applied a
+// hold and never released it - a crash, a kill, a power cut.
+async function releaseStaleNetworkHold() {
+  const record = readHoldRecord();
+  if (!record || !record.active) return;
+
+  const result = await runPowerShell('network-hold-revert', { record });
+  store.appendOplog({
+    action: 'network-release-stale',
+    tier: currentTier,
+    items: { restored: (result && result.restoredCount) || 0 },
+    outcome: result && result.success ? 'success' : 'error',
+    meta: { startedAt: record.startedAt, failed: result && result.failed }
+  });
+  if (result && result.success === true) clearHoldRecord();
+}
+
+function writeHoldRecord(record) {
+  store.writeJsonAtomic(store.networkHoldPath(), record);
+}
+
+function clearHoldRecord() {
+  try {
+    require('node:fs').unlinkSync(store.networkHoldPath());
+  } catch {
+    /* already gone */
+  }
+}
+
+ipcMain.handle('network-hold-state', async () => {
+  const record = readHoldRecord();
+  return {
+    success: true,
+    active: Boolean(record && record.active),
+    record: record || null
+  };
+});
+
+fullModeOnly('network-hold-apply', async () => {
+  try {
+    const existing = readHoldRecord();
+    if (existing && existing.active) {
+      return { success: false, error: 'Background transfers are already being held.' };
+    }
+
+    const capture = await runPowerShell('network-hold-capture');
+    if (!capture || capture.success !== true) {
+      return { success: false, error: (capture && capture.error) || 'Could not read the current settings, so nothing was changed.' };
+    }
+
+    const record = {
+      active: true,
+      startedAt: new Date().toISOString(),
+      tier: currentTier,
+      ...capture
+    };
+    // On disk BEFORE the first write. If the next line never runs, the file
+    // describes a machine that was never changed, and reverting it is a no-op.
+    writeHoldRecord(record);
+
+    const applied = await runPowerShell('network-hold-apply', { record });
+
+    store.appendOplog({
+      action: 'network-hold',
+      tier: currentTier,
+      items: { bitsJobs: (capture.bitsJobs || []).length },
+      outcome: applied && applied.success ? 'success' : 'error',
+      meta: { error: applied && applied.error, failed: applied && applied.failed }
+    });
+
+    if (!applied || applied.success !== true) {
+      // Nothing stuck: drop the record rather than leave a hold nobody can see
+      // in the UI but the machine is still carrying.
+      await runPowerShell('network-hold-revert', { record });
+      clearHoldRecord();
+      return { success: false, error: (applied && applied.error) || 'Nothing could be held, so nothing was changed.' };
+    }
+
+    writeHoldRecord({ ...record, applied: applied.applied, failed: applied.failed });
+    return { success: true, ...applied, record };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+fullModeOnly('network-hold-revert', async () => {
+  try {
+    const record = readHoldRecord();
+    if (!record) return { success: true, restoredCount: 0, nothingToDo: true };
+
+    const result = await runPowerShell('network-hold-revert', { record });
+
+    store.appendOplog({
+      action: 'network-release',
+      tier: currentTier,
+      items: { restored: (result && result.restoredCount) || 0 },
+      outcome: result && result.success ? 'success' : 'error',
+      meta: { failed: result && result.failed }
+    });
+
+    // The record is only dropped when everything really went back. A partial
+    // revert must stay on disk so the next attempt still knows what is
+    // outstanding - forgetting it would strand the leftovers permanently.
+    if (result && result.success === true) clearHoldRecord();
+    return result;
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 });
 

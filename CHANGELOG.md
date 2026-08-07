@@ -10,6 +10,42 @@ full decision rules.
 
 ## [Unreleased]
 
+### Changed — commercialization: personal use free, commercial use paid (ADR 0002)
+
+[`adrs/0002-commercialization-b2b-paid-personal-free.md`](adrs/0002-commercialization-b2b-paid-personal-free.md)
+supersedes **only** the payments row of ADR 0001; every other row of 0001
+stands. It also records what it deliberately does *not* decide — price,
+per-seat versus site, licence-key enforcement, and the repository licence text
+— because leaving those implicit is how one decision becomes five nobody made.
+
+Open-core was rejected on the way: a paid tier would end up holding the
+fleet-audit and advanced-heuristic surfaces, which would make the free build
+weaker at exactly the things that make the tool trustworthy. Signing hardens
+from optional-with-a-reversal-condition to disqualifying-if-absent — no IT
+department deploys an unsigned binary — so TASK-21 now needs splitting into
+signing (required) and channel (open).
+
+### Added — hold background transfers, with a guaranteed way back (`bfh.2`)
+
+* Step 2 of the network work. A hold caps Windows Update's **background**
+  downloading by policy and suspends BITS transfers that are currently running.
+  Foreground transfers are deliberately untouched: a download someone is
+  waiting for is not what "hold the background" means.
+* **The ordering is the safety property.** Capture is a separate, read-only
+  step; the main process writes that record to disk *before* anything is
+  changed. A crash between the two leaves a machine nobody touched. A crash
+  after leaves a file describing exactly what to put back — and the next
+  elevated start puts it back without being asked, because leaving Windows
+  Update capped at 1% because Vanish died is precisely "left the system in a
+  worse state than before".
+* A partial release keeps its record on disk on purpose. Dropping it would
+  strand the leftovers permanently; keeping it means the next start retries.
+* It says what it cannot do, and that is asserted: it cannot give a program
+  more speed, only stop other things taking it, and it does nothing about
+  traffic from other devices on the network.
+* A job somebody else already suspended is never captured, so releasing never
+  resumes a transfer that was not Vanish's to touch.
+
 ### Added — network attribution, and an honest negative answer (`bfh.1`)
 
 * **A Health Advisor section that reaches a verdict about the network**, not a

@@ -153,6 +153,50 @@ if (-not $isAdmin) {
     Assert-True ($null -eq $net.bitsJobs -or $net.bitsJobs -ge 0) "background transfer count is either a number or unknown, never negative"
 }
 
+# ======================================================================
+# bfh.2: holding background transfers
+# ======================================================================
+Write-Host ""
+Write-Host "bfh.2 network hold: capture, refuse, revert" -ForegroundColor Cyan
+
+# Capture must work in EITHER tier. It is how the UI describes what a hold
+# would do before anyone commits to one, and it changes nothing.
+$capture = Invoke-Engine "network-hold-capture"
+Assert-True ($capture.success -eq $true) "capturing the current settings works without elevation"
+Assert-True ($null -ne $capture.doKeyPath) "the capture names the policy key it would write to"
+Assert-True ($capture.doValues -is [array] -or $null -ne $capture.doValues) "the capture records the Delivery Optimization values it would change"
+
+$doValue = @($capture.doValues)[0]
+Assert-True ($null -ne $doValue.name -and $null -ne $doValue.existed) `
+    "each captured value records whether it existed, so revert can delete rather than guess"
+
+# A job somebody else already suspended is not ours to resume later, so it is
+# never captured in the first place.
+$capturedStates = @(@($capture.bitsJobs) | ForEach-Object { $_.state } | Select-Object -Unique)
+$wrongStates = @($capturedStates | Where-Object { @('Suspended','Transferred','Error','Cancelled','Acknowledged') -contains $_ })
+Assert-True ($wrongStates.Count -eq 0) "only transfers that are actually running are captured ($($wrongStates -join ', '))"
+
+# The load-bearing refusal: applying without a captured record would change the
+# machine with no way back, so it is refused before elevation is even relevant.
+$noRecord = Invoke-Engine "network-hold-apply" @{}
+Assert-True ($noRecord.success -eq $false) "holding without a captured record is refused"
+
+$noRevert = Invoke-Engine "network-hold-revert" @{}
+Assert-True ($noRevert.success -eq $false) "releasing without a record is refused rather than silently doing nothing"
+
+if (-not $isAdmin) {
+    $applyDenied  = Invoke-Engine "network-hold-apply"  @{ record = @{ doValues = @(); bitsJobs = @() } }
+    $revertDenied = Invoke-Engine "network-hold-revert" @{ record = @{ doValues = @(); bitsJobs = @() } }
+    Assert-True ($applyDenied.error  -match "Full Mode") "Audit Mode refuses to hold, by tier"
+    Assert-True ($revertDenied.error -match "Full Mode") "Audit Mode refuses to release, by tier"
+
+    # And nothing was written on the way to being refused.
+    $after = Invoke-Engine "network-hold-capture"
+    Assert-True ($after.doKeyExisted -eq $capture.doKeyExisted) "a refused hold leaves the policy key exactly as it found it"
+} else {
+    Write-Host "  SKIP  tier refusals (this shell is elevated; the round trip is vanish-uninstaller-bfh.2)" -ForegroundColor Yellow
+}
+
 Write-Host ""
 Write-Host ("Result: {0} passed, {1} failed" -f $script:pass, $script:fail) -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })
 exit ([int]($script:fail -gt 0))
