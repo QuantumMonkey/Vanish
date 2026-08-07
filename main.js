@@ -209,13 +209,28 @@ app.on('window-all-closed', () => {
 // stays pure JSON, so nothing here can corrupt an existing result contract.
 const PROGRESS_MARKER = '@@VANISH-PROGRESS@@';
 
+// Where scanner.ps1 actually lives at runtime.
+//
+// PACKAGING BLOCKER, found while producing the first installer: in a packaged
+// build __dirname points INSIDE app.asar, and powershell.exe cannot read a file
+// out of an asar archive - it is a virtual filesystem only Electron understands.
+// Every engine call in the packaged app would have failed with "the argument
+// -File does not exist", i.e. the entire application. electron-builder copies
+// the engine to resources/ via extraResources; this resolves to that copy when
+// packaged and to the repo copy in development.
+function enginePath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, 'scanner.ps1')
+    : path.join(__dirname, 'scanner.ps1');
+}
+
 // Helper to run scanner.ps1 functions
 //
 // `onProgress` receives each progress record the engine emits while it works.
 // Passing it is optional; every existing caller keeps its old behaviour.
 function runPowerShell(action, params = {}, onProgress = null) {
   return new Promise((resolve, reject) => {
-    const scriptPath = path.join(__dirname, 'scanner.ps1');
+    const scriptPath = enginePath();
     const paramsJson = JSON.stringify(params);
     const paramsBase64 = Buffer.from(paramsJson, 'utf8').toString('base64');
 

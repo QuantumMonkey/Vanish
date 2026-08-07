@@ -36,3 +36,12 @@ scratch/
 # The findings live in bd vanish-uninstaller-1gi and corrections.json; the raw
 # export is not a project artefact.
 test_export.json
+
+# Working artefacts - never part of the shipped app
+scratch/
+skills-archive/
+graphify-out/
+test_export.json
+corrections.json
+dist/
+release/

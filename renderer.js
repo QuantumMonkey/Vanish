@@ -24,7 +24,7 @@ let isAdmin = false;
 let tierState = { tier: 'audit', isFullMode: false, offerElevation: false, bannerText: '' };
 let appSettings = { autoPurgeEnabled: false, autoPurgeRetentionDays: 30, processRefreshSeconds: 2, startupMode: 'audit' };
 
-const TIER_TOOLTIP = 'Requires Full Mode - restart as administrator';
+const TIER_TOOLTIP = 'Needs administrator rights - restart Vanish as administrator';
 
 // Killing these has no legitimate outcome from Task Manager - Windows treats
 // their exit as fatal and either BSODs or force-restarts the session. Refuse
@@ -403,7 +403,7 @@ async function maybeOfferElevation() {
   document.getElementById('btn-stay-audit').onclick = async () => {
     overlay.classList.remove('active');
     await window.api.dismissElevationOffer();
-    toast('Continuing in Audit Mode. Scanning and reporting stay available.', 'info');
+    toast('Staying in Audit Mode. You can still list and scan everything.', 'info');
   };
   document.getElementById('btn-elevate-now').onclick = () => requestElevation(overlay);
   document.getElementById('btn-banner-elevate').onclick = () => requestElevation(null);
@@ -413,7 +413,7 @@ async function requestElevation(overlay) {
   const res = await window.api.relaunchElevated();
   if (res && res.success) return; // this instance is being replaced (D-09)
   if (overlay) overlay.classList.remove('active');
-  toast('Elevation was declined. Vanish stays in Audit Mode.', 'warn');
+  toast('Windows did not grant administrator rights. Vanish stays in Audit Mode.', 'warn');
 }
 
 // 7oo.3: the protected set is now tiny and evidence-backed - Windows servicing
@@ -427,7 +427,7 @@ function guardProtected() {
   // so the refusal names where to go rather than pretending to be able.
   if (selectedApp.classification === 'feature') {
     toast(
-      `${selectedApp.name} is a Windows optional feature. Turn it on or off in Windows' own "Turn Windows features on or off" dialog (optionalfeatures.exe).`,
+      `${selectedApp.name} is part of Windows. Turn it on or off in Windows' own "Turn Windows features on or off" window (optionalfeatures.exe).`,
       'info',
       9000
     );
@@ -436,7 +436,7 @@ function guardProtected() {
 
   if (selectedApp.protected !== true) return true;
   toast(
-    `${selectedApp.name} is held back: ${selectedApp.protectionReason || 'Windows needs it to service this machine.'}`,
+    `Vanish will not remove ${selectedApp.name}: ${selectedApp.protectionReason || 'Windows needs it to keep this PC updated.'}`,
     'warn',
     8000
   );
@@ -446,7 +446,7 @@ function guardProtected() {
 // Reused by every destructive UI path so a locked control can never act.
 function guardFullMode() {
   if (isAdmin) return true;
-  toast(tierState.bannerText || 'Running in Audit Mode - elevate to enable cleaning and uninstallation.', 'warn');
+  toast(tierState.bannerText || 'Vanish is in Audit Mode. Restart it as administrator to uninstall and clean up.', 'warn');
   return false;
 }
 
@@ -494,7 +494,7 @@ async function loadApplications() {
       <tr>
         <td colspan="4" style="text-align: center; padding: 48px; color: var(--color-danger);">
           <i class="fa-solid fa-circle-xmark" style="font-size: 28px; margin-bottom: 12px;"></i>
-          <div>Failed to gather applications: ${error.message}</div>
+          <div>Could not read your installed programs: ${error.message}</div>
         </td>
       </tr>
     `;
@@ -506,7 +506,7 @@ function showLoadingState() {
     <tr id="initial-loading-row">
       <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
         <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px; color: var(--color-primary);"></i>
-        <div>Gathering and mapping installed applications on your system...</div>
+        <div>Finding installed programs...</div>
       </td>
     </tr>
   `;

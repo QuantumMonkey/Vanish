@@ -1,11 +1,14 @@
 {
   "name": "vanish-uninstaller",
   "version": "0.3.0",
-  "description": "On-device Windows application auditor and manager — approval-gated uninstalls, leftover scanning, and system health audits. No telemetry, no cloud.",
+  "description": "On-device Windows application auditor and manager - approval-gated uninstalls, leftover scanning, and system health audits. No telemetry, no cloud.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File test/run-all.ps1"
+    "test": "powershell -NoProfile -ExecutionPolicy Bypass -File test/run-all.ps1",
+    "verify": "electron test/real-data-verify.js",
+    "dist": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable"
   },
   "keywords": [
     "windows",
@@ -22,9 +25,57 @@
   },
   "type": "commonjs",
   "devDependencies": {
-    "electron": "43.3.0"
+    "electron": "43.3.0",
+    "electron-builder": "^26.15.3"
   },
   "overrides": {
     "undici": "^7.29.0"
+  },
+  "build": {
+    "appId": "com.quantummonkey.vanish",
+    "productName": "Vanish",
+    "copyright": "MIT licensed",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "index.html",
+      "index.css",
+      "scanner.ps1",
+      "assets/**/*",
+      "lib/**/*",
+      "LICENSE",
+      "!test/**/*",
+      "!docs/**/*",
+      "!**/*.md"
+    ],
+    "extraResources": [
+      {
+        "from": "scanner.ps1",
+        "to": "scanner.ps1"
+      }
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "artifactName": "Vanish-${version}-${arch}.${ext}",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Vanish"
+    },
+    "portable": {
+      "artifactName": "Vanish-${version}-portable.exe"
+    }
   }
 }

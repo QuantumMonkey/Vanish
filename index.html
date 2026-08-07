@@ -45,7 +45,7 @@
       </div>
       <div class="titlebar-controls">
         <button class="titlebar-btn" id="btn-minimize" title="Minimize"><i class="fa-solid fa-minus"></i></button>
-        <button class="titlebar-btn" id="btn-maximize" title="Maximize/Restore"><i class="fa-solid fa-expand"></i></button>
+        <button class="titlebar-btn" id="btn-maximize" title="Maximize or restore"><i class="fa-solid fa-expand"></i></button>
         <button class="titlebar-btn close-btn" id="btn-close" title="Close"><i class="fa-solid fa-xmark"></i></button>
       </div>
     </div>
@@ -53,7 +53,7 @@
     <!-- SCR-01: Audit Mode banner (promptgate Rule 3 text, verbatim) -->
     <div class="tier-banner" id="tier-banner" role="status" style="display: none;">
       <i class="fa-solid fa-lock"></i>
-      <span id="tier-banner-text">Running in Audit Mode - elevate to enable cleaning and uninstallation.</span>
+      <span id="tier-banner-text">Audit Mode: Vanish can scan and report, but it cannot remove anything. Restart as administrator to uninstall and clean up.</span>
       <button class="tier-banner-btn" id="btn-banner-elevate">Restart as administrator</button>
     </div>
 
@@ -112,7 +112,7 @@
         <div class="content-header">
           <div class="search-container">
             <i class="fa-solid fa-magnifying-glass search-icon"></i>
-            <input type="text" class="search-input" id="search-bar" placeholder="Search apps by name or publisher...">
+            <input type="text" class="search-input" id="search-bar" placeholder="Search by name or publisher">
             <!-- A search/filter typed before the initial app list finishes
                  loading (which can genuinely take 10+ seconds) otherwise
                  applied silently once it did, with nothing on screen
@@ -124,7 +124,7 @@
                  same page clipped off-window the first time this was tried
                  as a normal flex row. -->
             <div class="filter-status-caption" id="filter-status-row">
-              <span id="filter-status-text">Showing all applications</span>
+              <span id="filter-status-text">Showing all programs</span>
               <button class="btn-clear-filters-inline" id="btn-clear-filters" style="display: none;">Clear</button>
             </div>
           </div>
@@ -140,7 +140,7 @@
             <!-- 7oo.3: components are classified, never dropped. This is how
                  the user reaches them - and the count is always on screen, so
                  "88 applications" can never quietly mean "and 73 we hid". -->
-            <label class="components-toggle" id="components-toggle" title="Runtimes, feature rows and duplicate registry records that belong to another product">
+            <label class="components-toggle" id="components-toggle" title="Shared runtimes, updates and other parts that belong to a program already in this list">
               <input type="checkbox" id="chk-show-components">
               <span class="slider"></span>
               <span class="components-toggle-label">
@@ -151,7 +151,7 @@
 
             <!-- 7oo.7: the "Turn Windows features on or off" list, which is
                  neither a desktop app nor a Store app and was invisible here. -->
-            <label class="components-toggle" id="features-toggle" title="Windows optional features - the 'Turn Windows features on or off' list">
+            <label class="components-toggle" id="features-toggle" title="Parts of Windows itself, from the 'Turn Windows features on or off' list">
               <input type="checkbox" id="chk-show-features">
               <span class="slider"></span>
               <span class="components-toggle-label">
@@ -231,7 +231,7 @@
                 <tr id="initial-loading-row">
                   <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
                     <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px; color: var(--color-primary);"></i>
-                    <div>Gathering and mapping installed applications on your system...</div>
+                    <div>Finding installed programs...</div>
                   </td>
                 </tr>
               </tbody>
@@ -262,15 +262,15 @@
                 <span class="details-value" id="det-size">124 MB</span>
               </div>
               <div class="details-info-item">
-                <span class="details-label">Installation Path</span>
+                <span class="details-label">Installed in</span>
                 <span class="details-value" id="det-path">C:\Program Files\App</span>
               </div>
               <div class="details-info-item">
-                <span class="details-label">Registry Key Path</span>
+                <span class="details-label">Registry entry</span>
                 <span class="details-value" id="det-reg">HKLM\Software\...</span>
               </div>
               <div class="details-info-item">
-                <span class="details-label">Installer Type</span>
+                <span class="details-label">Type</span>
                 <span class="details-value" id="det-type">Desktop</span>
               </div>
             </div>
@@ -316,7 +316,7 @@
           <!-- Loading state -->
           <div id="audit-loading" style="display: flex; flex-direction: column; align-items: center; justify-content: center; flex: 1; gap: 14px; color: var(--text-gray);">
             <i class="fa-solid fa-spinner fa-spin" style="font-size: 28px; color: var(--color-primary);"></i>
-            <div>Querying system via CIM... this may take a few seconds.</div>
+            <div>Reading your system information...</div>
           </div>
 
           <!-- Content (hidden until loaded) -->
@@ -345,7 +345,7 @@
                 <span class="audit-badge" id="audit-startup-count">0</span>
                 <span class="audit-badge danger" id="audit-orphan-count" style="display:none;">0 orphaned</span>
               </div>
-              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 4px;">Registry Run keys, logon-triggered Scheduled Tasks, and third-party auto-start services.</div>
+              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 4px;">Programs, scheduled tasks and services that start on their own when you sign in.</div>
               <!-- 7oo.4 / Rule 24: state the limit of this surface rather than
                    letting a table imply it can change things. -->
               <div class="panel-inline-note" id="audit-startup-note"></div>
@@ -387,7 +387,7 @@
           </div>
           <div class="header-controls">
             <button class="btn-sec btn-compact" id="btn-open-vault-folder">
-              <i class="fa-solid fa-folder-open"></i> Open vault folder
+              <i class="fa-solid fa-folder-open"></i> Open quarantine folder
             </button>
             <button class="btn-sec btn-compact" id="btn-refresh-vault">
               <i class="fa-solid fa-rotate-right"></i> Refresh
@@ -397,9 +397,9 @@
 
         <div class="panel-scroll">
           <p class="panel-lede">
-            Nothing Vanish removes is deleted outright. Files are moved here and registry keys are
-            exported to a .reg restore manifest before removal, so every purge stays reversible until
-            you choose otherwise.
+            Nothing Vanish removes is deleted straight away. Files are moved here, and registry entries
+            are saved to a backup file first, so you can put anything back until you decide to delete it
+            for good.
           </p>
 
           <!-- Retention settings row (ENT-02; auto-purge off by default) -->
@@ -407,8 +407,9 @@
             <div class="settings-row-main">
               <div class="settings-row-title">Automatic purge</div>
               <div class="settings-row-desc">
-                When enabled, quarantined entries older than the retention period are permanently
-                deleted at app start. Off by default - deletion policy is yours, not the scanner's.
+                When this is on, anything in quarantine older than the number of days below is deleted
+                permanently each time Vanish starts. Off by default - nothing leaves quarantine unless
+                you say so.
               </div>
             </div>
             <div class="settings-row-controls">
@@ -426,12 +427,12 @@
 
           <div id="vault-loading" class="panel-state">
             <i class="fa-solid fa-spinner fa-spin"></i>
-            <div>Reading the quarantine manifest...</div>
+            <div>Reading what is in quarantine...</div>
           </div>
 
           <div id="vault-empty" class="panel-state" style="display: none;">
             <i class="fa-solid fa-box-open"></i>
-            <div>Nothing quarantined yet - purges land here first.</div>
+            <div>Nothing in quarantine yet. Anything Vanish removes is moved here first.</div>
           </div>
 
           <div id="vault-error" class="panel-state error" style="display: none;">
@@ -453,7 +454,7 @@
           <div class="header-controls">
             <div class="search-container compact">
               <i class="fa-solid fa-magnifying-glass search-icon"></i>
-              <input type="text" class="search-input" id="process-search" placeholder="Filter by process name or PID...">
+              <input type="text" class="search-input" id="process-search" placeholder="Filter by name or PID">
             </div>
             <label class="retention-field">
               <span>Refresh</span>
@@ -485,7 +486,7 @@
               <tbody id="process-tbody">
                 <tr>
                   <td colspan="6" class="table-state">
-                    <i class="fa-solid fa-spinner fa-spin"></i> Sampling processes...
+                    <i class="fa-solid fa-spinner fa-spin"></i> Reading running programs...
                   </td>
                 </tr>
               </tbody>
@@ -512,7 +513,7 @@
                 <span class="details-value" id="proc-det-started">-</span>
               </div>
               <div class="details-info-item">
-                <span class="details-label">Image path</span>
+                <span class="details-label">Program file</span>
                 <span class="details-value mono" id="proc-det-path">-</span>
               </div>
               <div class="details-info-item">
@@ -542,8 +543,9 @@
         </div>
         <div class="panel-scroll">
           <p class="panel-lede">
-            Each section looks for entries whose backing file is gone. Scanning is read-only and works
-            in Audit Mode; purging moves findings into the quarantine vault, where they stay restorable.
+            Each section looks for settings that point at a file no longer on this PC. Scanning only
+            reads - it changes nothing, and works in Audit Mode. Anything you remove is moved to
+            quarantine, where you can put it back.
           </p>
           <div id="cleaner-sections"></div>
         </div>
@@ -563,21 +565,21 @@
 
         <div class="panel-scroll">
           <p class="panel-lede">
-            For applications that cannot uninstall themselves - the uninstaller is gone, the entry is
-            orphaned, or the folder was deleted by hand and the listing stayed behind. Vanish finds these
-            for you; you do not have to remember what the application was called. Everything found is
-            reviewed by you and moved to quarantine, never deleted outright - including the registry entry
-            that keeps it listed in Programs and Features.
+            For programs that cannot uninstall themselves - the uninstaller is missing, or the folder was
+            deleted by hand and the program stayed in the list. Vanish finds these for you, so you do not
+            have to remember what the program was called. You review everything it finds, and what you
+            pick is moved to quarantine rather than deleted - including the entry that keeps the program
+            listed in Programs and Features.
           </p>
 
-          <div class="settings-group-title">Broken entries on this machine</div>
+          <div class="settings-group-title">Broken entries on this PC</div>
           <div id="broken-loading" class="panel-state">
             <i class="fa-solid fa-spinner fa-spin"></i>
-            <div>Checking every uninstall entry...</div>
+            <div>Checking whether each program can still uninstall itself...</div>
           </div>
           <div id="broken-empty" class="panel-state" style="display: none;">
             <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
-            <div>Every installed application can still uninstall itself. Nothing to force.</div>
+            <div>Every installed program can still uninstall itself. There is nothing to force.</div>
           </div>
           <div id="broken-list" class="vault-entries"></div>
 
@@ -585,9 +587,9 @@
           <div class="force-manual">
             <div class="unlock-input-row">
               <input type="text" id="force-name-input" class="search-input"
-                     placeholder="Application name, e.g. BlueStacks">
+                     placeholder="Program name, for example BlueStacks">
               <input type="text" id="force-path-input" class="search-input"
-                     placeholder="Install folder (optional), e.g. C:\Program Files\App">
+                     placeholder="Install folder (optional), for example C:\Program Files\App">
               <button class="btn-sec btn-compact" id="btn-force-scan">
                 <i class="fa-solid fa-magnifying-glass"></i> Scan
               </button>
@@ -599,7 +601,7 @@
                 <button class="toggle-btn active" data-mode="Moderate">Moderate</button>
                 <button class="toggle-btn" data-mode="Advanced">Advanced</button>
               </div>
-              <span class="force-mode-note">Depth changes what is found, never what is removed.</span>
+              <span class="force-mode-note">Depth changes how much Vanish looks for. You still choose what gets removed.</span>
             </div>
           </div>
 
@@ -617,8 +619,8 @@
         </div>
         <div class="panel-scroll">
           <p class="panel-lede">
-            Vanish stores everything on this machine. There is no account, no sync and no telemetry,
-            so these settings are the whole configuration surface.
+            Vanish keeps everything on this PC. There is no account, no sync and no tracking, so these
+            settings are all there is to change.
           </p>
 
           <div class="settings-group-title">Startup</div>
@@ -626,11 +628,9 @@
             <div class="settings-row-main">
               <div class="settings-row-title">Start Vanish as administrator</div>
               <div class="settings-row-desc">
-                Ask Windows to elevate automatically the next time Vanish starts, instead of waiting for you
-                to click Elevate. Windows still shows its own permission prompt on every launch - this only
-                decides who asks, not whether Windows asks. Changing this affects the <em>next</em> start,
-                not this session. Available in either mode, since the person who needs it is usually not
-                elevated yet.
+                Ask for administrator rights automatically the next time Vanish starts, instead of waiting
+                for you to ask for them. Windows still shows its own permission prompt every time - this
+                only decides when it appears. The change applies to the <em>next</em> start, not this one.
               </div>
             </div>
             <div class="settings-row-controls">
@@ -646,9 +646,9 @@
             <div class="settings-row-main">
               <div class="settings-row-title">Automatic purge</div>
               <div class="settings-row-desc">
-                Permanently delete quarantined entries once they pass the retention period, at app start.
-                Off by default. How deeply Vanish searches and what it deletes are separate choices -
-                turning this on is the only way anything leaves the vault without you clicking it.
+                Permanently delete anything in quarantine once it is older than the number of days below,
+                each time Vanish starts. Off by default. Turning this on is the only way something leaves
+                quarantine without you clicking it.
               </div>
             </div>
             <div class="settings-row-controls">
@@ -669,8 +669,8 @@
             <div class="settings-row-main">
               <div class="settings-row-title">Default scan depth</div>
               <div class="settings-row-desc">
-                Which mode the uninstall wizard starts on. This controls how far Vanish looks - never
-                what it removes. Every finding is still reviewed and ticked by you before anything moves.
+                Which depth the uninstall wizard starts on. This controls how far Vanish looks, never what
+                it removes. You still tick each item yourself before anything moves.
               </div>
             </div>
             <div class="settings-row-controls">
@@ -687,8 +687,8 @@
             <div class="settings-row-main">
               <div class="settings-row-title">Process refresh interval</div>
               <div class="settings-row-desc">
-                How often the process list re-samples. Each sample spawns a PowerShell query; on a busy
-                machine a very short interval simply means samples are skipped rather than stacked.
+                How often the list of running programs updates. On a busy PC, a very short interval just
+                means some updates are skipped.
               </div>
             </div>
             <div class="settings-row-controls">
@@ -700,10 +700,10 @@
             </div>
           </div>
 
-          <div class="settings-group-title">Data on this machine</div>
+          <div class="settings-group-title">Data on this PC</div>
           <div class="settings-row">
             <div class="settings-row-main">
-              <div class="settings-row-title">Quarantine vault</div>
+              <div class="settings-row-title">Quarantine folder</div>
               <div class="settings-row-desc mono" id="set-vault-path">-</div>
               <div class="settings-row-desc" id="set-vault-stats">-</div>
             </div>
@@ -715,10 +715,10 @@
           </div>
           <div class="settings-row">
             <div class="settings-row-main">
-              <div class="settings-row-title">Operation log</div>
+              <div class="settings-row-title">Activity log</div>
               <div class="settings-row-desc">
-                Every destructive action, every rejected one, and every settings change is appended here
-                with a timestamp. It is the audit trail behind anything Vanish did to this machine.
+                Every removal, every refusal and every settings change is written here with the date and
+                time. It is the record of what Vanish has done to this PC.
               </div>
               <div class="settings-row-desc mono" id="set-oplog-path">-</div>
             </div>
@@ -746,40 +746,40 @@
               <h2 id="about-name">Vanish</h2>
               <div class="about-version" id="about-version">-</div>
               <p>
-                An on-device Windows application auditor and deep uninstaller. It shows its work,
-                undoes its damage, and waits for your word.
+                A Windows uninstaller and clean-up tool that runs entirely on this PC. It shows you what
+                it found, keeps a way back from everything it removes, and waits for you to decide.
               </p>
             </div>
           </div>
 
           <div class="about-grid">
             <div class="about-card">
-              <div class="about-card-title"><i class="fa-solid fa-box-archive"></i> Nothing dies on the first blow</div>
+              <div class="about-card-title"><i class="fa-solid fa-box-archive"></i> Nothing is deleted straight away</div>
               <p>
-                Files are moved to a quarantine vault and registry keys are exported to a .reg restore
-                manifest before removal. Everything stays reversible until you explicitly say otherwise.
+                Files are moved to quarantine, and registry entries are saved to a backup file before
+                they are removed. You can put any of it back until you choose to delete it for good.
               </p>
             </div>
             <div class="about-card">
-              <div class="about-card-title"><i class="fa-solid fa-eye"></i> Audit before power</div>
+              <div class="about-card-title"><i class="fa-solid fa-eye"></i> Useful before it is powerful</div>
               <p>
-                Unelevated, Vanish is fully useful: it lists, scans, explains and reports. It never
-                pretends it can act. Elevation is a separate, explicit step.
+                Without administrator rights, Vanish still lists, scans and explains. It never pretends
+                it can remove something it cannot. Asking for those rights is a separate step you take.
               </p>
             </div>
             <div class="about-card">
-              <div class="about-card-title"><i class="fa-solid fa-lock"></i> The machine is a vault, not a wire</div>
+              <div class="about-card-title"><i class="fa-solid fa-lock"></i> Nothing leaves this PC</div>
               <p>
-                Zero network activity at runtime. No telemetry, no cloud lookups, no update pings.
-                The icon set and typography are local, so nothing is fetched even for decoration.
+                Vanish makes no network connections while it runs. No tracking, no cloud lookups, no
+                update checks. Even the icons and fonts come from this PC, so nothing is downloaded.
               </p>
             </div>
             <div class="about-card">
               <div class="about-card-title"><i class="fa-solid fa-triangle-exclamation"></i> What it does not do</div>
               <p>
-                It is not an antivirus and gives no threat verdicts. It cannot promise a complete
-                rollback: asynchronous installer side effects, first-run service registrations and
-                reboot-deferred writes fall outside the snapshot window.
+                It is not an antivirus and will not tell you whether something is malicious. It also
+                cannot promise to undo everything: changes an installer makes in the background, or
+                that Windows finishes after a restart, happen outside what Vanish can record.
               </p>
             </div>
           </div>
@@ -789,8 +789,8 @@
 
           <div class="settings-group-title">Licensing</div>
           <p class="panel-lede">
-            Vanish is MIT licensed. This build carries no third-party runtime dependencies beyond
-            Electron: the icon set is first-party and the typography is the operating system's own.
+            Vanish is MIT licensed. Apart from Electron, this build uses no outside code: the icons ship
+            with the app and the fonts come from Windows.
           </p>
         </div>
       </div><!-- /about-panel -->
@@ -804,8 +804,8 @@
       <div class="small-modal-icon"><i class="fa-solid fa-shield-halved"></i></div>
       <h3>Restart as administrator?</h3>
       <p>
-        Vanish is running in Audit Mode. It can list applications, scan for leftovers and produce
-        reports, but it cannot uninstall, purge or restore anything until it is elevated.
+        Vanish is in Audit Mode. It can list your programs, scan for leftovers and show you what it
+        found, but it cannot uninstall, remove or restore anything without administrator rights.
       </p>
       <div class="small-modal-actions">
         <button class="btn-sec" id="btn-stay-audit">Continue in Audit Mode</button>
@@ -822,18 +822,18 @@
         <button class="wizard-close-btn" id="unlock-close-x"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <p>
-        Enter the file or folder that will not delete. Vanish asks the Windows Restart Manager which
-        processes hold it, then offers a graceful close before anything is forced.
+        Enter the file or folder that will not delete. Vanish asks Windows which programs are using it,
+        then offers to close them normally before anything is forced.
       </p>
       <div class="unlock-input-row">
         <input type="text" id="unlock-path-input" class="search-input" placeholder="C:\Program Files\App\locked.dll">
         <button class="btn-sec btn-compact" id="btn-browse-unlock-target"><i class="fa-solid fa-folder-open"></i> Browse</button>
-        <button class="btn-sec btn-compact" id="btn-find-lockers">Find holders</button>
+        <button class="btn-sec btn-compact" id="btn-find-lockers">Find what is using it</button>
       </div>
       <div id="unlock-results" class="unlock-results"></div>
       <div class="small-modal-actions">
         <button class="btn-sec" id="btn-unlock-graceful" data-destructive="true" style="display: none;">
-          Close holders gracefully
+          Ask them to close
         </button>
       </div>
     </div>
@@ -892,7 +892,7 @@
           <div class="wizard-title" id="wiz-app-name">Uninstalling Notepad++</div>
           <div class="wizard-subtitle" id="wiz-app-version">Version 8.5.2 - Desktop App</div>
         </div>
-        <button class="wizard-close-btn" id="wiz-close-x" title="Cancel Uninstall"><i class="fa-solid fa-xmark"></i></button>
+        <button class="wizard-close-btn" id="wiz-close-x" title="Cancel this uninstall"><i class="fa-solid fa-xmark"></i></button>
       </div>
 
       <!-- Steps Progress Tracker -->
@@ -903,11 +903,11 @@
         </div>
         <div class="step-item" id="step2-progress">
           <div class="step-node">2</div>
-          <span class="step-label">Safety</span>
+          <span class="step-label">Restore point</span>
         </div>
         <div class="step-item" id="step3-progress">
           <div class="step-node">3</div>
-          <span class="step-label">Native</span>
+          <span class="step-label">Uninstaller</span>
         </div>
         <div class="step-item" id="step4-progress">
           <div class="step-node">4</div>
@@ -925,12 +925,12 @@
         <!-- Screen 1: Options / Settings -->
         <div class="wizard-screen active" id="scr-config">
           <div class="options-layout">
-            <h3 style="font-family: var(--font-title); font-weight: 700; margin-bottom: 12px; text-align: left;">Configure Uninstall Options</h3>
+            <h3 style="font-family: var(--font-title); font-weight: 700; margin-bottom: 12px; text-align: left;">Uninstall options</h3>
             
             <div class="option-toggle-row">
               <div>
-                <div style="font-family: var(--font-title); font-weight: 600; font-size: 14px; margin-bottom: 2px;">Create System Restore Point</div>
-                <div style="font-size: 11px; color: var(--text-gray);">Backup system configurations before deleting entries.</div>
+                <div style="font-family: var(--font-title); font-weight: 600; font-size: 14px; margin-bottom: 2px;">Create a system restore point first</div>
+                <div style="font-size: 11px; color: var(--text-gray);">Gives Windows a point to roll back to if something goes wrong.</div>
               </div>
               <label class="toggle-switch">
                 <input type="checkbox" id="chk-create-restore" checked>
@@ -939,22 +939,22 @@
             </div>
 
             <div class="scan-modes-box">
-              <div class="scan-modes-title">Leftover Scanning Aggressiveness</div>
+              <div class="scan-modes-title">How deeply to look for leftovers</div>
               <div class="scan-modes-grid">
                 <div class="mode-card" data-mode="Safe">
                   <div class="mode-card-title">Safe</div>
-                  <div class="mode-card-desc">Only exact directory & installer key matches.</div>
+                  <div class="mode-card-desc">Only the program's own folder and its uninstall entry.</div>
                 </div>
                 <div class="mode-card selected" data-mode="Moderate">
                   <div class="mode-card-title">Moderate</div>
-                  <div class="mode-card-desc">Default scans for app & publisher folders.</div>
+                  <div class="mode-card-desc">Also folders named after the program or its publisher.</div>
                 </div>
                 <div class="mode-card" data-mode="Advanced">
                   <div class="mode-card-title" style="color: var(--color-danger);">Advanced</div>
-                  <div class="mode-card-desc">Deep keyword registry & filesystem scans.</div>
+                  <div class="mode-card-desc">A wide search for the program's name across your drive and settings.</div>
                 </div>
               </div>
-              <span class="force-mode-note">Applies to this uninstall only. Change your default in Settings.</span>
+              <span class="force-mode-note">Applies to this uninstall only. Change the default in Settings.</span>
             </div>
           </div>
         </div>
@@ -962,31 +962,31 @@
         <!-- Screen 2: System Restore Loading -->
         <div class="wizard-screen" id="scr-restore-loading">
           <div class="loader-ring"></div>
-          <div class="loader-status">Creating System Restore Point...</div>
-          <div class="loader-substatus">This sets a fallback safety checkpoint on your Windows OS. This may take 15-30 seconds.</div>
+          <div class="loader-status">Creating a system restore point...</div>
+          <div class="loader-substatus">Windows can roll back to this point if something goes wrong. This takes 15-30 seconds.</div>
         </div>
 
         <!-- Screen 3: Native Uninstaller Execute -->
         <div class="wizard-screen" id="scr-native-run">
           <div class="native-uninst-box">
             <i class="fa-solid fa-gears pulse"></i>
-            <h4 style="font-family: var(--font-title); font-weight: 700; font-size: 16px; margin-bottom: 6px;">Native App Uninstaller</h4>
+            <h4 style="font-family: var(--font-title); font-weight: 700; font-size: 16px; margin-bottom: 6px;">The program's own uninstaller</h4>
             <p style="font-size: 12px; color: var(--text-gray); line-height: 1.5;" id="native-uninst-prompt-text">
-              We are ready to launch the program's native uninstaller wizard. Click the button below, then follow the instructions on your screen.
+              Vanish will open the uninstaller that came with this program. Click below, then follow the steps on screen.
             </p>
           </div>
           <button class="btn-primary" id="btn-launch-native">
             <i class="fa-solid fa-circle-play"></i>
-            <span>Launch Native Uninstaller</span>
+            <span>Run the program's uninstaller</span>
           </button>
-          <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px;">Once the native wizard is finished, click Next to scan leftovers.</div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px;">When it has finished, click Scan Leftovers.</div>
         </div>
 
         <!-- Screen 4: Scanner Loading -->
         <div class="wizard-screen" id="scr-scan-loading">
           <div class="loader-ring" style="border-top-color: var(--color-accent);"></div>
-          <div class="loader-status" id="scan-status-text">Scanning Registry & Filesystem for leftovers...</div>
-          <div class="loader-substatus" id="scan-substatus-text">Searching common registry paths and directories.</div>
+          <div class="loader-status" id="scan-status-text">Looking for files and settings left behind...</div>
+          <div class="loader-substatus" id="scan-substatus-text">Checking the usual folders and registry locations.</div>
         </div>
 
         <!-- Screen 5: Remnants Tree Checklist -->
@@ -994,8 +994,8 @@
           <div class="leftovers-layout">
             <div class="leftovers-summary">
               <div>
-                <span class="leftovers-count-badge" id="lbl-leftovers-summary">Discovered 0 remnants</span>
-                <span style="font-size: 12px; color: var(--text-gray); margin-left: 12px;">Review items carefully before purging.</span>
+                <span class="leftovers-count-badge" id="lbl-leftovers-summary">0 leftovers found</span>
+                <span style="font-size: 12px; color: var(--text-gray); margin-left: 12px;">Check each item before you remove it.</span>
               </div>
               <button class="btn-sec" id="btn-select-all" style="padding: 4px 10px; font-size: 11px;">Select All</button>
             </div>
@@ -1010,8 +1010,8 @@
         <!-- Screen 6: Purge Loading -->
         <div class="wizard-screen" id="scr-purge-loading">
           <div class="loader-ring" style="border-top-color: var(--color-danger); border-right-color: var(--color-warning);"></div>
-          <div class="loader-status">Moving Selected Leftovers to Quarantine...</div>
-          <div class="loader-substatus">Files are moved to the quarantine vault and registry keys are exported to a .reg restore manifest before removal.</div>
+          <div class="loader-status">Moving the selected leftovers to quarantine...</div>
+          <div class="loader-substatus">Files are moved to the quarantine folder, and registry entries are saved to a backup file before they are removed.</div>
         </div>
 
         <!-- Screen 7: SCR-06 quarantine summary -->
@@ -1020,9 +1020,9 @@
             <div class="summary-hero" id="summary-hero">
               <i class="fa-solid fa-box-archive" id="summary-icon"></i>
               <div>
-                <h2 id="summary-title">Leftovers quarantined</h2>
+                <h2 id="summary-title">Leftovers moved to quarantine</h2>
                 <p id="lbl-purge-result-text">
-                  Selected leftovers were moved to the quarantine vault. Nothing has been deleted.
+                  The leftovers you selected were moved to quarantine. Nothing has been deleted.
                 </p>
               </div>
             </div>
@@ -1030,11 +1030,11 @@
             <div class="summary-stats">
               <div class="summary-stat">
                 <span class="summary-stat-value" id="lbl-space-saved">0 MB</span>
-                <span class="summary-stat-label">Reclaimed from active storage</span>
+                <span class="summary-stat-label">Freed on your drive</span>
               </div>
               <div class="summary-stat">
                 <span class="summary-stat-value" id="lbl-quarantined-count">0</span>
-                <span class="summary-stat-label">Items in this vault entry</span>
+                <span class="summary-stat-label">Items moved to quarantine</span>
               </div>
             </div>
 
@@ -1047,7 +1047,7 @@
             </div>
 
             <button class="btn-sec" id="btn-review-quarantine">
-              <i class="fa-solid fa-box-archive"></i> Review in Quarantine Manager
+              <i class="fa-solid fa-box-archive"></i> Review in Quarantine
             </button>
           </div>
         </div>
