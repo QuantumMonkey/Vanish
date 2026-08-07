@@ -44,12 +44,16 @@ const HANDLER_KEY = 'HKCU:\\Software\\Classes\\*\\shellex\\ContextMenuHandlers\\
 const CLSID_KEY = `HKCU:\\Software\\Classes\\CLSID\\${CLSID}`;
 const SVC_KEY = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\VanishIpcOrphanSvc';
 const DEAD_DIR = 'C:\\Vanish\\Definitely\\Missing\\ipcbin';
+const UWP_FAMILY = 'VanishIpcGhost.Test_vanishtest999';
+const UWP_DIR = `${process.env.LOCALAPPDATA}\\Packages\\${UWP_FAMILY}`;
+const UWP_FILE = `${UWP_DIR}\\LocalState\\payload.bin`;
 
 function cleanup() {
   ps(`
     foreach ($k in @('${HANDLER_KEY}','${CLSID_KEY}','${SVC_KEY}')) {
       if (Test-Path -LiteralPath $k) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue }
     }
+    if (Test-Path -LiteralPath '${UWP_DIR}') { Remove-Item -LiteralPath '${UWP_DIR}' -Recurse -Force -ErrorAction SilentlyContinue }
   `);
 }
 
@@ -182,6 +186,52 @@ app.whenReady().then(async () => {
 
     // Leave the machine as we found it.
     ps(`Set-ItemProperty -LiteralPath 'HKCU:\\Environment' -Name Path -Value '${originalPath}'`);
+
+    // ================================================================
+    // udu: left-over Store app data - a FOLDER, not a registry key
+    // ================================================================
+    // The only cleaner whose findings are files. Until this existed, no
+    // automated run had ever moved a real folder into the vault and pulled it
+    // back out again; every other round trip above is a .reg export.
+    console.log('');
+    console.log('udu left-over Store app data: purge -> quarantine -> restore');
+
+    ps(`
+      $null = New-Item -ItemType Directory -Path '${UWP_DIR}\\LocalState' -Force
+      Set-Content -LiteralPath '${UWP_FILE}' -Value ('x' * 4096) -Encoding ascii
+      (Get-Item -LiteralPath '${UWP_DIR}').LastWriteTime = (Get-Date).AddDays(-60)
+    `);
+
+    const uwpScan = await invoke('cleaner-scan', { cleaner: 'uwp-leftovers' });
+    const uwpFinding = (uwpScan.findings || []).find((f) => f.meta && f.meta.family === UWP_FAMILY);
+    assert(uwpFinding != null, 'planted left-over package folder found by the scan');
+    assert(uwpFinding != null && uwpFinding.sizeBytes > 0, 'the finding carries a real measured size');
+
+    const uwpPurge = await invoke('cleaner-purge', { cleaner: 'uwp-leftovers', items: [uwpFinding] });
+    assert(uwpPurge.success === true, 'folder purge reported success');
+    assert(uwpPurge.quarantinedCount === 1, 'exactly one folder quarantined');
+    assert(ps(`Test-Path -LiteralPath '${UWP_DIR}'`) === 'False', 'the folder is gone from AppData');
+
+    const vault3 = await invoke('vault-list');
+    const uwpEntry = vault3.entries.find((e) => e.id === uwpPurge.entryId);
+    assert(uwpEntry != null, 'a vault entry was created for the folder');
+    assert(uwpEntry != null && uwpEntry.origin === 'system-clean/uwp-leftovers', 'the entry records which sweep made it');
+    assert(uwpEntry != null && uwpEntry.fileCount === 1, 'the entry holds the folder itself, not a registry manifest');
+
+    const uwpRestore = await invoke('vault-restore', { entryId: uwpPurge.entryId });
+    assert(uwpRestore.success === true && uwpRestore.failed === 0, 'folder restore succeeded');
+    assert(ps(`Test-Path -LiteralPath '${UWP_DIR}'`) === 'True', 'the folder is back where it was');
+    assert(
+      ps(`(Get-Item -LiteralPath '${UWP_FILE}').Length`) === '4096',
+      'the file inside it survived the round trip byte for byte'
+    );
+
+    // A finding the engine refuses to remove must not become removable just
+    // because the renderer sent it back.
+    const protectedItem = { ...uwpFinding, removable: false };
+    const refused = await invoke('cleaner-purge', { cleaner: 'uwp-leftovers', items: [protectedItem] });
+    assert(refused.success === false, 'a finding marked unremovable is refused at the IPC boundary');
+    assert(ps(`Test-Path -LiteralPath '${UWP_DIR}'`) === 'True', 'and the folder it named is still there');
 
     // ================================================================
     // INV-1: nothing bypassed the vault

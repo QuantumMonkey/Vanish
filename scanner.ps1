@@ -54,16 +54,38 @@ function Write-ScanProgress {
     }
 }
 
-# Helper to convert folder size to bytes
+# Helper to convert folder size to bytes.
+#
+# `return if ($size) { $size } else { 0 }` is not the expression PowerShell 5.1
+# reads it as: this function returned 0 for every folder on earth, including a
+# 24 MB one measured by hand. It had no live callers when that was found (the
+# app-list caller was removed for being slow), so nothing on screen was wrong -
+# but the next caller would have inherited a helper that silently always agrees
+# the folder is empty.
 function Get-FolderSize {
     param([string]$path)
-    if (-not (Test-Path $path)) { return 0 }
+    if (-not (Test-Path -LiteralPath $path)) { return 0 }
     try {
-        $size = (Get-ChildItem $path -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum
-        return if ($size) { $size } else { 0 }
+        # -Force matters here: app data folders keep real payload in hidden
+        # subtrees (AC\, Settings\), and leaving those out under-reports.
+        $size = (Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue |
+                 Measure-Object -Property Length -Sum).Sum
+        if ($size) { return [long]$size }
+        return 0
     } catch {
         return 0
     }
+}
+
+# Bytes as a person reads them. The engine formats this rather than the
+# renderer because it travels inside an evidence sentence.
+function Format-ByteSize {
+    param([long]$bytes)
+    if ($bytes -le 0)        { return "empty" }
+    if ($bytes -lt 1KB)      { return "$bytes bytes" }
+    if ($bytes -lt 1MB)      { return "$([math]::Round($bytes / 1KB, 0)) KB" }
+    if ($bytes -lt 1GB)      { return "$([math]::Round($bytes / 1MB, 1)) MB" }
+    return "$([math]::Round($bytes / 1GB, 2)) GB"
 }
 
 # Helper to format install dates
@@ -3673,6 +3695,231 @@ function Find-OtherProfileRemnants {
     }
 }
 
+# --- Left-over Store (UWP/MSIX) app data ---------------------------------
+# Uninstalling a Store app removes the package but NOT the per-user data folder
+# it wrote to %LOCALAPPDATA%\Packages\<PackageFamilyName>. Windows never
+# collects these, nothing in Settings surfaces them, and they routinely hold
+# hundreds of megabytes years after the app is gone. No other surface in Vanish
+# looks at them, because the app list only reports packages Windows still
+# registers -- which is precisely the set these folders are NOT in.
+#
+# The dangerous mistake here is deleting the data folder of an app that IS
+# installed, so every ambiguity resolves toward keeping the folder:
+#   - the "installed" set is the UNION of this user's registrations and, when
+#     elevated, every user's, so a package registered for somebody else still
+#     counts as installed;
+#   - Windows' own shell and framework families are never offered for removal
+#     even when they look orphaned, because servicing unregisters them briefly;
+#   - a folder touched in the last few days is held back entirely, since an
+#     install, update or repair in flight looks exactly like an orphan.
+$script:UwpProtectedFamilyPatterns = @(
+    '^Microsoft\.Windows\.',
+    '^MicrosoftWindows\.',
+    '^Microsoft\.UI\.Xaml',
+    '^Microsoft\.VCLibs',
+    '^Microsoft\.NET\.',
+    '^Microsoft\.WindowsAppRuntime',
+    '^Microsoft\.Services\.Store',
+    '^Microsoft\.AAD\.',
+    '^Microsoft\.AccountsControl',
+    '^Microsoft\.AsyncTextService',
+    '^Microsoft\.BioEnrollment',
+    '^Microsoft\.CredDialogHost',
+    '^Microsoft\.ECApp',
+    '^Microsoft\.LockApp',
+    '^Microsoft\.Win32WebViewHost',
+    '^Microsoft\.XboxGameCallableUI',
+    '^Microsoft\.MicrosoftEdge',
+    '^windows\.',
+    '^Windows\.'
+)
+
+function Test-UwpProtectedFamily {
+    param([string]$familyName)
+    if ([string]::IsNullOrWhiteSpace($familyName)) { return $true }
+    foreach ($pattern in $script:UwpProtectedFamilyPatterns) {
+        if ($familyName -match $pattern) { return $true }
+    }
+    return $false
+}
+
+# Every package family Windows currently knows about, lower-cased for lookup.
+# -AllUsers needs elevation and is the slower of the two calls, so it is only
+# attempted in Full Mode - but its absence can only ever make the scan more
+# conservative, never less.
+function Get-UwpFamilyIndex {
+    $index = @{}
+
+    foreach ($pkg in (Get-AppxPackage -ErrorAction SilentlyContinue)) {
+        $family = [string]$pkg.PackageFamilyName
+        if (-not [string]::IsNullOrWhiteSpace($family)) { $index[$family.ToLowerInvariant()] = $true }
+    }
+
+    if (Test-IsElevated) {
+        foreach ($pkg in (Get-AppxPackage -AllUsers -ErrorAction SilentlyContinue)) {
+            $family = [string]$pkg.PackageFamilyName
+            if (-not [string]::IsNullOrWhiteSpace($family)) { $index[$family.ToLowerInvariant()] = $true }
+        }
+    }
+
+    return $index
+}
+
+function Find-UwpLeftovers {
+    param([object]$p)
+
+    $findings = [System.Collections.Generic.List[object]]::new()
+
+    # Overridable so the harness can plant a folder and see it in the same run;
+    # the shipped default is 7 days.
+    $recentDays = 7
+    if ($p -and $null -ne $p.recentDays) {
+        $parsed = 0
+        if ([int]::TryParse([string]$p.recentDays, [ref]$parsed) -and $parsed -ge 0) { $recentDays = $parsed }
+    }
+
+    $packagesRoot = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (-not (Test-Path -LiteralPath $packagesRoot)) {
+        return @{
+            success  = $true
+            findings = $findings
+            note     = "This account has no Store app data folder, so there is nothing to sweep."
+        }
+    }
+
+    Write-ScanProgress -stage "Reading installed Store packages" -done 0 -total 0 -found 0
+    $installed = Get-UwpFamilyIndex
+
+    # A machine that reports zero registered packages is far more likely to be
+    # a failed AppX query than a machine with no Store apps at all, and acting
+    # on that answer would propose deleting every folder under Packages.
+    if ($installed.Count -eq 0) {
+        return @{
+            success = $false
+            error   = "Windows did not return any installed Store packages, so Vanish cannot tell which folders are left over. Nothing was examined."
+        }
+    }
+
+    $folders = @(Get-ChildItem -LiteralPath $packagesRoot -Directory -Force -ErrorAction SilentlyContinue)
+    $cutoff = (Get-Date).AddDays(-$recentDays)
+    $orphans = [System.Collections.Generic.List[object]]::new()
+    $recentlyTouched = 0
+    $notPackageShaped = 0
+    $examined = 0
+
+    foreach ($folder in $folders) {
+        $examined++
+        $family = $folder.Name
+
+        # This directory is not only for Store packages - it is where Windows
+        # keeps every AppContainer profile, including the sandboxes desktop
+        # programs create for themselves (Chrome's "cr.sb.*", Windows' own
+        # "ActiveSync"). Those have no package to be missing, so "no package
+        # claims it" says nothing about them. Only folders shaped like a real
+        # package family name (Name_PublisherId, 13-character publisher id) are
+        # ever considered.
+        if ($family -notmatch '^[A-Za-z0-9][A-Za-z0-9\.\-]*_[a-z0-9]{13}$') {
+            $notPackageShaped++
+            continue
+        }
+
+        if ($installed.ContainsKey($family.ToLowerInvariant())) { continue }
+
+        if ($folder.LastWriteTime -gt $cutoff) {
+            $recentlyTouched++
+            continue
+        }
+
+        $orphans.Add($folder)
+    }
+
+    # Sizing is the expensive half (a full recursive walk per folder), so it
+    # runs over the orphans only - never over all ~120 packages, which is the
+    # mistake that made the app list take ten seconds.
+    $done = 0
+    foreach ($folder in $orphans) {
+        $done++
+        Write-ScanProgress -stage "Measuring left-over app data" -done $done -total $orphans.Count -found $findings.Count
+
+        $family    = $folder.Name
+        $shortName = $family.Split('_')[0]
+        $sizeBytes = Get-FolderSize $folder.FullName
+        $sizeLabel = Format-ByteSize $sizeBytes
+        $ageDays   = [int]((Get-Date) - $folder.LastWriteTime).TotalDays
+        $protected = Test-UwpProtectedFamily $family
+        $isMicrosoft = $family -match '^Microsoft\.' -or $family -match '^MicrosoftCorporationII\.'
+
+        $risk = if ($protected) { "Advanced" }
+                elseif ($isMicrosoft -or $ageDays -lt 30) { "Moderate" }
+                else { "Safe" }
+
+        $findings.Add(@{
+            id        = "uwp|$family"
+            label     = "$shortName - $sizeLabel"
+            evidence  = "no installed app package claims $family; last changed $($folder.LastWriteTime.ToString('yyyy-MM-dd')) ($ageDays days ago)"
+            risk      = $risk
+            kind      = "file"
+            path      = $folder.FullName
+            removable = (-not $protected)
+            note      = if ($protected) {
+                            "Part of Windows itself. Vanish will not offer to remove it, because Windows unregisters these briefly during updates and a folder that looks left over may not be."
+                        } else { $null }
+            sizeBytes = $sizeBytes
+            meta      = @{ family = $family; sizeBytes = $sizeBytes; ageDays = $ageDays }
+        })
+    }
+
+    $notes = [System.Collections.Generic.List[string]]::new()
+    if ($recentlyTouched -gt 0) {
+        $notes.Add("$recentlyTouched folder(s) changed in the last $recentDays days were left out - an install or update in progress looks the same as a leftover.")
+    }
+    if ($notPackageShaped -gt 0) {
+        $notes.Add("$notPackageShaped folder(s) here are sandboxes belonging to ordinary programs rather than Store apps, so they were not examined.")
+    }
+    if ($findings.Count -eq 0) {
+        $notes.Add("Checked $examined app data folder(s); nothing was left behind by an app that is gone.")
+    }
+
+    return @{
+        success  = $true
+        findings = $findings
+        note     = if ($notes.Count -gt 0) { ($notes -join ' ') } else { $null }
+    }
+}
+
+# Registered packages whose payload is gone: Windows still lists the app, the
+# Start tile still exists, and launching it fails. Audit only -- there is no
+# restore manifest for a package registration, so INV-1 forbids offering to
+# remove one from here.
+function Find-BrokenAppxRegistrations {
+    $findings = [System.Collections.Generic.List[object]]::new()
+
+    foreach ($pkg in (Get-AppxPackage -ErrorAction SilentlyContinue)) {
+        if ($pkg.IsFramework) { continue }
+        if ($pkg.SignatureKind -eq 'System') { continue }
+
+        $location = [string]$pkg.InstallLocation
+        if (-not [string]::IsNullOrWhiteSpace($location) -and (Test-Path -LiteralPath $location -ErrorAction SilentlyContinue)) { continue }
+
+        $findings.Add(@{
+            id        = "appx|$($pkg.PackageFullName)"
+            label     = [string]$pkg.Name
+            evidence  = if ([string]::IsNullOrWhiteSpace($location)) {
+                            "Windows lists this Store app but records no folder for it"
+                        } else {
+                            "Windows lists this Store app but its folder is gone: $location"
+                        }
+            risk      = "Moderate"
+            kind      = "appx-registration"
+            removable = $false
+            note      = "Listed so you know why the app fails to open. Removing the registration is a Windows operation with no undo, so Vanish does not do it from here - use the app list."
+            meta      = @{ packageFullName = [string]$pkg.PackageFullName; installLocation = $location }
+        })
+    }
+
+    return $findings
+}
+
 # A registry finding whose physical key could not be resolved cannot be
 # quarantined, so it must never be offered as removable (INV-1: no removal
 # without a restore manifest).
@@ -3719,6 +3966,17 @@ function Invoke-CleanerScan {
             "drivers"       { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanDriverPackages)) } }
             "path"          { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-DeadPathEntries)) } }
             "associations"  { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Set-FindingRemovability (Find-DeadAssociations))) } }
+            "uwp-leftovers" {
+                $res = Find-UwpLeftovers -p $p
+                if (-not $res.success) { return @{ success = $false; cleaner = $cleaner; error = $res.error } }
+                # Broken registrations are audit-only rows in the same list: the
+                # user's question is "what Store junk is on this machine", not
+                # "which registry hive backs it".
+                $all = [System.Collections.Generic.List[object]]::new()
+                foreach ($f in @($res.findings)) { $all.Add($f) }
+                foreach ($f in @(Find-BrokenAppxRegistrations)) { $all.Add($f) }
+                return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $all); note = $res.note }
+            }
             "profiles"      {
                 $res = Find-OtherProfileRemnants -p $p
                 if ($res.success) { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $res.findings); note = $res.note } }

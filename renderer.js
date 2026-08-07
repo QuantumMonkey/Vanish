@@ -2002,7 +2002,8 @@ function describeOrigin(origin) {
     'system-clean/services': 'System Clean - left-over services',
     'system-clean/associations': 'System Clean - file types and links',
     'system-clean/profiles': 'System Clean - other user accounts',
-    'system-clean/drivers': 'System Clean - driver packages'
+    'system-clean/drivers': 'System Clean - driver packages',
+    'system-clean/uwp-leftovers': 'System Clean - left-over Store app data'
   };
   if (known[raw]) return known[raw];
   if (raw.startsWith('system-clean/path')) return 'System Clean - PATH entries';
@@ -2837,6 +2838,12 @@ const CLEANERS = [
     desc: 'File types and links set to open with a program that is no longer on this PC.'
   },
   {
+    id: 'uwp-leftovers',
+    icon: 'fa-box-archive',
+    title: 'Left-over Store app data',
+    desc: 'Data folders left behind by Store apps that are no longer installed. Windows does not remove these when you uninstall, and they can be large. Anything Windows itself uses is listed but left alone.'
+  },
+  {
     id: 'profiles',
     icon: 'fa-users',
     title: 'Other user profiles',
@@ -3053,7 +3060,7 @@ function renderCleanerBody(cleaner) {
           <input type="checkbox" data-finding="${esc(index)}" ${f.removable === false ? 'disabled' : ''}${state.selected && state.selected.has(f.id) ? ' checked' : ''}>
           <div class="finding-main">
             <div class="finding-label">${esc(f.label)}</div>
-            <div class="finding-evidence">${esc(f.evidence)}${f.registryPath ? ' &middot; ' + esc(f.registryPath) : ''}</div>
+            <div class="finding-evidence">${esc(f.evidence)}${f.registryPath ? ' &middot; ' + esc(f.registryPath) : ''}${!f.registryPath && f.path ? ' &middot; ' + esc(f.path) : ''}</div>
             ${f.note ? `<div class="finding-evidence" style="color: var(--color-warning);">${esc(f.note)}</div>` : ''}
           </div>
           <span class="finding-risk ${esc((f.risk || 'safe').toLowerCase())}">${esc(f.risk || 'Safe')}</span>
@@ -3132,6 +3139,33 @@ function wireCleanerBody(cleaner) {
   applyTierLocks();
 }
 
+// What is about to happen, in the terms of the thing being moved. Telling
+// someone their folders are "registry entries" is how a confirmation dialog
+// stops being read.
+function purgeExplanation(cleanerId, selected) {
+  if (cleanerId === 'path') {
+    return (
+      'Your whole PATH setting is saved to a backup file before it is rewritten. Restoring this from the ' +
+      'Quarantine tab puts the exact previous PATH back.'
+    );
+  }
+
+  const files = selected.filter((f) => f.kind === 'file');
+  if (files.length === selected.length && files.length > 0) {
+    const bytes = files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+    const size = bytes > 0 ? ` That frees about ${formatBytes(bytes)}.` : '';
+    return (
+      `${files.length} folder(s) move into the Quarantine tab, where they stay until you delete them.${size} ` +
+      'Nothing is deleted now, and you can put any of it back.'
+    );
+  }
+
+  return (
+    'The selected registry entries are saved to a backup file, then removed. Nothing is deleted - it all ' +
+    'goes to the Quarantine tab, and you can put it back from there.'
+  );
+}
+
 async function purgeCleaner(cleanerId) {
   if (!guardFullMode()) return;
   const state = cleanerState[cleanerId];
@@ -3147,12 +3181,7 @@ async function purgeCleaner(cleanerId) {
 
   const ok = await confirmDialog({
     title: `Quarantine ${selected.length} item(s)?`,
-    body:
-      cleanerId === 'path'
-        ? 'Your whole PATH setting is saved to a backup file before it is rewritten. Restoring this from the ' +
-          'Quarantine tab puts the exact previous PATH back.'
-        : 'The selected registry entries are saved to a backup file, then removed. Nothing is deleted - it all ' +
-          'goes to the Quarantine tab, and you can put it back from there.',
+    body: purgeExplanation(cleanerId, selected),
     confirmLabel: 'Move to quarantine'
   });
   if (!ok) return;

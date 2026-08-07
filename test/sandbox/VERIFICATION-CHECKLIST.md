@@ -104,6 +104,36 @@ leftover-scan/quarantine meaningfully. Confirm it landed before starting:
 
 Record result and close `vanish-uninstaller-1qp` if all pass.
 
+## 3b. vanish-uninstaller-udu -- left-over Store app data, purge and restore
+
+The sweep itself is covered by automated tests on both real and planted data.
+What no harness can cover is the elevated round trip against a REAL Store app
+you removed yourself, on a machine where nothing was planted.
+
+The sandbox installs Chrome via winget; any Store app works as well. If the
+sandbox has no Store app worth removing, install one from the Store first.
+
+- [ ] Launch elevated (Full Mode). System Clean -> "Left-over Store app
+      data" -> Scan.
+      -> Expect: a finished count, not a spinner; the section explains what
+      it held back (folders touched in the last 7 days, and sandboxes that
+      were never packages).
+- [ ] Read every row before ticking anything. **Cross-check one**: copy the
+      package family name out of the evidence line and run
+      `Get-AppxPackage -AllUsers <name>` in PowerShell.
+      -> Expect: nothing returned. A row naming a package that IS installed
+      is a P0 bug, not a note -- `bd create` it immediately.
+- [ ] Confirm any row whose family starts `Microsoft.Windows`, `windows.` or
+      a framework name is listed but **cannot be ticked**.
+- [ ] Tick one real leftover, note its size, Move selected to quarantine.
+      -> Expect: the folder is gone from `%LOCALAPPDATA%\Packages`, the
+      Quarantine tab holds an entry naming "Left-over Store app data".
+- [ ] Restore that entry from the Quarantine tab.
+      -> Expect: the folder is back at its original path with its contents
+      intact (`Get-ChildItem -Recurse` it and compare).
+
+Record result in `bd show vanish-uninstaller-udu` notes.
+
 ## 4. TASK-17 (Win11 half only) -- vanish-uninstaller-0xt
 
 Full spec: `docs/planning/05-implementation-plan.md` TASK-17. This

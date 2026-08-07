@@ -115,7 +115,7 @@ Every destructive channel below is wrapped in `fullModeOnly()` ([main.js](main.j
 | `onQueueUpdate(cb)` | `queue-update` (main→renderer push) | | every state transition, not polled | — |
 | `onScanProgress(cb)` | `scan-progress` (main→renderer push) | | interim scan state. `scanner.ps1` writes progress to **stderr** behind a marker so stdout stays pure JSON and no existing result contract can be corrupted; `main.js` parses it line-buffered and forwards to the requesting sender. Reports measured facts only — stages completed, seconds elapsed — never a predicted percentage (Rule 9) | `Write-ScanProgress` |
 | `findBrokenEntries()` | `find-broken-entries` | | read-only, works in Audit Mode | `Find-BrokenUninstallEntries` |
-| `cleanerScan(params)` | `cleaner-scan` | | read-only | `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, other profiles) |
+| `cleanerScan(params)` | `cleaner-scan` | | read-only | `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, other profiles, left-over Store app data) |
 | `cleanerPurge(params)` | `cleaner-purge` | ✅ | routes through the vault, same as `purge-remnants` | `Invoke-QuarantineItems` / `Set-PathEntries` |
 | `minimizeWindow()` / `maximizeWindow()` / `closeWindow()` | `window-*` (send) | | window controls | — |
 | `openExternalLink(url)` | `open-external-link` (send) | | `shell.openExternal` | — |
@@ -142,7 +142,7 @@ Representative, not exhaustive — scanner.ps1 is ~3,100 lines. The table below 
 | `Invoke-Uninstaller` | Run one uninstaller and report exit code / timeout / interactivity | `Start-Process -FilePath/-ArgumentList`, no shell; refuses a `risky` entry without explicit acknowledgement |
 | `ConvertTo-ProcessArgument(List)` | Quote an elevated relaunch's argument vector | Implements the real `CommandLineToArgvW` rules, not naive quote-wrapping (TASK-05 fix; a trailing backslash or embedded quote breaks the naive version) |
 | `Stop-VanishProcess` / `Unlock-Path` / `ProcessFreezer` | Task Manager kill + file-lock holder discovery/close | `NtSuspendProcess`/`NtResumeProcess` hold handles open from discovery through thaw so a recycled PID is never mistakenly resumed or killed |
-| `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, profiles) | System Clean discovery across 6 categories | Audit-only for driver packages (Standard tier, Rule 16); other-profile sweep loads hives offline and always unloads in `finally` |
+| `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, profiles, left-over Store app data) | System Clean discovery across 7 categories | Audit-only for driver packages (Standard tier, Rule 16); other-profile sweep loads hives offline and always unloads in `finally` |
 | `Find-BrokenUninstallEntries` | Detect entries whose uninstaller can no longer run itself | Read-only; the fallback used by Force Uninstall before it resorts to a manifest-only removal |
 
 ## 5. Implemented vs. designed

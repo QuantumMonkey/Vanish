@@ -10,6 +10,40 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added — left-over Store app data sweep (`udu`)
+
+* **A seventh System Clean cleaner: left-over Store (UWP/MSIX) app data.**
+  Uninstalling a Store app removes the package and leaves
+  `%LOCALAPPDATA%\Packages\<PackageFamilyName>` exactly where it was. Windows
+  never collects these, Settings never shows them, and no other surface in
+  Vanish could see them — the app list reports packages Windows still
+  registers, which is precisely the set these folders are *not* in. On the
+  development machine the sweep found 24 MB of data belonging to a vendor
+  utility removed long ago.
+* Every ambiguity resolves toward keeping the folder: the "installed" set is
+  the union of this user's registrations and, elevated, every user's; Windows'
+  own shell and framework families are listed but never removable, because
+  servicing unregisters them briefly and a folder that looks left over may not
+  be; folders touched in the last 7 days are held back entirely and the sweep
+  says how many; and folders that were never package folders at all (Chrome's
+  `cr.sb.*` sandboxes, Windows' `ActiveSync`) are excluded by shape, since "no
+  package claims it" says nothing about a directory that never had one.
+* Registered packages whose install folder has vanished are listed in the same
+  section as audit-only rows — that is why the Start tile does nothing — with
+  no removal offered: a package registration has no restore manifest, so
+  INV-1 forbids removing one from here.
+* `cleaner-purge` grew a file branch, so this is also the first cleaner whose
+  findings are folders rather than registry keys. They move into the vault
+  whole and restore from it; `test/phase4-ipc-verify.js` now drives that round
+  trip end to end (elevated), which no automated run had ever done for a file.
+* **`Get-FolderSize` had never returned anything but zero.**
+  `return if ($size) { $size } else { 0 }` is not the expression PowerShell 5.1
+  reads it as. It had no live callers when this was found — the app-list caller
+  was deleted for being slow in the previous session — so nothing on screen was
+  ever wrong, but the next caller would have inherited a helper that silently
+  agrees every folder is empty. Fixed, and now measures hidden subtrees too
+  (`-Force`), which is where app data actually lives.
+
 ### Fixed — epic 7oo: the operator audit of 2026-08-06
 
 The verdict that started this was "we have an aesthetic product with poor ux and

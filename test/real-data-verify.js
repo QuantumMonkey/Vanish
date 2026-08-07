@@ -1335,6 +1335,126 @@ async function sectionWindowsFeatures() {
   assert(off === before, 'turning the toggle off restores the default view', `${off} vs ${before}`);
 }
 
+// --- left-over Store app data (udu) ----------------------------------------
+// The claim under test is a safety claim: on THIS machine, with these real
+// packages, nothing the sweep offers to delete belongs to an app that is still
+// installed. A stub cannot make that claim - it has no package list to be
+// wrong about.
+async function sectionUwpLeftovers() {
+  heading('Left-over Store app data: only folders whose app is genuinely gone');
+  await goToTab('system-clean');
+
+  const known = await js(`(typeof CLEANERS !== 'undefined') ? CLEANERS.some((c) => c.id === 'uwp-leftovers') : false`);
+  if (!known) {
+    assert(false, 'System Clean offers a left-over Store app data sweep', 'no such cleaner is registered');
+    return;
+  }
+
+  // Ground truth straight from Windows, not from the engine under test.
+  const truthOut = await runPowerShellCapture(
+    '@(Get-AppxPackage | ForEach-Object { $_.PackageFamilyName }) -join "|"'
+  );
+  const installedFamilies = new Set(
+    String(truthOut.stdout).trim().split('|').filter(Boolean).map((f) => f.toLowerCase())
+  );
+  console.log(`  (Windows registers ${installedFamilies.size} package families for this user)`);
+
+  await js(`scanCleaner('uwp-leftovers'); true;`);
+  const started = Date.now();
+  while (Date.now() - started < 180000) {
+    const busy = await js(`cleanerState['uwp-leftovers'].loading === true`);
+    if (!busy) break;
+    await sleep(1000);
+  }
+
+  const state = await js(`(() => {
+    const s = cleanerState['uwp-leftovers'];
+    return {
+      scanned: s.scanned, error: s.error, note: s.note,
+      findings: s.findings.map((f) => ({
+        family: (f.meta && f.meta.family) || null,
+        kind: f.kind, risk: f.risk, removable: f.removable !== false,
+        path: f.path || null, sizeBytes: f.sizeBytes || 0, label: f.label
+      })),
+      rows: document.querySelectorAll('#cleaner-uwp-leftovers .finding-row').length,
+      disabled: document.querySelectorAll('#cleaner-uwp-leftovers .finding-row input[disabled]').length
+    };
+  })()`);
+
+  assert(state.scanned === true && !state.error, 'the sweep completes on real data', state.error || 'never finished');
+  if (!state.scanned) return;
+
+  const folders = state.findings.filter((f) => f.kind === 'file');
+  console.log(`  (${state.findings.length} finding(s), ${folders.length} folder(s), ${state.rows} row(s) on screen)`);
+  if (state.note) console.log(`  (note: ${state.note})`);
+
+  const stillInstalled = folders.filter((f) => f.removable && f.family && installedFamilies.has(f.family.toLowerCase()));
+  assert(
+    stillInstalled.length === 0,
+    'no folder belonging to a package Windows still registers is offered for removal',
+    stillInstalled.map((f) => f.family).join(', ')
+  );
+
+  const windowsOwned = folders.filter((f) => f.removable && /^(microsoft\.windows\.|microsoftwindows\.|windows\.)/i.test(f.family || ''));
+  assert(
+    windowsOwned.length === 0,
+    "Windows' own app data is never offered for removal",
+    windowsOwned.map((f) => f.family).join(', ')
+  );
+
+  assert(
+    state.findings.length === state.rows,
+    'every finding the engine returned is actually on screen',
+    `${state.findings.length} findings, ${state.rows} rows`
+  );
+
+  const unremovable = state.findings.filter((f) => !f.removable).length;
+  assert(
+    state.disabled === unremovable,
+    'anything Vanish will not remove cannot be ticked',
+    `${unremovable} unremovable, ${state.disabled} disabled checkbox(es)`
+  );
+
+  if (folders.length === 0) {
+    skip('the measured size matches the folder on disk', 'this machine has no left-over package folders');
+    assert(
+      Boolean(state.note),
+      'an empty result explains what was checked rather than showing a bare zero',
+      'no note was returned'
+    );
+    return;
+  }
+
+  // Every path must be real, and inside the folder this sweep is allowed to
+  // touch. A finding pointing anywhere else is a purge aimed off target.
+  const packagesRoot = `${process.env.LOCALAPPDATA}\\Packages\\`.toLowerCase();
+  const strays = folders.filter((f) => !f.path || !f.path.toLowerCase().startsWith(packagesRoot));
+  assert(strays.length === 0, 'every folder named is inside this account\'s package data folder', strays.map((f) => f.path).join(', '));
+
+  const missing = [];
+  for (const f of folders) {
+    const probe = await runPowerShellCapture(`Test-Path -LiteralPath '${f.path}'`);
+    if (String(probe.stdout).trim() !== 'True') missing.push(f.path);
+  }
+  assert(missing.length === 0, 'every folder named still exists on disk', missing.join(', '));
+
+  // Size is the number the user decides on, so it is measured against the
+  // machine rather than trusted. The helper behind it returned a flat zero for
+  // every folder on earth until this release.
+  const biggest = folders.slice().sort((a, b) => b.sizeBytes - a.sizeBytes)[0];
+  const sizeOut = await runPowerShellCapture(
+    `(Get-ChildItem -LiteralPath '${biggest.path}' -Recurse -File -Force -ErrorAction SilentlyContinue | ` +
+    `Measure-Object -Property Length -Sum).Sum`
+  );
+  const realBytes = parseInt(String(sizeOut.stdout).trim(), 10) || 0;
+  const delta = realBytes > 0 ? Math.abs(biggest.sizeBytes - realBytes) / realBytes : 0;
+  assert(
+    delta < 0.05,
+    `the measured size matches the folder on disk (${biggest.label})`,
+    `engine ${biggest.sizeBytes} vs disk ${realBytes}`
+  );
+}
+
 // --- quarantine details (7oo.9) --------------------------------------------
 async function sectionQuarantine() {
   heading('Quarantine: does an entry answer what a worried person asks first?');
@@ -1493,6 +1613,7 @@ const SECTIONS = {
   redundancy: sectionRedundancy,
   force: sectionForceUninstall,
   clean: sectionSystemClean,
+  uwp: sectionUwpLeftovers,
   startup: sectionStartupItems,
   features: sectionWindowsFeatures,
   quarantine: sectionQuarantine,

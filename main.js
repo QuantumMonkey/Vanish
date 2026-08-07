@@ -863,12 +863,20 @@ fullModeOnly('cleaner-purge', async (event, params) => {
       .filter((i) => i.kind === 'registry' && i.registryPath)
       .map((i) => ({ path: i.registryPath }));
 
-    if (registry.length === 0) {
+    // File-backed findings (left-over Store app data) move into the vault
+    // whole, the same way an uninstall's remnant folders do. A finding the
+    // engine marked unremovable never reaches the vault, whatever the renderer
+    // sent - the guard belongs on this side of the IPC boundary too.
+    const files = items
+      .filter((i) => i.kind === 'file' && i.path && i.removable !== false)
+      .map((i) => ({ path: i.path }));
+
+    if (registry.length === 0 && files.length === 0) {
       return { success: false, error: 'None of the selected findings can be removed in this release.' };
     }
 
     const result = await vault.quarantine(
-      { files: [], registry },
+      { files, registry },
       {
         sourceApp: cleanerSourceLabel(cleaner),
         origin: `system-clean/${cleaner}`,
@@ -947,7 +955,8 @@ function cleanerSourceLabel(cleaner) {
     'context-menus': 'Context menu cleaner',
     services: 'Orphaned services cleaner',
     associations: 'File association repair',
-    profiles: 'Other user profiles sweep'
+    profiles: 'Other user profiles sweep',
+    'uwp-leftovers': 'Left-over Store app data'
   };
   return labels[cleaner] || `System Clean (${cleaner})`;
 }

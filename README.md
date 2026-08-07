@@ -4,7 +4,7 @@
 
 Vanish maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts down the leftovers that uninstallers leave behind, quarantines everything it removes so it can be put back, and audits system health — startup bloat, orphaned autostart entries, redundant software, locked files, a bulk uninstall queue. Everything runs locally. Nothing leaves your machine.
 
-> Working version 0.3.0, Core tier feature-complete. Passes 290/290 assertions **unelevated** (`npm test`); 2 of 14 suites need Full Mode and have not run this session. Not yet **Complete** by this project's own bar — see [Status](#status) below before you rely on it.
+> Working version 0.3.0, Core tier feature-complete. Passes 328/328 assertions **unelevated** (`npm test`); 2 of 14 suites need Full Mode and have not run this session. Not yet **Complete** by this project's own bar — see [Status](#status) below before you rely on it.
 
 <!-- DEMO GIF PLACEHOLDER
 Record with ScreenToGif: 30–60s showing scan → app select → wizard →
@@ -35,7 +35,7 @@ scan  →  detect  →  propose  →  await approval  →  act (quarantine)  →
 4. **Await approval** — nothing moves until you review the list and click Purge. Unchecking everything and finishing without purging is a first-class path.
 5. **Act & report** — the checked items are quarantined, not deleted: files move into a versioned vault and registry keys are exported to a `.reg` restore manifest *before* anything is removed. Anything locked by Windows is reported as skipped, never forced. Every quarantined item can be restored from the Quarantine Manager tab, or permanently deleted behind a typed double-confirmation.
 
-This same scan → propose → quarantine pattern is how every other destructive surface in the app works too — the bulk uninstall queue, System Clean's six cleaners, Force Uninstall for broken entries. There is exactly one route to the disk or the registry for a removal ([lib/vault.js](lib/vault.js)), and it is this one.
+This same scan → propose → quarantine pattern is how every other destructive surface in the app works too — the bulk uninstall queue, System Clean's seven cleaners, Force Uninstall for broken entries. There is exactly one route to the disk or the registry for a removal ([lib/vault.js](lib/vault.js)), and it is this one.
 
 ## What it does
 
@@ -51,6 +51,7 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Task Manager & file-lock unlocker — see what has a file open and close it (or suspend the tree) before retrying | [scanner.ps1](scanner.ps1) `Get-ProcessList`, `Unlock-Path` |
 | Bulk uninstall queue — restore point, silent-switch resolution, and an untrusted-uninstaller acknowledgement gate, per app | [lib/queue.js](lib/queue.js) |
 | System Clean — orphaned context menus, services, dead PATH entries, broken file associations, other-profile remnants; driver packages are audited but not yet removable | [scanner.ps1](scanner.ps1) `Invoke-CleanerScan` |
+| Left-over Store app data — `%LOCALAPPDATA%\Packages` folders whose package is no longer installed anywhere on the machine, with Windows' own families listed but never removable and anything touched in the last week held back | [scanner.ps1](scanner.ps1) `Find-UwpLeftovers` |
 | Force Uninstall — detects and removes entries that can no longer uninstall themselves, still routed through the vault | [scanner.ps1](scanner.ps1) `Find-BrokenUninstallEntries` |
 | Health Advisor: CIM-based system diagnostics (OS, CPU, RAM, GPU, disks, uptime) | [scanner.ps1](scanner.ps1) `Get-SystemDiagnostics` |
 | Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services — with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
@@ -87,7 +88,7 @@ Status vocabulary follows this project's own **promptgate Rule 10**: *Implemente
 - Per-item review with risk labels; Advanced findings opt-in only ([renderer.js](renderer.js))
 - Shared publisher folders protected from whole-folder deletion ([scanner.ps1](scanner.ps1) `Is-PublisherShared`)
 - Locked files reported and skipped, never forced; a Task Manager + unlocker tab can close or suspend the holder first
-- A bulk uninstall queue, a System Clean pass across six leftover categories, and Force Uninstall for entries that can no longer uninstall themselves — all routed through the same vault
+- A bulk uninstall queue, a System Clean pass across seven leftover categories, and Force Uninstall for entries that can no longer uninstall themselves — all routed through the same vault
 - Elevation state detected via the `WindowsPrincipal` API, never `net session`
 - A `/cso` security audit found and fixed four issues in the destructive paths (command injection, a restore-destination guard bypassable by a directory junction, an ACL fix that didn't survive the app's own normal startup order, and an untracked lockfile) — see the **Security** section of [CHANGELOG.md](CHANGELOG.md)
 

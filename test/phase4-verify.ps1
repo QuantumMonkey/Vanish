@@ -37,6 +37,7 @@ Write-Host "==========================="
 Write-Host ("Elevation: {0}" -f $(if ($isAdmin) { "Full Mode" } else { "Audit Mode" }))
 
 $planted = [System.Collections.Generic.List[string]]::new()
+$plantedFiles = [System.Collections.Generic.List[string]]::new()
 $ghostExe = Join-Path $env:TEMP "vanish-ghost-target\missing.exe"   # deliberately never created
 
 try {
@@ -267,10 +268,86 @@ try {
         $denied = Invoke-Engine "cleaner-scan" @{ cleaner = "profiles"; keyword = "test" }
         Assert-True ($denied.success -eq $false) "profile sweep refuses to run in Audit Mode"
     }
+
+    # ==================================================================
+    # udu: left-over Store (UWP/MSIX) app data
+    # ==================================================================
+    Write-Host ""
+    Write-Host "udu left-over Store app data" -ForegroundColor Cyan
+
+    $pkgRoot = Join-Path $env:LOCALAPPDATA 'Packages'
+    $null = [System.IO.Directory]::CreateDirectory($pkgRoot)
+
+    # Four plants, one per rule the sweep is supposed to follow.
+    $ghostFamily     = "VanishGhostApp.Test_vanishtest999"      # stale orphan  -> proposed
+    $freshFamily     = "VanishFreshApp.Test_vanishtest999"      # touched today -> held back
+    $protectedFamily = "Microsoft.Windows.VanishProbe_vanishtest999"  # Windows' own -> listed, not removable
+    $sandboxFolder   = "vanish.sb.probe"                       # not package-shaped -> never examined
+
+    $plantedDirs = @($ghostFamily, $freshFamily, $protectedFamily, $sandboxFolder) |
+        ForEach-Object { Join-Path $pkgRoot $_ }
+
+    foreach ($dir in $plantedDirs) {
+        if (Test-Path -LiteralPath $dir) { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }
+        $null = [System.IO.Directory]::CreateDirectory((Join-Path $dir "LocalState"))
+        Set-Content -Path (Join-Path $dir "LocalState\payload.bin") -Value ("x" * 4096) -Encoding ascii
+        $plantedFiles.Add($dir)
+    }
+
+    # Age the ones that must look settled. The freshly-written one keeps today's
+    # timestamp on purpose - that is the case being tested.
+    foreach ($name in @($ghostFamily, $protectedFamily, $sandboxFolder)) {
+        (Get-Item -LiteralPath (Join-Path $pkgRoot $name)).LastWriteTime = (Get-Date).AddDays(-60)
+    }
+
+    $uwp = Invoke-Engine "cleaner-scan" @{ cleaner = "uwp-leftovers" }
+    Assert-True ($uwp.success -eq $true) "left-over Store app data scan completed"
+
+    $ghostHit = @($uwp.findings | Where-Object { $_.meta.family -eq $ghostFamily })
+    Assert-True ($ghostHit.Count -eq 1) "the planted orphan folder is found"
+    if ($ghostHit.Count -eq 1) {
+        Assert-True ($ghostHit[0].kind -eq "file")           "it is reported as a folder, not a registry key"
+        Assert-True ($ghostHit[0].removable -ne $false)      "a third-party orphan is offered for removal"
+        Assert-True ($ghostHit[0].sizeBytes -gt 0)           "its size is measured, not reported as zero"
+        Assert-True ($ghostHit[0].path -eq (Join-Path $pkgRoot $ghostFamily)) "the finding carries the real folder path"
+        Assert-True ($ghostHit[0].evidence -match "last changed") "evidence says when the folder was last touched"
+    }
+
+    Assert-True (@($uwp.findings | Where-Object { $_.meta.family -eq $freshFamily }).Count -eq 0) `
+        "a folder touched today is held back - an install in progress looks like an orphan"
+    Assert-True ($uwp.note -match "last 7 days") "the sweep says how many folders it held back"
+
+    Assert-True (@($uwp.findings | Where-Object { $_.path -like "*$sandboxFolder*" }).Count -eq 0) `
+        "an AppContainer sandbox that was never a package is not examined"
+
+    $protectedHit = @($uwp.findings | Where-Object { $_.meta.family -eq $protectedFamily })
+    Assert-True ($protectedHit.Count -eq 1) "a Windows-owned family is still listed"
+    if ($protectedHit.Count -eq 1) {
+        Assert-True ($protectedHit[0].removable -eq $false) "but Windows' own app data is never offered for removal"
+    }
+
+    # THE invariant: an installed app's data folder must never be proposed. This
+    # is checked against the machine's real package list, not the plants.
+    $installedFamilies = @{}
+    foreach ($pkg in (Get-AppxPackage -ErrorAction SilentlyContinue)) {
+        if ($pkg.PackageFamilyName) { $installedFamilies[$pkg.PackageFamilyName.ToLowerInvariant()] = $true }
+    }
+    $wronglyProposed = @($uwp.findings | Where-Object {
+        $_.kind -eq "file" -and $_.meta.family -and $installedFamilies.ContainsKey(([string]$_.meta.family).ToLowerInvariant())
+    })
+    Assert-True ($wronglyProposed.Count -eq 0) "no folder belonging to an installed package is ever flagged"
+
+    # Every proposed folder must actually be there, or the purge would fail on
+    # a path the user was told about.
+    $missingPaths = @($uwp.findings | Where-Object { $_.kind -eq "file" -and -not (Test-Path -LiteralPath $_.path) })
+    Assert-True ($missingPaths.Count -eq 0) "every proposed folder exists on disk"
 }
 finally {
     foreach ($k in $planted) {
         if (Test-Path -LiteralPath $k) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue }
+    }
+    foreach ($d in $plantedFiles) {
+        if (Test-Path -LiteralPath $d) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
     }
 }
 
