@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;">
+  <title>Vanish</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --panel: hsla(222, 40%, 12%, 1);
+      --white: #f5f7fb;
+      --gray: #9aa5b8;
+      --accent: #4c8dff;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--white);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      -webkit-user-select: none;
+      cursor: default;
+      overflow: hidden;
+    }
+    body {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 22px 26px;
+      border: 1px solid hsla(220, 40%, 60%, 0.18);
+      border-radius: 10px;
+      -webkit-app-region: drag;
+    }
+    .mark {
+      width: 44px;
+      height: 44px;
+      flex: none;
+      border-radius: 10px;
+      background: linear-gradient(140deg, var(--accent), #7a5cff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 20px;
+      letter-spacing: 0.04em;
+    }
+    h1 {
+      margin: 0 0 5px;
+      font-size: 15px;
+      font-weight: 700;
+    }
+    p {
+      margin: 0;
+      font-size: 12.5px;
+      line-height: 1.45;
+      color: var(--gray);
+    }
+    .bar {
+      margin-top: 12px;
+      height: 3px;
+      border-radius: 3px;
+      background: hsla(220, 40%, 60%, 0.16);
+      overflow: hidden;
+    }
+    .bar span {
+      display: block;
+      height: 100%;
+      width: 38%;
+      border-radius: 3px;
+      background: var(--accent);
+      animation: slide 1.35s ease-in-out infinite;
+    }
+    @keyframes slide {
+      0%   { transform: translateX(-100%); }
+      100% { transform: translateX(300%); }
+    }
+  </style>
+</head>
+<body>
+  <div class="mark">V</div>
+  <div>
+    <h1>Starting Vanish with administrator rights</h1>
+    <!-- Two facts, because both are things the person is currently wondering:
+         Windows is about to ask, and the wait after that is normal. -->
+    <p>
+      Windows will ask for your permission. After you allow it, Vanish takes a
+      few seconds to open again - this window closes on its own.
+    </p>
+    <div class="bar"><span></span></div>
+  </div>
+</body>
+</html>

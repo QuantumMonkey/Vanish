@@ -66,6 +66,10 @@ contextBridge.exposeInMainWorld('api', {
   // Stage 6 - Forced uninstall for broken entries (REQ-20)
   findBrokenEntries: () => ipcRenderer.invoke('find-broken-entries'),
 
+  // 7oo.11 - acting on a startup item (remove Run value / service to manual /
+  // disable or enable a scheduled task)
+  startupAction: (params) => ipcRenderer.invoke('startup-action', params),
+
   // Stage 9 - System Clean cleaners (REQ-11, REQ-14..REQ-17)
   cleanerScan: (params) => ipcRenderer.invoke('cleaner-scan', params),
   cleanerPurge: (params) => ipcRenderer.invoke('cleaner-purge', params),

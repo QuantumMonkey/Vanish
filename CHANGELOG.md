@@ -10,6 +10,45 @@ full decision rules.
 
 ## [Unreleased]
 
+### Changed — the operator's second pass over Health Advisor and Settings
+
+* **Startup items can be acted on** (`7oo.11`). The verdict on the old surface
+  was "this item is broken but i cant do anything to it", and that was fair: it
+  named the orphan, named the tool that manages it, and stopped. Each row now
+  carries the one action Vanish can perform on that kind of entry, and each is
+  reversible — a Run value is removed after its key is exported to the vault as
+  a `.reg` restore manifest; a service is set to start on demand after the same
+  export; a scheduled task is disabled in place and re-enabled by the same
+  button. The three engine verbs are deliberately narrow: the registry one
+  accepts only the five Run/RunOnce keys this surface reads, the service one
+  refuses boot-start drivers, and the task one refuses anything under
+  `\Microsoft\`. None of them is a general-purpose primitive reachable over IPC.
+* **The second GPU was never missing — it was clipped** (`1bp`). The engine has
+  reported every adapter since the last fix. `.card-value` is one `nowrap` line
+  with an ellipsis, so "AMD Radeon + NVIDIA RTX 3080" rendered as "AMD
+  Radeon...". Adapters now render one per line, and every overview value wraps —
+  the CPU and machine model were quietly losing their tails the same way.
+* **System Overview cards centre at any count** (`1zv`). `auto-fill` keeps empty
+  phantom tracks, so a short last row sat jammed against the left with dead
+  space beside it. `auto-fit` plus a maximum track size and `justify-content:
+  center` reads the same with four cards or ten.
+* **The elevated restart says what it is doing** (`2cv`). Between requesting
+  elevation and the elevated window appearing there are several seconds of
+  Windows' own work — consent, then a second Electron process booting. The
+  automatic path created no window at all in that window of time, and the manual
+  path just vanished. Both now show a notice; the small always-on-top one
+  outlives the main window on purpose, so the desktop is never blank.
+* **Settings states which mode this session is in** (`388`). The "start as
+  administrator" toggle is about the *next* launch, but it was the only
+  elevation-shaped control on the panel, so it read as the current mode. Settings
+  now opens with a status block naming the mode, what it allows, and — in Audit
+  Mode — a button to elevate now. The toggle says in words what the next start
+  will do.
+  * Caught by the UI suite on the way: the new status block was first written as
+    `.mode-card`, a class the uninstall wizard's scan-depth cards already own.
+    It silently re-laid out the wizard until its restore-point toggle slid under
+    the step rail. A class name is an interface.
+
 ### Added — left-over Store app data sweep (`udu`)
 
 * **A seventh System Clean cleaner: left-over Store (UWP/MSIX) app data.**

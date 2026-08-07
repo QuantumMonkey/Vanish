@@ -353,10 +353,11 @@
                 <table class="apps-table" id="audit-startup-table">
                   <thead>
                     <tr>
-                      <th style="width: 28%;">Name</th>
-                      <th style="width: 12%;">Source</th>
-                      <th style="width: 12%;">Status</th>
-                      <th style="width: 48%;">Command</th>
+                      <th style="width: 24%;">Name</th>
+                      <th style="width: 11%;">Source</th>
+                      <th style="width: 11%;">Status</th>
+                      <th style="width: 38%;">Command</th>
+                      <th style="width: 16%; text-align: right;">Action</th>
                     </tr>
                   </thead>
                   <tbody id="audit-startup-tbody">
@@ -623,15 +624,32 @@
             settings are all there is to change.
           </p>
 
+          <!-- What mode this session is in, stated rather than implied. The
+               startup toggle below is about the NEXT start and was the only
+               elevation-shaped control on the panel, so it was being read as
+               this. -->
+          <div class="tier-status-card" id="settings-mode-card">
+            <div class="tier-status-icon"><i class="fa-solid fa-shield-halved"></i></div>
+            <div class="tier-status-main">
+              <div class="tier-status-title" id="settings-mode-title">Checking...</div>
+              <div class="tier-status-desc" id="settings-mode-desc">
+                Working out what this session is allowed to do.
+              </div>
+            </div>
+            <button class="btn-primary btn-compact" id="settings-mode-action" style="display:none;">
+              <i class="fa-solid fa-shield-halved"></i> Restart as administrator
+            </button>
+          </div>
+
           <div class="settings-group-title">Startup</div>
           <div class="settings-row">
             <div class="settings-row-main">
-              <div class="settings-row-title">Start Vanish as administrator</div>
+              <div class="settings-row-title">Always start with administrator rights</div>
               <div class="settings-row-desc">
-                Ask for administrator rights automatically the next time Vanish starts, instead of waiting
-                for you to ask for them. Windows still shows its own permission prompt every time - this
-                only decides when it appears. The change applies to the <em>next</em> start, not this one.
+                Windows shows its permission prompt either way - this only decides whether Vanish asks
+                for you at launch, or waits for you to click. It changes nothing about this session.
               </div>
+              <div class="settings-row-state" id="set-startup-elevated-state">-</div>
             </div>
             <div class="settings-row-controls">
               <label class="toggle-switch">
@@ -811,6 +829,20 @@
         <button class="btn-sec" id="btn-stay-audit">Continue in Audit Mode</button>
         <button class="btn-primary" id="btn-elevate-now">Restart as administrator</button>
       </div>
+    </div>
+  </div>
+
+  <!-- The gap between asking for elevation and the elevated window appearing is
+       several seconds of Windows' own work. It used to be several seconds of an
+       empty desktop. -->
+  <div class="modal-overlay" id="elevation-wait-overlay">
+    <div class="small-modal">
+      <div class="small-modal-icon"><i class="fa-solid fa-shield-halved"></i></div>
+      <h3>Restarting with administrator rights</h3>
+      <p id="elevation-wait-text">
+        Windows is asking whether Vanish may run as administrator. Answer that prompt to continue.
+      </p>
+      <div class="wait-track"><div class="wait-fill"></div></div>
     </div>
   </div>
 

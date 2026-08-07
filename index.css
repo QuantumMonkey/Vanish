@@ -1496,10 +1496,40 @@ input:checked + .slider:before {
   font-size: 14px;
 }
 
-/* Info card grid */
+/* Indeterminate wait bar. Used where the wait is Windows' and its length is
+ * genuinely unknown, so a percentage would be an invention. */
+.wait-track {
+  margin-top: 14px;
+  height: 3px;
+  border-radius: 3px;
+  background: hsla(220, 40%, 60%, 0.16);
+  overflow: hidden;
+}
+
+.wait-fill {
+  height: 100%;
+  width: 38%;
+  border-radius: 3px;
+  background: var(--color-primary);
+  animation: wait-slide 1.35s ease-in-out infinite;
+}
+
+@keyframes wait-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}
+
+/* Info card grid
+ *
+ * auto-FILL keeps empty phantom tracks, so a row holding fewer cards than there
+ * are columns sits jammed against the left with dead space beside it. auto-FIT
+ * collapses those tracks, and a max track size stops two cards on their own row
+ * from stretching to half the window each; justify-content then centres the
+ * whole block. The result reads the same with four cards or ten. */
 .audit-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+  justify-content: center;
   gap: 10px;
 }
 
@@ -1529,6 +1559,16 @@ input:checked + .slider:before {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Values that must not be clipped, however long they are - a second graphics
+ * adapter is information, not decoration. */
+.audit-info-card .card-value.wrap {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 13.5px;
+  line-height: 1.35;
 }
 
 .audit-info-card .card-sub {
@@ -1891,6 +1931,72 @@ input:checked + .slider:before {
   margin-bottom: 3px;
 }
 .settings-row-desc { font-size: 11.5px; color: var(--text-gray); line-height: 1.5; max-width: 560px; }
+
+/* What this setting will actually do, in the present tense, under the setting
+ * itself. A toggle whose only label is its name makes the user guess. */
+.settings-row-state {
+  margin-top: 7px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-primary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Current elevation state, at the top of Settings.
+ *
+ * Named tier-status-*, NOT mode-card-*: the uninstall wizard's scan-depth
+ * cards already own .mode-card, and styling this as one silently re-laid out
+ * the wizard until its restore-point toggle slid under the step rail. The UI
+ * suite caught it; the lesson is that a class name is an interface. */
+.tier-status-card {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-dark-card);
+}
+
+.tier-status-card.is-full {
+  border-color: hsla(145, 60%, 45%, 0.35);
+  background: linear-gradient(180deg, hsla(145, 60%, 40%, 0.10), transparent);
+}
+
+.tier-status-card.is-audit {
+  border-color: hsla(38, 90%, 55%, 0.35);
+  background: linear-gradient(180deg, hsla(38, 90%, 55%, 0.10), transparent);
+}
+
+.tier-status-icon {
+  width: 42px;
+  height: 42px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-size: 18px;
+  background: hsla(220, 40%, 60%, 0.12);
+  color: var(--text-gray);
+}
+
+.tier-status-card.is-full .tier-status-icon  { color: var(--color-success); background: hsla(145, 60%, 45%, 0.14); }
+.tier-status-card.is-audit .tier-status-icon { color: var(--color-warning); background: hsla(38, 90%, 55%, 0.14); }
+
+.tier-status-main { flex: 1; min-width: 0; text-align: left; }
+
+.tier-status-title {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-white);
+  margin-bottom: 3px;
+}
+
+.tier-status-desc { font-size: 11.5px; color: var(--text-gray); line-height: 1.5; max-width: 560px; }
 .settings-row-controls { display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
 .retention-field {
   display: flex;

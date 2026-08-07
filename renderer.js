@@ -410,9 +410,28 @@ async function maybeOfferElevation() {
 }
 
 async function requestElevation(overlay) {
-  const res = await window.api.relaunchElevated();
-  if (res && res.success) return; // this instance is being replaced (D-09)
+  // 2cv: the UAC prompt can take a moment to appear, and once it is accepted
+  // this window closes while a second Electron process boots. Both stretches
+  // used to look identical to a frozen app, so say what is happening before the
+  // wait rather than after it.
   if (overlay) overlay.classList.remove('active');
+  const wait = document.getElementById('elevation-wait-overlay');
+  const waitText = document.getElementById('elevation-wait-text');
+  if (wait) wait.classList.add('active');
+
+  const res = await window.api.relaunchElevated();
+
+  if (res && res.success) {
+    // This instance is being replaced (D-09). Main keeps its own small window
+    // up after this one goes, so the desktop is never blank in between.
+    if (waitText) {
+      waitText.textContent =
+        'Permission granted. Vanish is reopening with administrator rights - this takes a few seconds.';
+    }
+    return;
+  }
+
+  if (wait) wait.classList.remove('active');
   toast('Windows did not grant administrator rights. Vanish stays in Audit Mode.', 'warn');
 }
 
@@ -945,6 +964,11 @@ function setupSettingsTab() {
 
   document.getElementById('set-open-vault').addEventListener('click', () => window.api.openVaultFolder());
   document.getElementById('set-open-data').addEventListener('click', () => window.api.openDataFolder());
+
+  // Elevating from here is the same FLOW-01 path as the banner: one route, one
+  // set of consequences, one wait notice.
+  const modeAction = document.getElementById('settings-mode-action');
+  if (modeAction) modeAction.addEventListener('click', () => requestElevation(null));
 }
 
 async function saveSettings(patch) {
@@ -961,11 +985,52 @@ function syncSettingsPanel() {
   document.getElementById('set-retention-days').value = appSettings.autoPurgeRetentionDays;
   document.getElementById('set-scan-mode').value = appSettings.defaultScanMode || 'Moderate';
   document.getElementById('set-process-refresh').value = appSettings.processRefreshSeconds;
-  document.getElementById('set-startup-elevated').checked = appSettings.startupMode === 'full';
+
+  const startsElevated = appSettings.startupMode === 'full';
+  document.getElementById('set-startup-elevated').checked = startsElevated;
+
+  // 388: the toggle's own name does not say what happens next, and the setting
+  // is about a launch that has not happened yet. Spell out the next start.
+  const startupState = document.getElementById('set-startup-elevated-state');
+  if (startupState) {
+    startupState.innerHTML = startsElevated
+      ? '<i class="fa-solid fa-circle-check"></i> Next start: Vanish asks Windows for administrator rights straight away.'
+      : '<i class="fa-solid fa-circle-info"></i> Next start: Vanish opens read-only. You can switch any time.';
+    startupState.style.color = startsElevated ? 'var(--color-success)' : 'var(--text-gray)';
+  }
+
+  syncModeCard();
 
   // Audit Mode can read the configuration but not change deletion policy.
   autoPurge.disabled = !isAdmin;
   document.getElementById('set-retention-days').disabled = !isAdmin;
+}
+
+// The mode this session is actually in, as opposed to the mode the next one
+// will start in. Nothing on this panel used to say it.
+function syncModeCard() {
+  const card = document.getElementById('settings-mode-card');
+  if (!card) return;
+  const title = document.getElementById('settings-mode-title');
+  const desc = document.getElementById('settings-mode-desc');
+  const action = document.getElementById('settings-mode-action');
+
+  card.classList.toggle('is-full', isAdmin);
+  card.classList.toggle('is-audit', !isAdmin);
+
+  if (isAdmin) {
+    title.textContent = 'Full Mode - running as administrator';
+    desc.textContent =
+      'This session can uninstall, quarantine, restore and clean. Everything it removes still goes to ' +
+      'the Quarantine tab first, and you still approve each item.';
+    action.style.display = 'none';
+  } else {
+    title.textContent = 'Audit Mode - read-only';
+    desc.textContent =
+      'This session can list, scan and explain everything, but cannot change anything on this PC. ' +
+      'Controls that would remove something are switched off rather than hidden.';
+    action.style.display = '';
+  }
 }
 
 async function loadSettingsPanel() {
@@ -1637,6 +1702,9 @@ function renderLeftoversTree() {
 // ==========================================
 
 let auditLoaded = false;
+// The rows currently on screen, so a click resolves to the item the user was
+// actually looking at rather than to whatever the DOM can be re-parsed into.
+let startupItems = [];
 
 async function loadAuditData(force = false) {
   if (auditLoaded && !force) return;
@@ -1695,22 +1763,37 @@ function renderSysInfoCards(diag) {
     : '';
   const cpuSub = diag.cpu ? `${diag.cpu.cores ?? '?'} cores / ${diag.cpu.logicalCores ?? '?'} threads` : '';
 
+  // A machine with switchable graphics has two adapters and both matter. The
+  // engine has reported both since the last fix; this card was where the second
+  // one disappeared, clipped by a single nowrap line with an ellipsis. Each
+  // adapter gets its own line now.
+  const gpus = Array.isArray(diag.gpus) && diag.gpus.length
+    ? diag.gpus
+    : (diag.gpu ? String(diag.gpu).split(' + ') : ['Unknown']);
+
   const cards = [
     { label: 'Operating System',  value: diag.os?.caption  ?? 'Unknown',    sub: `Build ${diag.os?.build ?? '?'} - ${diag.os?.architecture ?? ''}` },
     { label: 'System Uptime',     value: uptimeStr || 'Unknown',              sub: '' },
     { label: 'CPU',               value: shortenCpuName(diag.cpu?.name),      sub: `${cpuClockGHz} - ${cpuSub}` },
     { label: 'RAM Usage',         value: ramPct || 'Unknown',                 sub: ramSub },
-    { label: 'GPU',               value: diag.gpu ?? 'Unknown',               sub: '' },
+    { label: gpus.length > 1 ? `Graphics (${gpus.length})` : 'Graphics', values: gpus, sub: '' },
     { label: 'Machine',           value: `${diag.manufacturer ?? ''} ${diag.model ?? ''}`.trim() || 'Unknown', sub: '' }
   ];
 
-  grid.innerHTML = cards.map(c => `
+  // Every value wraps, not just the graphics one: "AMD Ryzen 9 5900HX with Ra..."
+  // and "ASUSTeK COMPUTER INC. RO..." were the same defect on the same row,
+  // just less obviously wrong than a missing GPU.
+  grid.innerHTML = cards.map(c => {
+    const lines = (c.values || [c.value])
+      .map((v) => `<span class="card-value wrap" title="${esc(v)}">${esc(v)}</span>`)
+      .join('');
+    return `
     <div class="audit-info-card">
       <span class="card-label">${esc(c.label)}</span>
-      <span class="card-value" title="${esc(c.value)}">${esc(c.value)}</span>
+      ${lines}
       ${c.sub ? `<span class="card-sub">${esc(c.sub)}</span>` : ''}
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
 }
 
 function shortenCpuName(name) {
@@ -1772,18 +1855,23 @@ function renderStartupTable(startup) {
     orphanBadge.style.display = orphans > 0 ? 'inline-flex' : 'none';
   }
 
-  // 7oo.4 / Rule 24: this surface detects, it does not change anything. Say so
-  // once, plainly, instead of letting the user infer capability from a table.
+  // 7oo.11: this surface acts now, and what it does is reversible. The note
+  // says which, because the difference between "removed" and "removed, and
+  // here is how to undo it" is the whole basis for clicking the button.
   const noteEl = document.getElementById('audit-startup-note');
   if (noteEl) {
     noteEl.textContent = startup.detectionNote ||
-      'Vanish lists what starts with Windows. It cannot change these yet.';
+      'Every change here is saved to quarantine first, so it can be put back.';
   }
+
+  // Keep the rows so the click handlers can find their item by index rather
+  // than re-deriving it from the DOM.
+  startupItems = items;
 
   if (items.length === 0) {
     tbody.innerHTML = `
       <tr>
-        <td colspan="4" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
+        <td colspan="5" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
           <i class="fa-solid fa-circle-check" style="color:var(--color-success); margin-right:6px;"></i>Nothing extra starts with Windows on this PC.
         </td>
       </tr>
@@ -1791,7 +1879,7 @@ function renderStartupTable(startup) {
     return;
   }
 
-  tbody.innerHTML = items.map(item => {
+  tbody.innerHTML = items.map((item, index) => {
     const sourceClass = item.source === 'Registry' ? 'registry'
                       : item.source === 'TaskScheduler' ? 'task'
                       : 'service';
@@ -1813,7 +1901,7 @@ function renderStartupTable(startup) {
     // own kind of entry is managed.
     const suggestionRow = item.exeExists === false && item.suggestion
       ? `<tr class="startup-suggestion-row">
-           <td colspan="4">
+           <td colspan="5">
              <div class="startup-suggestion">
                <i class="fa-solid fa-lightbulb"></i>
                <div>
@@ -1825,6 +1913,18 @@ function renderStartupTable(startup) {
          </tr>`
       : '';
 
+    // The label changes with the row's own state: a disabled task offers to be
+    // enabled again, which is what makes disabling it safe to try.
+    const actionLabel = item.action === 'task-disable'
+      ? (item.enabled ? 'Disable' : 'Enable')
+      : item.actionLabel || 'Turn off';
+
+    const actionCell = item.action
+      ? `<button class="btn-sec btn-compact startup-action-btn" data-startup-index="${index}"
+                 data-destructive="true"
+                 title="${esc(item.suggestion || '')}">${esc(actionLabel)}</button>`
+      : `<span style="font-size:11.5px; color: var(--text-muted);">Managed by Windows</span>`;
+
     return `
       <tr class="app-row${item.exeExists === false ? ' is-orphan' : ''}">
         <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(item.name)}</td>
@@ -1834,10 +1934,78 @@ function renderStartupTable(startup) {
           <span style="font-size:12px; color: var(--text-gray);">${statusLabel}</span>
         </td>
         <td class="mono" style="color: var(--text-muted); word-break: break-all;" title="${esc(item.command || '')}">${esc(cmdShort)}</td>
+        <td style="text-align: right; white-space: nowrap;">${actionCell}</td>
       </tr>
       ${suggestionRow}
     `;
   }).join('');
+
+  tbody.querySelectorAll('.startup-action-btn').forEach((btn) => {
+    btn.addEventListener('click', () =>
+      runStartupAction(parseInt(btn.getAttribute('data-startup-index'), 10))
+    );
+  });
+
+  // Audit Mode leaves these visible and inert with the reason, like every other
+  // destructive control in the app (REQ-04).
+  applyTierLocks();
+}
+
+// 7oo.11. Three actions, one confirmation shape: say what will change, say
+// where the undo lives, then do it and report the result on the row.
+async function runStartupAction(index) {
+  const item = startupItems[index];
+  if (!item || !item.action) return;
+  if (!guardFullMode()) return;
+
+  const isTask = item.action === 'task-disable';
+  const enabling = isTask && !item.enabled;
+
+  let title;
+  let body;
+  if (isTask) {
+    title = enabling ? `Enable "${item.name}"?` : `Disable "${item.name}"?`;
+    body = enabling
+      ? 'The task runs at logon again. Nothing else about it changes.'
+      : 'The task stays on this PC but stops running at logon. This same button turns it back on.';
+  } else if (item.action === 'service-manual') {
+    title = `Stop "${item.name}" starting with Windows?`;
+    body =
+      'The service is set to start only when something asks for it, instead of at every boot. It is not ' +
+      'removed, and it can still run. Its settings are saved to the Quarantine tab first, so the change ' +
+      'can be undone from there.';
+  } else {
+    title = `Remove "${item.name}" from startup?`;
+    body =
+      'This entry stops running when Windows starts. The program itself is not touched or uninstalled. ' +
+      'The startup settings are saved to the Quarantine tab first, so you can put this back.';
+  }
+
+  const ok = await confirmDialog({ title, body, confirmLabel: isTask ? (enabling ? 'Enable' : 'Disable') : 'Do it' });
+  if (!ok) return;
+
+  const res = await window.api.startupAction({
+    action: item.action,
+    item,
+    enable: enabling
+  });
+
+  if (!res || res.success !== true) {
+    toast(`Nothing changed: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
+    return;
+  }
+
+  toast(
+    isTask
+      ? `"${item.name}" is now ${enabling ? 'enabled' : 'disabled'}.`
+      : `"${item.name}" no longer starts with Windows. You can put it back from the Quarantine tab.`,
+    'success',
+    6000
+  );
+
+  // The change is ours, so the result is not in doubt - but a startup list is
+  // cheap to re-read and this keeps the row's state honest rather than guessed.
+  await loadAuditData(true);
 }
 
 function renderRedundancyGroups(redundancy) {

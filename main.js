@@ -154,10 +154,19 @@ const bootstrapped = app.whenReady().then(async () => {
   // elevation behaviour must not be settable against a shipped build.
   const autoElevateDisabled = testHatchesAllowed && process.env.VANISH_DISABLE_AUTO_ELEVATE === '1';
   if (!autoElevateDisabled && !isFullMode() && store.readSettings().startupMode === 'full') {
+    // Operator, 2026-08-07: "it takes about 5 seconds to restart the app after
+    // closing, with no information in between." The wait is real - Windows has
+    // to show consent and a second Electron process has to boot - and cannot be
+    // engineered away. The silence can: this path used to create no window at
+    // all, so the only feedback between double-click and the elevated window
+    // was an empty desktop. A person who sees nothing happen assumes nothing
+    // happened, and clicks again.
+    showElevationSplash();
     const relaunch = await attemptElevatedRelaunch('startup-auto');
     if (relaunch.success) {
-      // D-09: the elevated instance replaces this one. No window was ever
-      // created here, so there is nothing to tear down.
+      // D-09: the elevated instance replaces this one. The splash stays up
+      // until this process exits, so the desktop is never blank while the
+      // elevated instance boots.
       app.quit();
       return;
     }
@@ -165,6 +174,7 @@ const bootstrapped = app.whenReady().then(async () => {
     // never exit or crash on a declined elevation. Fall through exactly as an
     // unelevated launch always has; the FLOW-01 offer below still gives the
     // operator a second, visible way to retry rather than a silent failure.
+    closeElevationSplash();
   }
 
   elevationOfferPending = !isFullMode();
@@ -552,6 +562,43 @@ ipcMain.handle('get-tier', async () => ({
 // elevation setting. Never throws; always resolves to {success, declined?,
 // alreadyElevated?, error?} so both callers can apply Rule 3 (never crash or
 // exit on a declined elevation) without duplicating the relaunch plumbing.
+// A small window that exists only to say "Windows is about to ask you
+// something, and the wait after that is normal". Deliberately independent of
+// the main window: the automatic-elevation path runs before any main window
+// exists, and the manual path is about to destroy the one that does.
+let splashWindow = null;
+
+function showElevationSplash() {
+  if (headlessHarness || splashWindow) return;
+  try {
+    splashWindow = new BrowserWindow({
+      width: 460,
+      height: 168,
+      frame: false,
+      resizable: false,
+      movable: true,
+      minimizable: false,
+      maximizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: false,
+      backgroundColor: '#0b0f19',
+      title: 'Vanish',
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    splashWindow.on('closed', () => { splashWindow = null; });
+    splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+  } catch {
+    // Feedback failing must never block the elevation it describes.
+    splashWindow = null;
+  }
+}
+
+function closeElevationSplash() {
+  if (!splashWindow) return;
+  try { splashWindow.destroy(); } catch { /* already gone */ }
+  splashWindow = null;
+}
+
 async function attemptElevatedRelaunch(trigger) {
   if (isFullMode()) return { success: true, alreadyElevated: true };
 
@@ -603,6 +650,10 @@ ipcMain.handle('relaunch-elevated', async () => {
   const res = await attemptElevatedRelaunch('user-click');
   if (res.success && !res.alreadyElevated) {
     // D-09: the elevated instance replaces this one - never run two writers.
+    // The splash outlives the main window on purpose: without it the app
+    // disappears off the desktop for several seconds while the elevated
+    // instance starts, which reads as a crash rather than a restart.
+    showElevationSplash();
     setTimeout(() => app.quit(), 400);
   }
   return res;
@@ -828,6 +879,77 @@ ipcMain.handle('find-broken-entries', async () => {
     return await runPowerShell('find-broken-entries');
   } catch (error) {
     return { success: false, error: error.message, findings: [] };
+  }
+});
+
+// 7oo.11: acting on a startup item. Every path here that changes something
+// persistent exports its restore manifest to the vault FIRST and only writes if
+// that export succeeded (INV-1). A task is the exception and says so: disabling
+// one destroys nothing, and the same button turns it back on.
+fullModeOnly('startup-action', async (event, params) => {
+  const item = (params && params.item) || {};
+  const action = (params && params.action) || item.action;
+
+  try {
+    if (action === 'task-disable') {
+      const enable = params.enable === true;
+      const res = await runPowerShell('startup-task-enabled', {
+        taskName: item.taskName,
+        taskPath: item.taskPath,
+        enable
+      });
+      store.appendOplog({
+        action: 'startup-task',
+        tier: currentTier,
+        items: { task: item.managePath },
+        outcome: res && res.success ? 'success' : 'error',
+        meta: { enable, error: res && res.error }
+      });
+      return res;
+    }
+
+    if (action !== 'registry-remove' && action !== 'service-manual') {
+      return { success: false, error: `Vanish has no action called "${action}" for a startup item.` };
+    }
+
+    if (!item.registryPath) {
+      return { success: false, error: 'That entry does not say which registry key backs it, so it cannot be saved before changing.' };
+    }
+
+    // mode manifest-only: export the key as the restore manifest and LEAVE it
+    // in place. Both writes below edit a value inside a key that must survive -
+    // deleting the Run key itself would take every other program's startup
+    // entry with it, and deleting a service key would unregister the service.
+    const quarantined = await vault.quarantine(
+      { files: [], registry: [{ path: item.registryPath, mode: 'manifest-only' }] },
+      {
+        sourceApp: action === 'service-manual' ? 'Startup services' : 'Startup entries',
+        origin: `startup/${action}`
+      }
+    );
+
+    if (!quarantined.success || quarantined.quarantinedCount === 0) {
+      return {
+        success: false,
+        error: quarantined.error || 'Could not write the restore file, so nothing was changed.'
+      };
+    }
+
+    const res = action === 'service-manual'
+      ? await runPowerShell('startup-service-manual', { serviceName: item.serviceName })
+      : await runPowerShell('startup-remove-registry', { keyPath: item.keyPath, valueName: item.valueName });
+
+    store.appendOplog({
+      action: action === 'service-manual' ? 'startup-service-manual' : 'startup-registry-remove',
+      tier: currentTier,
+      items: { entry: item.name, target: item.managePath },
+      outcome: res && res.success ? 'success' : 'error',
+      meta: { entryId: quarantined.entryId, error: res && res.error }
+    });
+
+    return { ...res, entryId: quarantined.entryId };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 });
 

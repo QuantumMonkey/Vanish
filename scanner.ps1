@@ -1017,6 +1017,8 @@ function Get-SystemDiagnostics {
 
     # --- GPU ---
     #
+    $gpuList = @()
+    #
     # PERFORMANCE: Win32_VideoController is the slowest class touched here by a
     # wide margin - instantiating it makes Windows enumerate and wake display
     # adapters, which on a laptop with switchable graphics can stall for
@@ -1035,12 +1037,18 @@ function Get-SystemDiagnostics {
             $desc = (Get-ItemProperty -Path "$videoKey\$sub" -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc
             if ($desc -and $desc -notmatch 'Basic Display|Basic Render') { $adapters += [string]$desc }
         }
-        if ($adapters.Count -gt 0) { $gpuName = ($adapters | Select-Object -Unique) -join ' + ' }
+        $gpuList = @($adapters | Select-Object -Unique)
+        if ($gpuList.Count -gt 0) { $gpuName = $gpuList -join ' + ' }
     } catch {}
     if (-not $gpuName) {
         try {
-            $gpu = Get-CimInstance -Query "SELECT Name FROM Win32_VideoController" -ErrorAction Stop | Select-Object -First 1
-            $gpuName = if ($gpu) { $gpu.Name } else { $null }
+            # Every adapter here too. Taking -First 1 was the original defect and
+            # the fallback kept it.
+            $gpuList = @(Get-CimInstance -Query "SELECT Name FROM Win32_VideoController" -ErrorAction Stop |
+                         ForEach-Object { [string]$_.Name } |
+                         Where-Object { $_ -and $_ -notmatch 'Basic Display|Basic Render' } |
+                         Select-Object -Unique)
+            if ($gpuList.Count -gt 0) { $gpuName = $gpuList -join ' + ' }
         } catch {}
     }
 
@@ -1074,6 +1082,11 @@ function Get-SystemDiagnostics {
             pctUsed = if ($ramTotalGB -and $ramFreeGB -and $ramTotalGB -gt 0) { [math]::Round((($ramTotalGB - $ramFreeGB) / $ramTotalGB) * 100, 1) } else { $null }
         }
         gpu          = $gpuName
+        # The joined string kept a second adapter out of sight: the card it
+        # lands in is one nowrap line with an ellipsis, so "AMD + NVIDIA" showed
+        # as "AMD...". The list is what the UI renders; the string stays for
+        # anything that reads a single name.
+        gpus         = @($gpuList)
         manufacturer = $manufacturer
         model        = $model
         disks        = $disks
@@ -1144,6 +1157,13 @@ function Get-StartupItems {
                             sourceDetail = $hive.Hive
                             enabled     = $true
                             managePath  = "$($hive.Path)\$($_.Name)"
+                            # 7oo.11: the key and the value name, kept apart, so
+                            # the action can quarantine the key and delete only
+                            # the one value. registryPath is in reg.exe form
+                            # because that is what the vault's exporter takes.
+                            keyPath      = $hive.Path
+                            valueName    = $_.Name
+                            registryPath = ($hive.Path -replace '^HKLM:\\', 'HKLM\' -replace '^HKCU:\\', 'HKCU\')
                         })
                     }
                 }
@@ -1171,6 +1191,8 @@ function Get-StartupItems {
                 sourceDetail = $task.TaskPath
                 enabled      = ($task.State -eq 'Ready' -or $task.State -eq 'Running')
                 managePath   = "$($task.TaskPath)$($task.TaskName)"
+                taskName     = [string]$task.TaskName
+                taskPath     = [string]$task.TaskPath
             })
         }
     } catch {}
@@ -1194,32 +1216,59 @@ function Get-StartupItems {
                 sourceDetail = "StartMode=Auto | State=$($svc.State)"
                 enabled      = ($svc.State -eq 'Running')
                 managePath   = [string]$svc.Name
+                serviceName  = [string]$svc.Name
+                registryPath = "HKLM\SYSTEM\CurrentControlSet\Services\$($svc.Name)"
             })
         }
     } catch {}
 
-    # 7oo.4 / Rule 24. This surface is DETECTION ONLY, and saying so is part of
-    # the contract: the operator's report was "startup items being shown as
-    # orphaned are not addressable, no suggestions". A finding with no action
-    # and no explanation teaches the user the app is decorative, which is worse
-    # than not showing it. Each item now carries the concrete place its own kind
-    # of entry is managed, so "informational" comes with somewhere to go.
+    # 7oo.11. This surface used to be DETECTION ONLY: it named the orphan, named
+    # the tool that manages it, and left. The operator's verdict on that was
+    # "this item is broken but i cant do anything to it" - which is the right
+    # verdict. Each item now carries the one action Vanish can actually perform
+    # on its kind of entry, and every one of those actions is reversible:
+    #
+    #   Registry Run value -> the key is exported to the vault as a .reg restore
+    #                         manifest, then the single value is deleted.
+    #   Auto-start service -> the service key is exported the same way, then the
+    #                         start type is set to Manual. Nothing is deleted;
+    #                         the service can still be started on demand.
+    #   Scheduled task     -> disabled in place, and re-enabled by the same
+    #                         control. Nothing is exported because nothing is
+    #                         destroyed.
+    #
+    # The manual route stays in the text: an action button is an offer, not a
+    # replacement for knowing where the thing lives.
     foreach ($item in $items) {
-        $suggestion = switch ($item.source) {
+        $action = $null
+        $actionLabel = $null
+        $suggestion = ""
+
+        switch ($item.source) {
             'Registry' {
-                "Managed in the registry Run key. Uninstalling the owning application is the clean fix; " +
-                "otherwise remove the value at $($item.managePath)."
+                $action = 'registry-remove'
+                $actionLabel = 'Remove from startup'
+                $suggestion = "Lives in the registry Run key. Removing it here saves the key to quarantine first, " +
+                              "so you can put it back. Uninstalling the owning program is the tidier fix if it is still installed."
             }
             'TaskScheduler' {
-                "Managed in Task Scheduler. Open taskschd.msc and disable or delete the task at $($item.managePath)."
+                $action = 'task-disable'
+                $actionLabel = if ($item.enabled) { 'Disable task' } else { 'Enable task' }
+                $suggestion = "A scheduled task. Disabling stops it running at logon and can be undone from this same row, " +
+                              "or in Task Scheduler (taskschd.msc) at $($item.managePath)."
             }
             'Service' {
-                "Managed as a Windows service. Open services.msc and set '$($item.name)' to Manual or Disabled, " +
-                "or run: sc.exe config $($item.managePath) start= demand"
+                $action = 'service-manual'
+                $actionLabel = 'Set to start manually'
+                $suggestion = "A service set to start with Windows. Vanish can set it to start only when something asks for it; " +
+                              "the service itself is left in place. Also changeable in services.msc."
             }
-            default { "" }
+            default { }
         }
-        $item | Add-Member -NotePropertyName suggestion -NotePropertyValue $suggestion -Force
+
+        $item | Add-Member -NotePropertyName suggestion  -NotePropertyValue $suggestion  -Force
+        $item | Add-Member -NotePropertyName action      -NotePropertyValue $action      -Force
+        $item | Add-Member -NotePropertyName actionLabel -NotePropertyValue $actionLabel -Force
     }
 
     # @() around the pipeline is load-bearing, not style. Where-Object returns a
@@ -1231,14 +1280,134 @@ function Get-StartupItems {
         items          = $items
         total          = @($items).Count
         orphans        = @($items | Where-Object { $_.exeExists -eq $false }).Count
-        # The renderer states this verbatim rather than implying capability the
-        # engine does not have.
-        detectionOnly  = $true
-        detectionNote  = 'Vanish reports startup items; it does not change them yet. Each row says where its kind of entry is managed.'
+        detectionOnly  = $false
+        detectionNote  = 'Every change here is reversible: registry entries and services are saved to quarantine before they are touched, and a disabled task is re-enabled from the same button.'
     }
 }
 
 # 8. Software Redundancy Detector (groups installed apps by category keyword clusters)
+# --- 7oo.11: acting on a startup item ------------------------------------
+#
+# Three deliberately narrow verbs, not one general-purpose one. Each validates
+# its own target against a shape that only its own surface produces, so none of
+# them is a generic "delete any registry value" or "reconfigure any service"
+# primitive reachable over IPC. The vault export that makes each reversible is
+# performed by the caller BEFORE these run (FLOW-02); these do the write only.
+
+function Remove-StartupRegistryValue {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required. Vanish is running in Audit Mode (read-only)." }
+    }
+
+    $keyPath   = [string]$p.keyPath
+    $valueName = [string]$p.valueName
+
+    if ([string]::IsNullOrWhiteSpace($valueName)) {
+        return @{ success = $false; error = "Which startup entry? No value name was given." }
+    }
+
+    # Only the five Run/RunOnce keys this surface reads are writable from here.
+    # Any other path - including a Run key under a different hive - is refused
+    # rather than trusted because it arrived over IPC looking plausible.
+    $allowed = @(
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
+        'HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce',
+        'HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce'
+    )
+    $match = $allowed | Where-Object { $_ -eq $keyPath }
+    if (-not $match) {
+        return @{ success = $false; error = "Rejected: '$keyPath' is not one of the Windows startup keys Vanish manages." }
+    }
+
+    try {
+        $props = Get-ItemProperty -LiteralPath $keyPath -ErrorAction Stop
+        if (-not ($props.PSObject.Properties.Name -contains $valueName)) {
+            return @{ success = $false; error = "That startup entry is no longer in the registry." }
+        }
+        Remove-ItemProperty -LiteralPath $keyPath -Name $valueName -ErrorAction Stop
+        return @{ success = $true; keyPath = $keyPath; valueName = $valueName }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message }
+    }
+}
+
+function Set-StartupServiceManual {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required. Vanish is running in Audit Mode (read-only)." }
+    }
+
+    $name = [string]$p.serviceName
+    if ($name -notmatch '^[A-Za-z0-9_\.\- ]{1,256}$') {
+        return @{ success = $false; error = "Rejected: that is not a valid service name." }
+    }
+
+    try {
+        $svc = Get-CimInstance -ClassName Win32_Service -Filter "Name='$($name -replace "'","''")'" -ErrorAction Stop
+        if (-not $svc) { return @{ success = $false; error = "No service called '$name' is installed." } }
+
+        # A boot or system-start service is kernel-adjacent and is not something
+        # this surface offers to reconfigure. Get-StartupItems only lists Auto
+        # services, so reaching this means the request did not come from the
+        # list the user was looking at.
+        $startKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$name"
+        $start = (Get-ItemProperty -LiteralPath $startKey -Name Start -ErrorAction SilentlyContinue).Start
+        if ($null -ne $start -and [int]$start -le 1) {
+            return @{ success = $false; error = "'$name' is a boot-start driver. Vanish will not change how Windows loads it." }
+        }
+
+        Set-Service -Name $name -StartupType Manual -ErrorAction Stop
+        return @{ success = $true; serviceName = $name; startupType = 'Manual'; previousStart = $start }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message }
+    }
+}
+
+function Set-StartupTaskEnabled {
+    param([object]$p)
+
+    if (-not (Test-IsElevated)) {
+        return @{ success = $false; error = "Full Mode required. Vanish is running in Audit Mode (read-only)." }
+    }
+
+    $taskName = [string]$p.taskName
+    $taskPath = [string]$p.taskPath
+    $enable   = [bool]$p.enable
+
+    if ([string]::IsNullOrWhiteSpace($taskName) -or [string]::IsNullOrWhiteSpace($taskPath)) {
+        return @{ success = $false; error = "Which task? A task name and folder are both required." }
+    }
+    # Windows' own tasks are not listed by Get-StartupItems and are not
+    # reconfigured from here, whatever arrives over IPC.
+    if ($taskPath -like '\Microsoft\*') {
+        return @{ success = $false; error = "Rejected: '$taskPath' is one of Windows' own scheduled tasks." }
+    }
+
+    try {
+        $task = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction Stop
+        if (-not $task) { return @{ success = $false; error = "That scheduled task no longer exists." } }
+
+        if ($enable) { $null = Enable-ScheduledTask  -TaskName $taskName -TaskPath $taskPath -ErrorAction Stop }
+        else         { $null = Disable-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction Stop }
+
+        $after = Get-ScheduledTask -TaskName $taskName -TaskPath $taskPath -ErrorAction SilentlyContinue
+        return @{
+            success = $true
+            taskName = $taskName
+            taskPath = $taskPath
+            state    = if ($after) { [string]$after.State } else { $null }
+            enabled  = $enable
+        }
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message }
+    }
+}
+
 function Get-SoftwareRedundancy {
     $installedApps = Get-InstalledApps
 
@@ -4266,6 +4435,15 @@ if ($Action) {
         }
         "get-startup-items" {
             Get-StartupItems | ConvertTo-Json -Depth 5
+        }
+        "startup-remove-registry" {
+            Remove-StartupRegistryValue -p $Params | ConvertTo-Json -Depth 4 -Compress
+        }
+        "startup-service-manual" {
+            Set-StartupServiceManual -p $Params | ConvertTo-Json -Depth 4 -Compress
+        }
+        "startup-task-enabled" {
+            Set-StartupTaskEnabled -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         "get-software-redundancy" {
             Get-SoftwareRedundancy | ConvertTo-Json -Depth 5

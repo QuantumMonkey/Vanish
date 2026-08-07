@@ -44,6 +44,7 @@
       "renderer.js",
       "index.html",
       "index.css",
+      "splash.html",
       "scanner.ps1",
       "corrections.json",
       "assets/**/*",

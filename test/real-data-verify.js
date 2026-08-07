@@ -1132,7 +1132,7 @@ async function sectionSystemClean() {
 }
 
 // --- startup items (7oo.4) -------------------------------------------------
-async function sectionStartupItems() {
+async function sectionStartupItems(truth) {
   heading('Startup items: an orphan the app shows is an orphan the app can act on');
 
   const startup = await js(`window.api.getStartupItems()`);
@@ -1190,17 +1190,77 @@ async function sectionStartupItems() {
     `${rendered.orphanRows} marked vs ${orphans.length} found`
   );
 
-  // The contract (7oo.4): a finding is EITHER actionable - a button that really
-  // resolves it - OR informational, saying so and naming a concrete next step.
-  // What is forbidden is the middle: a control that renders and does nothing.
-  if (rendered.actionable > 0) {
-    skip('startup findings are informational', `${rendered.actionable} rows carry controls - they must be verified to work`);
-  } else {
-    assert(
-      rendered.noteText.length > 0,
-      'the panel states plainly that it reports startup items rather than changing them',
-      `note is empty`
-    );
+  // The contract (7oo.4, now satisfied the other way by 7oo.11): a finding is
+  // EITHER actionable - a control that really resolves it - OR informational,
+  // saying so and naming a concrete next step. What is forbidden is the middle:
+  // a control that renders and does nothing. These rows now carry controls, so
+  // the controls are what get verified.
+  const withAction = items.filter((i) => i.action);
+  assert(
+    rendered.actionable === withAction.length,
+    'every startup item the engine says it can act on has a control on its row',
+    `${rendered.actionable} controls for ${withAction.length} actionable items`
+  );
+  assert(
+    rendered.noteText.length > 0,
+    'the panel says what happens to what it changes',
+    'note is empty'
+  );
+
+  if (withAction.length > 0) {
+    // Hit-tested, not merely present: a button under another element is the
+    // defect this harness exists for (7oo.1). The list is longer than the
+    // window on any real machine, so scroll the row into view first - a control
+    // below the fold is a scroll away, not a defect, and conflating the two
+    // would make this assertion depend on how many programs are installed.
+    await js(`(() => {
+      const btn = document.querySelector('#audit-startup-tbody tr.app-row button.startup-action-btn');
+      if (btn) btn.scrollIntoView({ block: 'center' });
+      return true;
+    })()`);
+    await sleep(400);
+    await assertClickable('#audit-startup-tbody tr.app-row button.startup-action-btn', 'the first startup action button is reachable');
+
+    const locks = await js(`(() => {
+      const btns = Array.from(document.querySelectorAll('#audit-startup-tbody button.startup-action-btn'));
+      return {
+        total: btns.length,
+        locked: btns.filter((b) => b.classList.contains('tier-locked')).length,
+        labelled: btns.filter((b) => (b.textContent || '').trim().length > 0).length,
+        titled: btns.filter((b) => (b.getAttribute('title') || '').trim().length > 0).length
+      };
+    })()`);
+
+    assert(locks.labelled === locks.total, 'every action button says what it does', `${locks.labelled}/${locks.total} labelled`);
+    assert(locks.titled === locks.total, 'every action button explains itself on hover', `${locks.titled}/${locks.total} carry a title`);
+
+    if (truth.isAdmin) {
+      assert(locks.locked === 0, 'in Full Mode the actions are live', `${locks.locked} still locked`);
+    } else {
+      assert(
+        locks.locked === locks.total,
+        'in Audit Mode every action is visibly inert rather than a button that fails when pressed',
+        `${locks.locked}/${locks.total} locked`
+      );
+
+      // And the refusal is real on the backend, not just a CSS class: ask the
+      // IPC directly. Read-only - a rejected call changes nothing.
+      const refused = await js(`window.api.startupAction({
+        action: 'registry-remove',
+        item: ${JSON.stringify({
+          name: 'harness probe',
+          keyPath: 'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+          valueName: 'VanishNoSuchStartupEntry',
+          registryPath: 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run',
+          managePath: 'probe'
+        })}
+      })`);
+      assert(
+        refused && refused.success === false && /audit mode|full mode|administrator/i.test(String(refused.error)),
+        'the engine refuses a startup change in Audit Mode, and says why',
+        JSON.stringify(refused)
+      );
+    }
   }
 
   if (orphans.length === 0) {
@@ -1732,7 +1792,7 @@ app.whenReady().then(async () => {
     for (const name of names) {
       try {
         if (name === 'applist') await SECTIONS[name](listState);
-        else if (name === 'inventory' || name === 'storage' || name === 'force') await SECTIONS[name](truth);
+        else if (name === 'inventory' || name === 'storage' || name === 'force' || name === 'startup') await SECTIONS[name](truth);
         else await SECTIONS[name]();
       } catch (err) {
         section = name;

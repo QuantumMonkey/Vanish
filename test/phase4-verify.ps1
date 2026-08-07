@@ -270,6 +270,60 @@ try {
     }
 
     # ==================================================================
+    # 7oo.11: startup actions refuse anything outside their own surface
+    # ==================================================================
+    # These three verbs write to the registry, the service database and the
+    # task scheduler. Each one must be usable ONLY for the entries the startup
+    # list actually shows - not as a general-purpose primitive that happens to
+    # be reachable over IPC.
+    Write-Host ""
+    Write-Host "7oo.11 startup actions: scope of each verb" -ForegroundColor Cyan
+
+    $wrongKey = Invoke-Engine "startup-remove-registry" @{
+        keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer"; valueName = "Something"
+    }
+    Assert-True ($wrongKey.success -eq $false) "removing a value outside the Run keys is refused"
+    if ($isAdmin) {
+        Assert-True ($wrongKey.error -match "not one of the Windows startup keys") "and the refusal names the reason"
+    }
+
+    $noValue = Invoke-Engine "startup-remove-registry" @{
+        keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"; valueName = ""
+    }
+    Assert-True ($noValue.success -eq $false) "removing an unnamed startup value is refused"
+
+    $badSvc = Invoke-Engine "startup-service-manual" @{ serviceName = 'evil & name; rm' }
+    Assert-True ($badSvc.success -eq $false) "a service name that is not a service name is refused"
+
+    $msTask = Invoke-Engine "startup-task-enabled" @{
+        taskName = "SomeTask"; taskPath = "\Microsoft\Windows\Defrag\"; enable = $false
+    }
+    Assert-True ($msTask.success -eq $false) "disabling one of Windows' own scheduled tasks is refused"
+
+    if (-not $isAdmin) {
+        # In Audit Mode all three must refuse BEFORE looking at the target at
+        # all - the tier check is the first thing each of them does.
+        $auditReg  = Invoke-Engine "startup-remove-registry" @{ keyPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run"; valueName = "VanishNoSuchEntry" }
+        $auditSvc  = Invoke-Engine "startup-service-manual"  @{ serviceName = "Spooler" }
+        $auditTask = Invoke-Engine "startup-task-enabled"    @{ taskName = "X"; taskPath = "\"; enable = $false }
+        Assert-True ($auditReg.error  -match "Full Mode") "Audit Mode refuses the registry action by tier"
+        Assert-True ($auditSvc.error  -match "Full Mode") "Audit Mode refuses the service action by tier"
+        Assert-True ($auditTask.error -match "Full Mode") "Audit Mode refuses the task action by tier"
+    }
+
+    # The list itself must hand out an action for every row, or the UI is back
+    # to showing problems it cannot address.
+    $startup = Invoke-Engine "get-startup-items"
+    Assert-True ($startup.detectionOnly -eq $false) "the startup surface no longer describes itself as detection-only"
+    $noAction = @($startup.items | Where-Object { -not $_.action })
+    Assert-True ($noAction.Count -eq 0) "every startup item carries an action ($($noAction.Count) without one)"
+    $regItems = @($startup.items | Where-Object { $_.source -eq 'Registry' })
+    if ($regItems.Count -gt 0) {
+        Assert-True (@($regItems | Where-Object { $_.keyPath -and $_.valueName -and $_.registryPath }).Count -eq $regItems.Count) `
+            "each registry entry carries the key, the value name and the reg.exe path the vault needs"
+    }
+
+    # ==================================================================
     # udu: left-over Store (UWP/MSIX) app data
     # ==================================================================
     Write-Host ""
