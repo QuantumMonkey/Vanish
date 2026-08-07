@@ -1521,7 +1521,7 @@ async function elevateAndRetry(index) {
     }
   } else {
     toast(
-      `Still could not move it: ${(row && row.error) || (res && res.error) || 'unknown error'}`,
+      `Still could not move it: ${(row && row.error) || (res && res.error) || 'no reason given'}`,
       'error',
       8000
     );
@@ -2168,7 +2168,7 @@ async function restoreVaultEntry(entryId) {
 
   const res = await window.api.vaultRestore({ entryId, onConflict: 'skip' });
   if (!res || res.success !== true) {
-    toast(`Could not restore it: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not restore it: ${(res && res.error) || 'no reason given'}`, 'error', 7000);
     return;
   }
 
@@ -2195,7 +2195,7 @@ async function restoreVaultEntry(entryId) {
 
 function reportRestore(res) {
   if (!res || res.success !== true) {
-    toast(`Could not restore it: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not restore it: ${(res && res.error) || 'no reason given'}`, 'error', 7000);
     return;
   }
   if (res.failed > 0) {
@@ -2239,7 +2239,7 @@ async function deleteVaultEntry(entryId) {
   if (res && res.success) {
     toast('That quarantine entry was permanently deleted.', 'success');
   } else {
-    toast(`Could not delete it: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not delete it: ${(res && res.error) || 'no reason given'}`, 'error', 7000);
   }
   await loadVaultEntries();
 }
@@ -3160,7 +3160,7 @@ async function purgeCleaner(cleanerId) {
   const res = await window.api.cleanerPurge({ cleaner: cleanerId, items: selected });
 
   if (!res || res.success !== true) {
-    toast(`Nothing was removed: ${(res && res.error) || 'unknown error'}`, 'error', 8000);
+    toast(`Nothing was removed: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
     return;
   }
 
@@ -3470,7 +3470,7 @@ async function forcePurge() {
   });
 
   if (!res || res.success !== true) {
-    toast(`Nothing was removed: ${(res && res.error) || 'unknown error'}`, 'error', 8000);
+    toast(`Nothing was removed: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
     return;
   }
 

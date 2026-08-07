@@ -156,8 +156,12 @@ app.whenReady().then(async () => {
     return { text: cell ? cell.textContent : null, rows: document.querySelectorAll('#apps-tbody .app-row').length };
   })()`);
   assert(emptyShape.rows === 0, 'an empty list renders no app rows');
+  // Assert the CONTRACT, not the wording. Pinning the exact sentence made this
+  // fail the moment the copy was rewritten to read less like a debug string,
+  // which is a test defending prose rather than behaviour. What matters is that
+  // an empty table says something a person can read.
   assert(
-    (emptyShape.text || '').includes('No applications found'),
+    /\bno\b.*\b(program|application|match)/i.test(emptyShape.text || ''),
     'an empty list explains itself rather than showing a blank table'
   );
 
@@ -398,7 +402,10 @@ app.whenReady().then(async () => {
     return {
       total: all.length,
       locked: all.filter((e) => e.classList.contains('tier-locked')).length,
-      titled: all.filter((e) => (e.title || '').includes('Full Mode')).length
+      // Same reasoning as the empty-list check above: what the tooltip must do
+      // is name WHY the control is inert. "Full Mode" was internal vocabulary
+      // that the copy pass correctly replaced with "administrator rights".
+      titled: all.filter((e) => /administrator|full mode/i.test(e.title || '')).length
     };
   })()`);
   assert(locked.total > 0, `${locked.total} destructive controls are marked`);

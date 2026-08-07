@@ -45,6 +45,7 @@
       "index.html",
       "index.css",
       "scanner.ps1",
+      "corrections.json",
       "assets/**/*",
       "lib/**/*",
       "LICENSE",
@@ -56,6 +57,10 @@
       {
         "from": "scanner.ps1",
         "to": "scanner.ps1"
+      },
+      {
+        "from": "corrections.json",
+        "to": "corrections.json"
       }
     ],
     "win": {
