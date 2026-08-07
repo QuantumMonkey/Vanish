@@ -66,6 +66,10 @@ contextBridge.exposeInMainWorld('api', {
   // Stage 6 - Forced uninstall for broken entries (REQ-20)
   findBrokenEntries: () => ipcRenderer.invoke('find-broken-entries'),
 
+  // bfh.1 - network attribution: what is using the connection, and whether
+  // anything on this machine is at all. Read-only, no network I/O.
+  getNetworkActivity: (params) => ipcRenderer.invoke('get-network-activity', params),
+
   // 7oo.11 - acting on a startup item (remove Run value / service to manual /
   // disable or enable a scheduled task)
   startupAction: (params) => ipcRenderer.invoke('startup-action', params),

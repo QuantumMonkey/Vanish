@@ -25,6 +25,8 @@ $suites = @(
     @{ Name = "Store migration (SEC-3)";       Kind = "node";     Path = "test/store-migration-verify.js" },
     @{ Name = "System Clean scans (4)";        Kind = "ps";       Path = "test\phase4-verify.ps1" },
     @{ Name = "System Clean purges (4)";       Kind = "electron"; Path = "test/phase4-ipc-verify.js" },
+    @{ Name = "Icon set";                      Kind = "node";     Path = "test/icon-verify.js" },
+    @{ Name = "Network attribution (bfh.1)";   Kind = "ps";       Path = "test\network-verify.ps1" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },
     @{ Name = "Security regressions";          Kind = "ps";       Path = "test\security-verify.ps1" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },

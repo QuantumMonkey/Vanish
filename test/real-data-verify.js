@@ -1284,6 +1284,106 @@ async function sectionStartupItems(truth) {
   }
 }
 
+// --- network attribution (bfh.1) -------------------------------------------
+// The panel's job is to reach a verdict, and the verdict that matters most is
+// the negative one. What it must never do is invent a per-program byte rate,
+// because that number would be unfalsifiable to the person reading it.
+async function sectionNetwork() {
+  heading('Network activity: a verdict, and no invented per-app numbers');
+
+  await goToTab('audit');
+  const auditMs = await waitForAuditContent();
+  assert(auditMs !== -1, 'the Health Advisor finished loading', 'audit content never became visible');
+  if (auditMs === -1) return;
+
+  const engine = await js(`window.api.getNetworkActivity({ sampleMs: 400 })`);
+  assert(engine && engine.success === true, 'the engine answers a network read', JSON.stringify(engine && engine.error));
+
+  const view = await js(`(() => {
+    const section = document.getElementById('audit-network-section');
+    if (!section) return { missing: true };
+    const verdict = section.querySelector('.net-verdict-title');
+    const detail = section.querySelector('.net-verdict-detail');
+    const rows = Array.from(section.querySelectorAll('tbody tr'));
+    return {
+      missing: false,
+      verdict: verdict ? verdict.textContent.trim() : '',
+      detail: detail ? detail.textContent.trim() : '',
+      rowCount: rows.length,
+      rowText: rows.map((r) => r.textContent.replace(/\\s+/g, ' ').trim()),
+      sectionText: section.textContent.replace(/\\s+/g, ' ').trim(),
+      hasRefresh: Boolean(section.querySelector('#btn-network-refresh'))
+    };
+  })()`);
+
+  if (view.missing) {
+    assert(false, 'the Health Advisor has a network activity section', 'no #audit-network-section');
+    return;
+  }
+
+  console.log(`  (verdict on screen: "${view.verdict}")`);
+
+  assert(view.verdict.length > 0, 'the section leads with a verdict, not a table');
+  assert(view.detail.length > 0, 'and says what that verdict is based on');
+  assert(view.hasRefresh, 'the reading can be taken again without reloading the whole page');
+
+  // The fourth outcome has to send the reader somewhere useful, or it is just
+  // a shrug with better grammar.
+  if (/nothing on this pc/i.test(view.verdict)) {
+    assert(
+      /router|beyond/i.test(view.detail),
+      'a quiet verdict names where the cause is instead, rather than stopping at "not here"',
+      view.detail
+    );
+  } else {
+    skip('the quiet verdict points elsewhere', `this machine reported "${view.verdict}"`);
+  }
+
+  // THE rule: no per-program rate. The adapter total is a measurement and may
+  // appear in the headline; a rate inside a program row would be fiction.
+  const ratePattern = /\d+(\.\d+)?\s*(B|KB|MB|GB)\s*\/\s*s|\bmbps\b|\bkbps\b/i;
+  const rowsClaimingRates = view.rowText.filter((t) => ratePattern.test(t));
+  assert(
+    rowsClaimingRates.length === 0,
+    'no program row claims a share of the bandwidth - Windows cannot attribute bytes without a kernel trace',
+    rowsClaimingRates.join('\n')
+  );
+
+  assert(
+    /kernel|not a share of the speed/i.test(view.sectionText),
+    'and the panel says why it cannot, rather than leaving the omission unexplained',
+    view.sectionText.slice(0, 200)
+  );
+
+  // The banned-copy list from the design note, enforced rather than remembered.
+  const marketing = [
+    /\bup to \d+%/i,
+    /\b\d+% faster\b/i,
+    /\bboost(ed)?\b/i,
+    /\boptimi[sz]ed for\b/i,
+    /\bconnection grade\b/i,
+    /\bimproved by\b/i
+  ].filter((re) => re.test(view.sectionText));
+  assert(marketing.length === 0, 'the section promises no improvement it cannot measure', marketing.join(', '));
+
+  assert(
+    view.rowCount <= (engine.processes || []).length,
+    'no program appears on screen that the engine did not report',
+    `${view.rowCount} rows vs ${(engine.processes || []).length} reported`
+  );
+
+  // Re-measuring is one engine call, and only for this section.
+  const before = callsTo('get-network-activity');
+  await js(`document.getElementById('btn-network-refresh').click(); true;`);
+  await sleep(4000);
+  const after = callsTo('get-network-activity');
+  assert(
+    after - before === 1,
+    'measuring again costs exactly one engine call',
+    `${after - before} calls`
+  );
+}
+
 // --- windows optional features (7oo.7) -------------------------------------
 async function sectionWindowsFeatures() {
   heading('Windows optional features: listed, counted, and never falsely actionable');
@@ -1674,6 +1774,7 @@ const SECTIONS = {
   force: sectionForceUninstall,
   clean: sectionSystemClean,
   uwp: sectionUwpLeftovers,
+  network: sectionNetwork,
   startup: sectionStartupItems,
   features: sectionWindowsFeatures,
   quarantine: sectionQuarantine,

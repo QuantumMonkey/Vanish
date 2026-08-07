@@ -864,6 +864,18 @@ ipcMain.handle('get-startup-items', async () => {
   }
 });
 
+// bfh.1: reading who is using the network is read-only and works in Audit Mode.
+// It samples local byte counters twice and asks Windows which process owns each
+// connection - it opens no socket of its own (INV-4).
+ipcMain.handle('get-network-activity', async (event, params) => {
+  try {
+    return await runPowerShell('get-network-activity', params || {});
+  } catch (error) {
+    console.error('Error reading network activity:', error);
+    return { success: false, verdict: 'unreadable', adapters: [], processes: [], error: error.message };
+  }
+});
+
 ipcMain.handle('get-software-redundancy', async () => {
   try {
     return await runPowerShell('get-software-redundancy');

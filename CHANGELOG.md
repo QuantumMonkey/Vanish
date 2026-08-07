@@ -10,6 +10,49 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added — network attribution, and an honest negative answer (`bfh.1`)
+
+* **A Health Advisor section that reaches a verdict about the network**, not a
+  list of sockets. The verdict that matters is the negative one: *nothing on
+  this PC is using the network* — which tells someone to stop looking at their
+  PC and go look at their router. That answer needs no network call to reach,
+  because it is a claim about local state, so `INV-4` (zero runtime network
+  I/O) stands untouched.
+* **It never claims a per-program byte rate.** Windows does not attribute bytes
+  to a process without an ETW kernel trace, so any per-app "12 Mbps" here would
+  be invented. The panel reports connections held and peers connected to, and
+  says on screen why that is the honest limit. Both the engine field names and
+  the rendered rows are asserted against it.
+* Sources were measured before they were chosen: the .NET
+  `NetworkInterface.GetIPStatistics` API (44ms) and `netstat -ano` (40ms) beat
+  `Get-NetAdapter` (2.5s) and `Get-NetTCPConnection` (1.3s), because the engine
+  spawns a fresh `powershell.exe` per action and pays module autoload every
+  time. A Hyper-V switch busy talking to a local VM is excluded from the
+  verdict by requiring a default gateway.
+* Absence is reported as absence, with a reason. Windows 11 gates Wi-Fi signal
+  strength behind the Location privacy setting *and* elevation, so on a healthy
+  machine that read legitimately fails — it is reported as unread with the
+  cause, never as a good signal, and the "weak link" verdict is withheld rather
+  than guessed at.
+* Two bugs found while building it, both of which looked fine on screen:
+  * The peer count read `1` for every program on the machine. The variable
+    holding the address was called `$host`, which is a PowerShell automatic
+    variable: the assignment silently did nothing and every connection used the
+    same object as its hashtable key. A plausible-looking number that was wrong
+    everywhere.
+  * `Get-BitsTransfer -AllUsers` needs elevation, and `netsh wlan` needs
+    Location permission. Both now degrade to "unknown", never to "none".
+
+### Fixed — five icons were rendering as blank squares
+
+The icon set is first-party SVG data URIs used as CSS masks (it replaced the
+FontAwesome CDN for `INV-4`). A class the file does not define is not an error:
+the element renders as a 1em blank square, nothing throws, and nothing logs.
+`fa-lightbulb` was sitting on every orphaned startup row; `fa-clock` and
+`fa-location-dot` elsewhere. All five are drawn now, and `test/icon-verify.js`
+diffs referenced against defined so the next one fails the build instead of
+shipping invisibly.
+
 ### Changed — the operator's second pass over Health Advisor and Settings
 
 * **Startup items can be acted on** (`7oo.11`). The verdict on the old surface

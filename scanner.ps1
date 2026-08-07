@@ -1286,6 +1286,266 @@ function Get-StartupItems {
 }
 
 # 8. Software Redundancy Detector (groups installed apps by category keyword clusters)
+# --- bfh.1: network attribution ------------------------------------------
+#
+# Answers "what is using my network", and - the part that matters - can answer
+# "nothing on this machine is". That negative verdict is a claim about local
+# state, so local evidence settles it and no packet is ever sent: INV-4 stands.
+#
+# What this deliberately does NOT do is per-process bandwidth. Windows does not
+# attribute bytes to a process without an ETW kernel trace (the mechanism Task
+# Manager uses internally). This reports who holds connections and what the
+# adapter as a whole moved, and the UI says exactly that. A made-up per-app
+# number would be the single easiest lie to tell on this screen.
+#
+# Every source here was measured before it was chosen. Get-NetAdapter (2.5s)
+# and Get-NetTCPConnection (1.3s) lost to the .NET API (44ms) and netstat
+# (40ms): the engine spawns a fresh powershell.exe per action, so module
+# autoload is paid on every single call, not once per session.
+
+# Below this, the adapter is doing nothing worth calling activity - roughly
+# 0.8 Mbit/s. Named rather than inlined because it is a judgement, not a fact.
+$script:NetBusyBytesPerSecond = 102400
+# A wireless link this weak is itself the constraint, whatever the processes do.
+$script:NetWeakSignalPercent = 40
+
+function Get-NetAdapterSnapshot {
+    $rows = @{}
+    foreach ($nic in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+        if ($nic.OperationalStatus -ne 'Up') { continue }
+        $type = [string]$nic.NetworkInterfaceType
+        if ($type -eq 'Loopback' -or $type -eq 'Tunnel') { continue }
+
+        $stats = $null
+        try { $stats = $nic.GetIPStatistics() } catch { continue }
+
+        # An adapter with no default gateway carries no internet traffic, so it
+        # must not vote on the verdict - a Hyper-V virtual switch busily talking
+        # to a local VM is not the user's connection being consumed.
+        $hasGateway = $false
+        try {
+            $props = $nic.GetIPProperties()
+            $hasGateway = @($props.GatewayAddresses | Where-Object {
+                $_ -and $_.Address -and $_.Address.ToString() -ne '0.0.0.0' -and $_.Address.ToString() -ne '::'
+            }).Count -gt 0
+        } catch {}
+
+        $rows[$nic.Id] = @{
+            id          = [string]$nic.Id
+            name        = [string]$nic.Name
+            description = [string]$nic.Description
+            type        = $type
+            isWireless  = ($type -eq 'Wireless80211')
+            hasGateway  = $hasGateway
+            speedBps    = [long]$nic.Speed
+            rx          = [long]$stats.BytesReceived
+            tx          = [long]$stats.BytesSent
+        }
+    }
+    return $rows
+}
+
+# Established TCP connections by owning process. netstat is used over
+# Get-NetTCPConnection purely for start-up cost; the PID column is the same
+# data. UDP is skipped: an endpoint being open says nothing about traffic.
+function Get-NetConnectionsByProcess {
+    $byPid = @{}
+    $output = @()
+    try { $output = & netstat.exe -ano 2>$null } catch { return $byPid }
+
+    foreach ($line in $output) {
+        $text = ([string]$line).Trim()
+        if (-not $text.StartsWith('TCP')) { continue }
+        $parts = @($text -split '\s+' | Where-Object { $_ })
+        if ($parts.Count -lt 5) { continue }
+        if ($parts[3] -ne 'ESTABLISHED') { continue }
+
+        $procId = 0
+        if (-not [int]::TryParse($parts[4], [ref]$procId)) { continue }
+        if ($procId -le 0) { continue }
+
+        $remote = [string]$parts[2]
+        # Strip the port: the count of distinct peers is the useful shape, and
+        # a per-port list edges this panel toward the security framing Rule 6
+        # keeps it out of.
+        #
+        # This variable is NOT called $host. It was, and $host is a PowerShell
+        # automatic variable holding the console host object: the assignment
+        # failed silently, every line used the same object as its hashtable key,
+        # and every process on the machine reported exactly one peer. The number
+        # looked plausible, which is what made it worth a comment.
+        $peer = $remote.Substring(0, [Math]::Max($remote.LastIndexOf(':'), 0))
+
+        if (-not $byPid.ContainsKey($procId)) {
+            $byPid[$procId] = @{ connections = 0; peers = @{} }
+        }
+        $byPid[$procId].connections++
+        if ($peer) { $byPid[$procId].peers[$peer] = $true }
+    }
+
+    return $byPid
+}
+
+function Get-NetworkActivity {
+    param([object]$p)
+
+    $sampleMs = 1000
+    if ($p -and $null -ne $p.sampleMs) {
+        $parsed = 0
+        if ([int]::TryParse([string]$p.sampleMs, [ref]$parsed) -and $parsed -ge 200 -and $parsed -le 5000) {
+            $sampleMs = $parsed
+        }
+    }
+
+    $first = Get-NetAdapterSnapshot
+    if ($first.Count -eq 0) {
+        return @{
+            success  = $true
+            verdict  = 'unreadable'
+            adapters = @()
+            processes = @()
+            sampleMs = $sampleMs
+        }
+    }
+
+    # The connection read happens inside the sampling window rather than before
+    # it, so the two describe the same moment.
+    Start-Sleep -Milliseconds ([int]($sampleMs / 2))
+    $byPid = Get-NetConnectionsByProcess
+    Start-Sleep -Milliseconds ([int]($sampleMs / 2))
+    $second = Get-NetAdapterSnapshot
+
+    $seconds = [double]$sampleMs / 1000
+    $adapters = [System.Collections.Generic.List[object]]::new()
+    $gatewayBytesPerSecond = 0.0
+
+    foreach ($key in $second.Keys) {
+        if (-not $first.ContainsKey($key)) { continue }
+        $a = $second[$key]
+        $b = $first[$key]
+
+        # Counters can wrap or reset; a negative delta is not evidence of
+        # anything, so it is reported as zero rather than as a wild number.
+        $rxDelta = [Math]::Max(0, $a.rx - $b.rx)
+        $txDelta = [Math]::Max(0, $a.tx - $b.tx)
+        $bps = ($rxDelta + $txDelta) / $seconds
+
+        if ($a.hasGateway) { $gatewayBytesPerSecond += $bps }
+
+        $adapters.Add(@{
+            name              = $a.name
+            description       = $a.description
+            type              = $a.type
+            isWireless        = $a.isWireless
+            hasGateway        = $a.hasGateway
+            linkSpeedBps      = $a.speedBps
+            receiveBytesPerSecond  = [long][Math]::Round($rxDelta / $seconds)
+            sendBytesPerSecond     = [long][Math]::Round($txDelta / $seconds)
+            totalBytesPerSecond    = [long][Math]::Round($bps)
+        })
+    }
+
+    # Wi-Fi signal, only when a wireless adapter actually carries the gateway.
+    #
+    # Windows 11 gates WlanQueryInterface behind BOTH the Location privacy
+    # setting and elevation, so this legitimately fails on a healthy machine.
+    # An unavailable reading is reported as unavailable WITH its reason - never
+    # as a good signal, and never as a silent blank, because 'link-weak' is a
+    # verdict this panel would otherwise never be able to reach and would never
+    # explain why.
+    $signalPercent = $null
+    $signalNote = $null
+    $wireless = @($adapters | Where-Object { $_.isWireless -and $_.hasGateway })
+    if ($wireless.Count -gt 0) {
+        try {
+            $wlan = @(& netsh.exe wlan show interfaces 2>&1)
+            foreach ($line in $wlan) {
+                if (([string]$line) -match '^\s*Signal\s*:\s*(\d+)%') {
+                    $signalPercent = [int]$Matches[1]
+                    break
+                }
+            }
+            if ($null -eq $signalPercent) {
+                $joined = ($wlan -join ' ')
+                $signalNote = if ($joined -match 'location') {
+                    'needs-location-permission'
+                } elseif ($joined -match 'elevation|administrator') {
+                    'needs-elevation'
+                } else {
+                    'unavailable'
+                }
+            }
+        } catch {
+            $signalNote = 'unavailable'
+        }
+    }
+
+    # Windows Update's own transfers. Only Status=Downloading counts: a machine
+    # holding twelve 'Caching' rows is seeding completed files it already has,
+    # and reporting that as an active download is the false alarm Rule 24 is
+    # about.
+    $updateTransfers = $null
+    try {
+        $updateTransfers = @(Get-DeliveryOptimizationStatus -ErrorAction Stop |
+            Where-Object { [string]$_.Status -eq 'Downloading' }).Count
+    } catch {}
+
+    # BITS needs elevation to see other users' jobs; unelevated it sees this
+    # user's own, which is still worth reporting. A failure means "unknown",
+    # never "none".
+    $bitsJobs = $null
+    try {
+        if (Test-IsElevated) { $bitsJobs = @(Get-BitsTransfer -AllUsers -ErrorAction Stop).Count }
+        else                 { $bitsJobs = @(Get-BitsTransfer -ErrorAction Stop).Count }
+    } catch {}
+
+    # Name the processes holding connections. This is attribution of
+    # CONNECTIONS, not of bytes, and the field names say so.
+    $processes = [System.Collections.Generic.List[object]]::new()
+    if ($byPid.Count -gt 0) {
+        $names = @{}
+        foreach ($proc in (Get-Process -ErrorAction SilentlyContinue)) {
+            $names[$proc.Id] = $proc.ProcessName
+        }
+        foreach ($procId in $byPid.Keys) {
+            $entry = $byPid[$procId]
+            $processes.Add(@{
+                processId       = [int]$procId
+                name            = if ($names.ContainsKey([int]$procId)) { [string]$names[[int]$procId] } else { "PID $procId" }
+                connectionCount = [int]$entry.connections
+                peerCount       = [int]$entry.peers.Count
+            })
+        }
+    }
+    $processes = @($processes | Sort-Object -Property @{ Expression = { $_.connectionCount } } -Descending)
+
+    # The verdict. A weak wireless link outranks everything else: whatever the
+    # processes are doing, the link itself is the constraint and suppressing an
+    # app will not change that.
+    $verdict = if ($null -ne $signalPercent -and $signalPercent -lt $script:NetWeakSignalPercent) {
+        'link-weak'
+    } elseif ($gatewayBytesPerSecond -ge $script:NetBusyBytesPerSecond) {
+        'busy'
+    } else {
+        'quiet'
+    }
+
+    return @{
+        success                = $true
+        verdict                = $verdict
+        sampleMs               = $sampleMs
+        adapters               = @($adapters)
+        processes              = @($processes)
+        totalBytesPerSecond    = [long][Math]::Round($gatewayBytesPerSecond)
+        busyThresholdBytesPerSecond = $script:NetBusyBytesPerSecond
+        signalPercent          = $signalPercent
+        signalNote             = $signalNote
+        updateTransfers        = $updateTransfers
+        bitsJobs               = $bitsJobs
+        elevated               = (Test-IsElevated)
+    }
+}
+
 # --- 7oo.11: acting on a startup item ------------------------------------
 #
 # Three deliberately narrow verbs, not one general-purpose one. Each validates
@@ -4435,6 +4695,9 @@ if ($Action) {
         }
         "get-startup-items" {
             Get-StartupItems | ConvertTo-Json -Depth 5
+        }
+        "get-network-activity" {
+            Get-NetworkActivity -p $Params | ConvertTo-Json -Depth 6 -Compress
         }
         "startup-remove-registry" {
             Remove-StartupRegistryValue -p $Params | ConvertTo-Json -Depth 4 -Compress

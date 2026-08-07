@@ -140,3 +140,19 @@
 .fa-road { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 21.5L8.6 2.5'/%3E%3Cpath d='M18 21.5L15.4 2.5'/%3E%3Cpath d='M12 4.5v3'/%3E%3Cpath d='M12 10.5v3'/%3E%3Cpath d='M12 16.5v3'/%3E%3C/svg%3E"); }
 
 .fa-users { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='9' cy='7.8' r='3.6'/%3E%3Cpath d='M2.6 20.6a6.4 6.4 0 0 1 12.8 0'/%3E%3Cpath d='M16.4 4.8a3.6 3.6 0 0 1 0 6.6'/%3E%3Cpath d='M17.6 14.4a6.4 6.4 0 0 1 3.8 6.2'/%3E%3C/svg%3E"); }
+
+/* An icon this file does not define renders as a blank square - a mask with no
+   image. Nothing failed and nothing logged, which is why fa-lightbulb sat on
+   every orphaned startup row and fa-clock and fa-location-dot sat in the
+   quarantine and force-uninstall panels, all invisible, until an icon audit
+   went looking. test/icon-verify.js now fails the build instead. */
+
+.fa-wifi { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2.6 8.9a14 14 0 0 1 18.8 0'/%3E%3Cpath d='M5.8 12.7a9.4 9.4 0 0 1 12.4 0'/%3E%3Cpath d='M9 16.5a4.7 4.7 0 0 1 6 0'/%3E%3Cpath d='M12 20.2h.01'/%3E%3C/svg%3E"); }
+
+.fa-arrows-up-down { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 3.5v17'/%3E%3Cpath d='M4.5 7L8 3.5 11.5 7'/%3E%3Cpath d='M16 20.5v-17'/%3E%3Cpath d='M12.5 17l3.5 3.5 3.5-3.5'/%3E%3C/svg%3E"); }
+
+.fa-lightbulb { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 18h6'/%3E%3Cpath d='M10 21.2h4'/%3E%3Cpath d='M12 2.8a6.4 6.4 0 0 0-3.7 11.6c.5.4.7.9.7 1.5v.1h6v-.1c0-.6.2-1.1.7-1.5A6.4 6.4 0 0 0 12 2.8z'/%3E%3C/svg%3E"); }
+
+.fa-clock { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.2'/%3E%3Cpath d='M12 6.8V12l3.6 2.2'/%3E%3C/svg%3E"); }
+
+.fa-location-dot { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21.5s7-6.2 7-11.4a7 7 0 1 0-14 0c0 5.2 7 11.4 7 11.4z'/%3E%3Ccircle cx='12' cy='10' r='2.6'/%3E%3C/svg%3E"); }

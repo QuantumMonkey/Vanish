@@ -116,6 +116,8 @@ Every destructive channel below is wrapped in `fullModeOnly()` ([main.js](main.j
 | `onScanProgress(cb)` | `scan-progress` (main→renderer push) | | interim scan state. `scanner.ps1` writes progress to **stderr** behind a marker so stdout stays pure JSON and no existing result contract can be corrupted; `main.js` parses it line-buffered and forwards to the requesting sender. Reports measured facts only — stages completed, seconds elapsed — never a predicted percentage (Rule 9) | `Write-ScanProgress` |
 | `findBrokenEntries()` | `find-broken-entries` | | read-only, works in Audit Mode | `Find-BrokenUninstallEntries` |
 | `cleanerScan(params)` | `cleaner-scan` | | read-only | `Invoke-CleanerScan` (context menus, services, drivers, PATH, associations, other profiles, left-over Store app data) |
+| `getNetworkActivity(params)` | `get-network-activity` | | read-only | `Get-NetworkActivity` — adapter byte-counter deltas and connections by owning process. Opens no socket (INV-4) and reports no per-process byte rate, which Windows cannot attribute without an ETW trace |
+| `startupAction(params)` | `startup-action` | ✅ | registry and service writes export a manifest-only `.reg` to the vault first | `Remove-StartupRegistryValue` / `Set-StartupServiceManual` / `Set-StartupTaskEnabled` |
 | `cleanerPurge(params)` | `cleaner-purge` | ✅ | routes through the vault, same as `purge-remnants` | `Invoke-QuarantineItems` / `Set-PathEntries` |
 | `minimizeWindow()` / `maximizeWindow()` / `closeWindow()` | `window-*` (send) | | window controls | — |
 | `openExternalLink(url)` | `open-external-link` (send) | | `shell.openExternal` | — |

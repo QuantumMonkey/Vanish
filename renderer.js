@@ -1716,15 +1716,19 @@ async function loadAuditData(force = false) {
   auditLoaded = false;
 
   try {
-    // Fire all three PowerShell queries in parallel
-    const [diag, startup, redundancy] = await Promise.all([
+    // Fire every PowerShell query in parallel. The network read spends most of
+    // its time asleep between two counter samples, so running it alongside the
+    // others costs the load almost nothing in wall-clock time.
+    const [diag, startup, redundancy, network] = await Promise.all([
       window.api.getSystemDiagnostics(),
       window.api.getStartupItems(),
-      window.api.getSoftwareRedundancy()
+      window.api.getSoftwareRedundancy(),
+      window.api.getNetworkActivity()
     ]);
 
     renderSysInfoCards(diag);
     renderDiskBars(diag.disks || [], diag.disksError);
+    renderNetworkActivity(network);
     renderStartupTable(startup);
     renderRedundancyGroups(redundancy);
 
@@ -1800,6 +1804,158 @@ function shortenCpuName(name) {
   if (!name) return 'Unknown';
   // Collapse repeated whitespace and strip trailing processor brand noise
   return name.replace(/\s+/g, ' ').replace(/ CPU @.*$/, '').trim();
+}
+
+// bfh.1. The output of this section is a VERDICT, not a list of connections.
+// "Nothing on this PC is using the network" is a first-class answer here, not
+// an empty state - it is the answer that tells someone to stop looking at their
+// PC and go look at their router.
+//
+// The one thing this must never do is imply a per-program byte rate. Windows
+// does not attribute bytes to a process without an ETW kernel trace, so any
+// per-app "12 Mbps" on this screen would be invented. It reports connections
+// held, and says so.
+function renderNetworkActivity(net) {
+  const body = document.getElementById('audit-network-body');
+  const badge = document.getElementById('audit-network-badge');
+  if (!body) return;
+
+  if (!net || net.success !== true || net.verdict === 'unreadable') {
+    if (badge) badge.style.display = 'none';
+    body.innerHTML = `<div class="panel-state error" style="padding: 12px 0;">
+      <i class="fa-solid fa-circle-xmark"></i>
+      <div>Could not read the network adapters on this PC${net && net.error ? `: ${esc(net.error)}` : '.'}</div>
+    </div>`;
+    wireNetworkRefresh();
+    return;
+  }
+
+  const rate = (bytesPerSecond) => `${formatBytes(bytesPerSecond || 0, 1)}/s`;
+  const gateway = (net.adapters || []).filter((a) => a.hasGateway);
+  const primary = gateway.length ? gateway[0] : (net.adapters || [])[0];
+  const processes = net.processes || [];
+  const top = processes.slice(0, 6);
+
+  const verdicts = {
+    busy: {
+      icon: 'fa-arrows-up-down',
+      cls: 'is-busy',
+      title: 'Something on this PC is using the network',
+      detail:
+        `The connection carried ${rate(net.totalBytesPerSecond)} while this was measured. ` +
+        (top.length
+          ? `${top.length === 1 ? 'One program has' : `${top.length} programs have`} connections open right now.`
+          : 'No program held an open connection, so this is Windows itself.')
+    },
+    quiet: {
+      icon: 'fa-circle-check',
+      cls: 'is-quiet',
+      title: 'Nothing on this PC is using the network',
+      detail:
+        `The connection carried ${rate(net.totalBytesPerSecond)} while this was measured, which is an idle machine. ` +
+        'If something still feels slow, the cause is not on this PC - it is the router or the connection beyond it, ' +
+        'and nothing Vanish can change here will help.'
+    },
+    'link-weak': {
+      icon: 'fa-triangle-exclamation',
+      cls: 'is-weak',
+      title: 'The Wi-Fi signal is the limit here',
+      detail:
+        `The signal is at ${net.signalPercent}%. At this strength the link itself is the constraint, so closing ` +
+        'programs will not make much difference. Moving closer to the access point, or using a cable, will.'
+    }
+  };
+
+  const v = verdicts[net.verdict] || verdicts.quiet;
+
+  const examined = [
+    primary ? `${esc(primary.name)} (${primary.isWireless ? 'Wi-Fi' : 'wired'})` : null,
+    `${processes.length} program(s) with a connection open`,
+    net.updateTransfers != null
+      ? `Windows Update: ${net.updateTransfers === 0 ? 'not downloading' : `${net.updateTransfers} download(s) running`}`
+      : null,
+    net.bitsJobs != null
+      ? `background transfers: ${net.bitsJobs === 0 ? 'none' : net.bitsJobs}`
+      : 'background transfers: needs administrator to see every account'
+  ].filter(Boolean);
+
+  const signalLine =
+    net.signalNote === 'needs-location-permission'
+      ? 'Wi-Fi signal strength was not read: Windows keeps it behind the Location privacy setting.'
+      : net.signalNote === 'needs-elevation'
+        ? 'Wi-Fi signal strength was not read: Windows only reports it to an administrator.'
+        : null;
+
+  const rows = top
+    .map(
+      (p) => `
+      <tr class="app-row">
+        <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
+        <td style="font-size: 12px; color: var(--text-gray);">${esc(p.processId)}</td>
+        <td style="font-size: 12px; color: var(--text-gray);">${esc(p.connectionCount)}</td>
+        <td style="font-size: 12px; color: var(--text-gray);">${esc(p.peerCount)}</td>
+      </tr>`
+    )
+    .join('');
+
+  body.innerHTML = `
+    <div class="net-verdict ${v.cls}">
+      <div class="net-verdict-icon"><i class="fa-solid ${v.icon}"></i></div>
+      <div class="net-verdict-main">
+        <div class="net-verdict-title">${esc(v.title)}</div>
+        <div class="net-verdict-detail">${esc(v.detail)}</div>
+      </div>
+      <button class="btn-sec btn-compact" id="btn-network-refresh">
+        <i class="fa-solid fa-rotate-right"></i> Measure again
+      </button>
+    </div>
+
+    <div class="panel-inline-note">Looked at: ${examined.map(esc).join(' &middot; ')}${signalLine ? ` &middot; ${esc(signalLine)}` : ''}</div>
+
+    ${
+      top.length
+        ? `<div style="overflow-x: auto;">
+             <table class="apps-table">
+               <thead>
+                 <tr>
+                   <th style="width: 40%;">Program</th>
+                   <th style="width: 15%;">ID</th>
+                   <th style="width: 22%;">Connections open</th>
+                   <th style="width: 23%;">Places connected to</th>
+                 </tr>
+               </thead>
+               <tbody>${rows}</tbody>
+             </table>
+           </div>
+           <div class="panel-inline-note">Windows does not tell any program how many bytes each other program used
+             without a kernel-level trace, so this is what each one has open - not a share of the speed.</div>`
+        : ''
+    }`;
+
+  if (badge) {
+    badge.style.display = 'inline-flex';
+    badge.textContent = net.verdict === 'busy' ? 'in use' : net.verdict === 'link-weak' ? 'weak signal' : 'idle';
+    badge.className = net.verdict === 'busy' ? 'audit-badge' : 'audit-badge';
+  }
+
+  wireNetworkRefresh();
+}
+
+function wireNetworkRefresh() {
+  const btn = document.getElementById('btn-network-refresh');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const badge = document.getElementById('audit-network-badge');
+    if (badge) {
+      badge.style.display = 'inline-flex';
+      badge.textContent = 'measuring';
+    }
+    btn.disabled = true;
+    // Only this section re-samples. Re-running the whole Health Advisor to
+    // answer one question is the pattern 7oo.5 was about.
+    const net = await window.api.getNetworkActivity();
+    renderNetworkActivity(net);
+  });
 }
 
 function renderDiskBars(disks, error) {

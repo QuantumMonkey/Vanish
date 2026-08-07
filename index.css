@@ -1496,6 +1496,52 @@ input:checked + .slider:before {
   font-size: 14px;
 }
 
+/* Network verdict block (bfh.1). The verdict is the point of the section, so
+ * it is the first and largest thing in it - not a summary line under a table. */
+.net-verdict {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-glass);
+  background: var(--bg-dark-card);
+  margin-bottom: 10px;
+}
+
+.net-verdict.is-quiet { border-color: hsla(145, 60%, 45%, 0.30); }
+.net-verdict.is-busy  { border-color: hsla(210, 90%, 60%, 0.30); }
+.net-verdict.is-weak  { border-color: hsla(38, 90%, 55%, 0.35); }
+
+.net-verdict-icon {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  font-size: 16px;
+  background: hsla(220, 40%, 60%, 0.12);
+  color: var(--text-gray);
+}
+
+.net-verdict.is-quiet .net-verdict-icon { color: var(--color-success); background: hsla(145, 60%, 45%, 0.14); }
+.net-verdict.is-busy  .net-verdict-icon { color: var(--color-primary); background: hsla(210, 90%, 60%, 0.14); }
+.net-verdict.is-weak  .net-verdict-icon { color: var(--color-warning); background: hsla(38, 90%, 55%, 0.14); }
+
+.net-verdict-main { flex: 1; min-width: 0; text-align: left; }
+
+.net-verdict-title {
+  font-family: var(--font-title);
+  font-weight: 600;
+  font-size: 14.5px;
+  color: var(--text-white);
+  margin-bottom: 3px;
+}
+
+.net-verdict-detail { font-size: 12px; color: var(--text-gray); line-height: 1.55; }
+
 /* Indeterminate wait bar. Used where the wait is Windows' and its length is
  * genuinely unknown, so a percentage would be an invention. */
 .wait-track {
