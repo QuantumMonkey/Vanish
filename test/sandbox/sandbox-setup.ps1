@@ -15,6 +15,24 @@ Write-Host ""
 Write-Host "Running the unelevated regression suite..." -ForegroundColor Cyan
 npm test
 
+# 2026-08-07: the packaged portable exe is what the operator actually runs, and
+# a bug (blank window on elevated relaunch, commit e00f252) was specific to the
+# portable build and invisible to `npm start` against source - PORTABLE_EXECUTABLE_FILE
+# is only set when running the real packaged exe. Surface whether a build is
+# present and how fresh, so the checklist's exe-specific items know what they
+# are testing before the human starts clicking.
+$portableExe = Get-ChildItem "$(Get-Location)\dist\Vanish-*-portable.exe" -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Write-Host ""
+if ($portableExe) {
+    Write-Host "Packaged portable build found:" -ForegroundColor Cyan
+    Write-Host "  $($portableExe.FullName)"
+    Write-Host "  built $($portableExe.LastWriteTime)"
+} else {
+    Write-Host "No packaged portable build in dist\ - run 'npm run dist:portable' on the" -ForegroundColor Yellow
+    Write-Host "host first if you want to test the exe checklist items, not just source." -ForegroundColor Yellow
+}
+
 # 1qp (Force Uninstall) needs a REAL broken app, not a planted registry
 # fixture. 7-Zip was the obvious first candidate but uninstalls too cleanly
 # to exercise leftover-scan/quarantine meaningfully (operator note

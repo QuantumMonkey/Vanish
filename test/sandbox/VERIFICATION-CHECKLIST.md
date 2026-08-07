@@ -15,7 +15,40 @@ In the sandbox PowerShell window, `npm start` launches the app
 
 ---
 
-## 1. beads-69a -- elevated relaunch UAC branch on a spaced path
+## 0. vanish-uninstaller-jhh -- packaged portable exe: elevated relaunch (P0, do this first)
+
+The bug this checks for was real, reported by the operator on 2026-08-07, and
+fixed in commit `e00f252` (`main.js` `attemptElevatedRelaunch`): clicking
+"Restart as administrator" produced a correctly-sized, correctly-coloured
+window with **no content** - background painted, `index.html` never rendered.
+
+Root cause was specific to the PACKAGED PORTABLE build: it relaunched
+`process.execPath`, which for a portable exe is a temp-extracted copy that can
+be cleaned up mid-relaunch. `npm start` (source, unpackaged) cannot reproduce
+this - `PORTABLE_EXECUTABLE_FILE`, the environment variable the fix now
+prefers, is only set when running the real packaged exe. **This is why this
+item exists separately from item 1 below**, which only ever exercised source.
+
+The sandbox setup script prints whether a packaged build is present in `dist\`
+and how fresh. If it says none is present, run `npm run dist:portable` on the
+**host** first (outside the sandbox) and relaunch the sandbox.
+
+- [ ] Launch `dist\Vanish-*-portable.exe` directly (not `npm start`) inside
+      the sandbox, unelevated.
+- [ ] Click "Restart as administrator" (the FLOW-01 banner/button). Accept
+      the UAC prompt.
+      -> Expect: the elevated window shows the real app - sidebar, program
+      list, everything - not a blank navy rectangle. Exactly one instance
+      running once the old one exits.
+- [ ] If it is still blank: `did-fail-load` now shows an error dialog
+      instead of failing silently (part of the same fix). Copy its exact
+      text into this checklist's notes - that is the next diagnostic step,
+      not a guess.
+
+Record result in `bd show vanish-uninstaller-jhh` notes, then
+`bd close vanish-uninstaller-jhh --reason="..."` if it passes.
+
+## 1. beads-69a -- elevated relaunch UAC branch on a spaced path (source build)
 
 Path already contains a space (`test folder`) -- that's done for you.
 
