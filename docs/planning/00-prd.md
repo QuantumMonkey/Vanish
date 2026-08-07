@@ -183,7 +183,10 @@ Stage 6 addition (Forced Uninstall, operator-directed 2026-08-03):
 - Stack fixed by ADR 0001 (Electron + vanilla JavaScript + PowerShell 5.1).
 - Zero network calls at runtime (Rule 6); zero telemetry.
 - "Complete" means tested on clean Win10 + Win11 VMs (Rule 10).
-- Payments: Microsoft Store Convenience Edition (ADR 0001); source stays MIT.
+- ~~Payments: Microsoft Store Convenience Edition (ADR 0001); source stays MIT.~~
+  **Superseded 2026-08-08 by ADR 0002**: personal use free, commercial use
+  paid. Signing is unchanged and now harder-required; the Store as a channel
+  is an open question.
 
 ## Decisions
 

@@ -385,9 +385,16 @@ others depend on it)
   - Do NOT read: feature source -- this is packaging/distribution
 - **Steps:** acquire OV/EV certificate (operator action -- has cost;
   reversal condition in bd `vanish-uninstaller-22n` governs whether this
-  proceeds); sign all binaries; package the MS Store "Convenience Edition"
-  (source stays MIT on GitHub); submit. Acknowledge the SmartScreen
+  proceeds); sign all binaries; ~~package the MS Store "Convenience Edition"
+  (source stays MIT on GitHub); submit~~. Acknowledge the SmartScreen
   reputation build-up period.
+  **Amended 2026-08-08 (ADR 0002)**: the signing half stands and hardens --
+  under a commercial model an unsigned binary is disqualifying, not merely
+  SmartScreen-annoying. The Store-submission half is no longer the plan: the
+  Store is built for consumer one-time purchases and the model is now
+  organisations procuring a licence. Split this task before starting it into
+  signing (required) and channel (open). Tracked on
+  `vanish-uninstaller-1w0`.
 - **Verify:** signed binary passes signature verification; unsigned
   artifacts absent from the release; Store package validates in the
   Partner Center pre-submission check.

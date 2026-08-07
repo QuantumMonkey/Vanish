@@ -14,7 +14,7 @@
 | Persistence | JSON files under the app data directory (no DB) | TEC-05 | Local-first, zero network (Rule 6); volumes are tiny | SQLite -- adds a native dep for kilobyte-scale data |
 | Auth | None; elevation tiers only (Rule 3) | TEC-06 | Single-user desktop app | -- |
 | Hosting/deploy | Signed binaries (Rule 14) + GitHub source; MS Store later | TEC-07 | ADR 0001 | Direct-sale MoR -- deferred, Store handles tax/payments |
-| Payments | MS Store Convenience Edition | TEC-08 | ADR 0001, operator decision 2026-07-11 | Paddle/Lemon Squeezy -- see ADR |
+| Payments | ~~MS Store Convenience Edition~~ **superseded 2026-08-08: personal free, commercial paid** | TEC-08 | **ADR 0002** (supersedes the payments row of ADR 0001) | Paddle/Lemon Squeezy -- still deferred; price and enforcement deliberately undecided, see ADR 0002 |
 
 D-04: Keep all new system logic in scanner.ps1 behind the existing -Action
 dispatcher. | Because: one privilege boundary, one param-decoding path, one
