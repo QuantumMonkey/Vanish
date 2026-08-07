@@ -77,11 +77,33 @@ function createWindow() {
     frame: false, // Frameless for a premium, custom UI
     transparent: false,
     backgroundColor: '#0b0f19',
+    // Don't paint an empty window: show it once the page has actually
+    // rendered. Without this, any load failure - including the elevated-
+    // relaunch temp-extraction race above - looks identical to the app simply
+    // being slow: a correctly-sized, correctly-coloured window with nothing on
+    // it, and no visible sign anything went wrong.
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+
+  mainWindow.once('ready-to-show', () => mainWindow.show());
+
+  // A failed load (missing file, corrupted extraction, the race above) must
+  // never fail silently into a blank window. Tell the user what happened
+  // instead of leaving them staring at background colour with no error.
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+    if (errorCode === -3) return; // ERR_ABORTED - a deliberate navigation, not a failure
+    dialog.showErrorBox(
+      'Vanish could not load',
+      `The application window failed to load its interface (${errorDescription || errorCode}).\n\n` +
+      'If this happened right after "Restart as administrator", try closing every Vanish window and ' +
+      'launching Vanish.exe again directly rather than through the elevation button.'
+    );
+    mainWindow.show();
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -534,9 +556,30 @@ async function attemptElevatedRelaunch(trigger) {
   if (isFullMode()) return { success: true, alreadyElevated: true };
 
   const argList = app.isPackaged ? [] : [app.getAppPath()];
+
+  // BUG (operator report, blank navy window after clicking "Restart as
+  // administrator" from the portable build): process.execPath, for a portable
+  // build, is the TEMP-EXTRACTED copy - electron-builder's portable format
+  // unpacks the whole app to a fresh %TEMP% folder on every launch and runs
+  // from there. Relaunching that path is relaunching a copy that is not the
+  // one the user double-clicked and is not guaranteed to still exist: the
+  // ORIGINAL instance quits ~400ms after Start-Process returns, and if that
+  // triggers portable cleanup of ITS OWN temp folder while the NEW elevated
+  // process - launched from files in that same folder - is still reading
+  // index.html/app.asar from it, the window paints its background colour and
+  // never gets content. No error surfaces because nothing in this process
+  // failed; the files it needed were gone.
+  //
+  // electron-builder sets PORTABLE_EXECUTABLE_FILE to the stable path of the
+  // exe the user actually launched, specifically so a self-relaunch can target
+  // that instead. Preferring it here means the elevated instance performs its
+  // OWN independent extraction to its OWN new temp folder, with nothing shared
+  // with (or deletable by) the instance being replaced.
+  const exePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+
   try {
     const res = await runPowerShell('relaunch-elevated', {
-      exePath: process.execPath,
+      exePath,
       argList
     });
     store.appendOplog({
