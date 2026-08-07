@@ -1,6 +1,8 @@
 # ADR 0001: Stack override -- desktop app, not the default SaaS stack
 
-- Status: Accepted
+- Status: Accepted; **the Payments row is superseded by
+  [ADR 0002](0002-commercialization-b2b-paid-personal-free.md) (2026-08-08)**.
+  Every other row below stands.
 - Date: 2026-07-11
 - Deciders: Anand (operator), per PLAYBOOK S4 rule "a project deviates via an ADR, never silently"
 
@@ -22,7 +24,7 @@ not apply and is overridden here.
 | Database | None. On-disk state only: quarantine vault manifests, corrections JSON, settings file | Local-first, zero network (promptgate Rule 6); no server component exists |
 | Auth | None | Single-user desktop app; elevation tiers (promptgate Rule 3) are the only privilege model |
 | Hosting | None. Distribution = signed binaries (promptgate Rule 14 hard gate) plus source on GitHub | Desktop app; unsigned builds never distributed |
-| Payments | Microsoft Store paid "Convenience Edition" (USD 4.99-9.99 one-time); source stays MIT on GitHub | Decided by operator 2026-07-11. Closes the PLAYBOOK open payments decision for this project. Microsoft handles payment and tax; model proven by NanaZip/ShareX |
+| ~~Payments~~ | ~~Microsoft Store paid "Convenience Edition" (USD 4.99-9.99 one-time); source stays MIT on GitHub~~ | **SUPERSEDED 2026-08-08 by [ADR 0002](0002-commercialization-b2b-paid-personal-free.md): personal use free, commercial use paid.** Original reasoning: decided by operator 2026-07-11; Microsoft handles payment and tax; model proven by NanaZip/ShareX |
 
 ## Consequences
 
