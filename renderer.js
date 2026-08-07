@@ -640,10 +640,10 @@ function updateFilterStatus(shownCount) {
 
   if (!isFiltered) {
     text.textContent = allApps.length === 0
-      ? 'Loading applications...'
-      : `Showing all ${pool} applications${suffix}`;
+      ? 'Finding installed programs...'
+      : `Showing all ${pool} programs${suffix}`;
   } else {
-    text.textContent = `Showing ${shownCount} of ${pool} applications${suffix}`;
+    text.textContent = `Showing ${shownCount} of ${pool} programs${suffix}`;
   }
 }
 
@@ -654,7 +654,7 @@ function renderTable(apps) {
       <tr>
         <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
           <i class="fa-solid fa-folder-open" style="font-size: 24px; margin-bottom: 12px;"></i>
-          <div>No applications found matching your criteria.</div>
+          <div>No programs match your search.</div>
         </td>
       </tr>
     `;
@@ -720,9 +720,9 @@ function selectApp(app, rowElement) {
   elements.detPath.textContent = app.installLocation || 'Unknown';
   elements.detReg.textContent = app.registryPath || 'Unknown';
   elements.detType.textContent =
-    app.type === 'UWP' ? 'Universal Windows Platform (UWP)'
-    : app.type === 'Feature' ? 'Windows optional feature'
-    : 'Classic Desktop Executable';
+    app.type === 'UWP' ? 'Windows Store app'
+    : app.type === 'Feature' ? 'Part of Windows'
+    : 'Desktop program';
 
   // Why this entry is classified as it is, why Windows hides its uninstall
   // button, or why Vanish holds it back. Whichever applies, the user reads the
@@ -919,9 +919,9 @@ function setupSettingsTab() {
       const ok = await confirmDialog({
         title: 'Enable automatic purge?',
         body:
-          `Quarantined entries older than ${retention.value} day(s) will be permanently deleted at app ` +
-          'start, without another prompt. This is the only setting that lets Vanish destroy something ' +
-          'you did not click that day.',
+          `Anything in quarantine older than ${retention.value} day(s) will be deleted permanently each ` +
+          'time Vanish starts, with no further prompt. This is the only setting that lets Vanish destroy ' +
+          'something you did not click that day.',
         confirmLabel: 'Enable'
       });
       if (!ok) {
@@ -975,7 +975,7 @@ async function loadSettingsPanel() {
   const info = await window.api.getAppInfo();
   document.getElementById('set-vault-path').textContent = info.vaultRoot;
   document.getElementById('set-vault-stats').textContent =
-    `${info.vaultEntryCount} entry(s) held - ${formatBytes(info.vaultBytes, 1)} on disk`;
+    `${info.vaultEntryCount} item(s) held here - ${formatBytes(info.vaultBytes, 1)} on disk`;
   document.getElementById('set-oplog-path').textContent =
     `${info.oplogPath} (${info.oplogBytes > 0 ? formatBytes(info.oplogBytes, 1) : 'empty'})`;
 }
@@ -997,10 +997,10 @@ async function loadAboutPanel() {
     ['Electron', info.versions.electron],
     ['Chromium', info.versions.chrome],
     ['Node', info.versions.node],
-    ['Engine', 'PowerShell 5.1 (scanner.ps1)'],
-    ['Data directory', info.dataDir],
-    ['Runtime network calls', 'None'],
-    ['Telemetry', 'None']
+    ['Scanning engine', 'Windows PowerShell 5.1'],
+    ['Data folder', info.dataDir],
+    ['Network use while running', 'None'],
+    ['Tracking', 'None']
   ];
 
   document.getElementById('about-facts').innerHTML = facts
@@ -1057,7 +1057,7 @@ function openUninstallWizard(app) {
 
   // UI labels
   elements.wizAppName.textContent = `Uninstalling ${app.name}`;
-  elements.wizAppVersion.textContent = `Version ${app.version || 'Unknown'} - ${app.type === 'UWP' ? 'Windows App' : 'Desktop Program'}`;
+  elements.wizAppVersion.textContent = `Version ${app.version || 'Unknown'} - ${app.type === 'UWP' ? 'Windows Store app' : 'Desktop program'}`;
   
   // Show first screen
   showScreen(0);
@@ -1094,11 +1094,11 @@ function showScreen(index) {
     elements.btnWizNext.innerHTML = 'Scan Leftovers <i class="fa-solid fa-magnifying-glass"></i>';
     // If UWP, explain that uninstallation is silent
     if (selectedApp.type === 'UWP') {
-      elements.nativeUninstPromptText.textContent = "UWP applications can be uninstalled silently via Windows AppX Package services. Click 'Launch Silent Uninstall' below.";
-      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-bolt"></i> <span>Launch Silent Uninstall</span>';
+      elements.nativeUninstPromptText.textContent = "Windows Store apps are removed without any extra windows or prompts. Click below to remove this one.";
+      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-bolt"></i> <span>Remove this app</span>';
     } else {
-      elements.nativeUninstPromptText.textContent = "We are ready to launch the program's native uninstaller wizard. Click the button below, then follow the instructions on your screen. Once done, click Next to scan remnants.";
-      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-circle-play"></i> <span>Launch Native Uninstaller</span>';
+      elements.nativeUninstPromptText.textContent = "Vanish will open the uninstaller that came with this program. Click below, follow the steps on screen, then click Scan Leftovers.";
+      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-circle-play"></i> <span>Run the program\'s uninstaller</span>';
     }
   } else {
     elements.btnWizNext.innerHTML = 'Next <i class="fa-solid fa-chevron-right" style="font-size: 11px;"></i>';
@@ -1170,12 +1170,12 @@ async function runNativeUninstaller(app) {
       body:
         `${app.name} would run with administrator rights, but it is the kind of entry ` +
         `malware can create: ${reasons}.\n\n` +
-        'Only continue if you recognise it. Type RUN to run it anyway.',
+        'Only continue if you recognise this program. Type RUN to run it anyway.',
       confirmLabel: 'Run it anyway',
       typed: 'RUN'
     });
     if (!ack) {
-      return { success: false, declined: true, error: 'Not run: the uninstaller was not acknowledged.' };
+      return { success: false, declined: true, error: 'Not run: you did not confirm this uninstaller.' };
     }
     res = await window.api.uninstallNative({ ...request, acknowledged: true });
   }
@@ -1207,7 +1207,7 @@ function setupWizardControls() {
         showScreen(1); // Show safety loader
         const res = await window.api.createRestorePoint();
         if (!res.success) {
-          toast(`Restore point failed: ${res.error}. Continuing - the quarantine vault is still your undo.`, 'warn', 7000);
+          toast(`Could not create a restore point: ${res.error}. Continuing - anything removed still goes to quarantine first.`, 'warn', 7000);
         } else if (res.note) {
           toast(res.note, 'info');
         }
@@ -1233,7 +1233,7 @@ function setupWizardControls() {
         renderLeftoversTree();
         showScreen(4); // Show tree checklist
       } catch (err) {
-        toast(`Scanning leftovers failed: ${err.message}`, 'error');
+        toast(`Could not scan for leftovers: ${err.message}`, 'error');
         showScreen(2);
       }
     }
@@ -1245,21 +1245,21 @@ function setupWizardControls() {
     elements.btnLaunchNative.disabled = true;
 
     if (selectedApp.type === 'UWP') {
-      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Uninstalling Package...</span>';
+      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Removing the app...</span>';
     } else {
-      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Native Uninstaller Running...</span>';
+      elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>The uninstaller is running...</span>';
     }
 
     const res = await runNativeUninstaller(selectedApp);
 
     elements.btnLaunchNative.disabled = false;
-    elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-circle-play"></i> <span>Launch Native Uninstaller</span>';
+    elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-circle-play"></i> <span>Run the program\'s uninstaller</span>';
 
     if (selectedApp.type === 'UWP') {
       if (res.success) {
-        toast('Store package removed. Scanning for leftovers.', 'success');
+        toast('The app was removed. Now looking for leftovers.', 'success');
       } else {
-        toast(`Package removal failed: ${res.error}. Scanning for leftovers anyway.`, 'warn');
+        toast(`Could not remove the app: ${res.error}. Looking for leftovers anyway.`, 'warn');
       }
       elements.btnWizNext.click();
     } else if (res.success) {
@@ -1267,15 +1267,15 @@ function setupWizardControls() {
       // this is a result rather than a "we launched something" guess.
       toast(
         res.rebootRequired
-          ? 'Uninstaller finished - Windows needs a reboot to complete it. Click Scan Leftovers.'
-          : 'Uninstaller finished. Click Scan Leftovers.',
+          ? 'The uninstaller finished. Windows needs a restart to complete it. Click Scan Leftovers.'
+          : 'The uninstaller finished. Click Scan Leftovers.',
         'success',
         7000
       );
     } else if (res.declined) {
       toast(res.error, 'warn');
     } else {
-      toast(`Uninstaller did not complete: ${res.error} You can still scan for leftovers.`, 'warn', 7000);
+      toast(`The uninstaller did not finish: ${res.error} You can still scan for leftovers.`, 'warn', 7000);
     }
   });
 
@@ -1312,7 +1312,7 @@ function setupWizardControls() {
     if (checkedBoxes.length === 0) {
       const finish = await confirmDialog({
         title: 'Nothing selected',
-        body: 'No leftovers are ticked. Finish the uninstall without quarantining anything?',
+        body: 'You have not ticked any leftovers. Finish without moving anything to quarantine?',
         confirmLabel: 'Finish'
       });
       if (finish) closeUninstallWizard();
@@ -1345,9 +1345,9 @@ function setupWizardControls() {
     const purgeOk = await confirmDialog({
       title: `Quarantine ${itemCount} item(s)?`,
       body:
-        `These files and registry entries move to the vault immediately, not just when you clear it out. ` +
-        'If any of them are still needed by something, that something stops working the moment you confirm ' +
-        'this - restore it from Quarantine Manager any time to bring it back exactly as it was.',
+        'These files and registry entries move to quarantine straight away. If anything else on this PC ' +
+        'still needs them, it stops working the moment you confirm. You can put them back exactly as they ' +
+        'were from the Quarantine tab at any time.',
       confirmLabel: 'Quarantine'
     });
     if (!purgeOk) return;
@@ -1367,7 +1367,7 @@ function setupWizardControls() {
       showScreen(6);
       wizState.lastEntryId = res.entryId || null;
     } catch (err) {
-      toast(`Quarantine failed: ${err.message}`, 'error');
+      toast(`Could not move anything to quarantine: ${err.message}`, 'error');
       showScreen(4);
     }
   });
@@ -1396,7 +1396,7 @@ function renderPurgeSummary(res, requestedCount) {
     title.textContent = 'Nothing was removed';
     elements.lblPurgeResultText.textContent =
       (res && res.error ? `${res.error} ` : '') +
-      'The quarantine vault could not be written, so every selected leftover was left exactly where it was.';
+      'Vanish could not write to the quarantine folder, so everything you selected was left exactly where it is.';
     document.getElementById('lbl-space-saved').textContent = '0 B';
     document.getElementById('lbl-quarantined-count').textContent = '0';
     failuresBox.style.display = 'none';
@@ -1416,20 +1416,20 @@ function renderPurgeSummary(res, requestedCount) {
 
   if (problems.length === 0) {
     icon.className = 'fa-solid fa-box-archive';
-    title.textContent = 'Leftovers quarantined';
+    title.textContent = 'Leftovers moved to quarantine';
     elements.lblPurgeResultText.textContent =
-      `${quarantined} of ${requestedCount} selected item(s) were moved into the quarantine vault. ` +
-      'Files were moved, registry keys were exported to a .reg restore manifest before removal. ' +
-      'Nothing has been deleted - restore any of it from the Quarantine tab.' +
+      `${quarantined} of the ${requestedCount} item(s) you selected were moved to quarantine. ` +
+      'Files were moved, and registry entries were saved to a backup file before removal. ' +
+      'Nothing has been deleted - you can put any of it back from the Quarantine tab.' +
       (missing > 0 ? ` ${missing} item(s) were already gone.` : '');
     failuresBox.style.display = 'none';
   } else {
     hero.classList.add('partial');
     icon.className = 'fa-solid fa-triangle-exclamation';
-    title.textContent = 'Quarantined, with items left in place';
+    title.textContent = 'Moved to quarantine, with some items left in place';
     elements.lblPurgeResultText.textContent =
-      `${quarantined} item(s) moved into the vault. ${problems.length} could not be moved and were left untouched - ` +
-      'nothing is half-removed.';
+      `${quarantined} item(s) moved to quarantine. ${problems.length} could not be moved and were left ` +
+      'exactly as they were - nothing is half-removed.';
     failuresTitle.textContent = `Left in place (${problems.length})`;
 
     // REQ-19: offer the ownership elevator per item, and only for the items
@@ -1444,7 +1444,7 @@ function renderPurgeSummary(res, requestedCount) {
         return `
           <div class="summary-failure-item" data-failure-index="${esc(index)}">
             <div class="path">${esc(p.originalPath || p.keyPath)}</div>
-            <div class="reason">${esc(p.error || 'Unknown reason')}</div>
+            <div class="reason">${esc(p.error || 'No reason given')}</div>
             <div class="failure-actions">
               ${
                 denied && isFile
@@ -1495,9 +1495,9 @@ async function elevateAndRetry(index) {
   const ok = await confirmDialog({
     title: 'Take ownership of this item?',
     body:
-      `Vanish will take ownership of "${item.originalPath}" and grant Administrators full control, then retry ` +
-      'moving it to quarantine. This changes the permissions on that item permanently, even if you later ' +
-      'restore it. It applies to this item only.',
+      `Vanish will take ownership of "${item.originalPath}", give administrators full control of it, then try ` +
+      'moving it to quarantine again. This changes the permissions on that item permanently, even if you ' +
+      'restore it later. It applies to this one item only.',
     confirmLabel: 'Take ownership'
   });
   if (!ok) return;
@@ -1512,10 +1512,10 @@ async function elevateAndRetry(index) {
 
   const row = (res && res.files && res.files[0]) || null;
   if (res && res.success && row && row.status === 'quarantined') {
-    toast(`Ownership taken and item quarantined${row.aclElevated ? ' (permissions changed)' : ''}.`, 'success', 6000);
+    toast(`Ownership taken and the item moved to quarantine${row.aclElevated ? ' (permissions changed)' : ''}.`, 'success', 6000);
     const el = document.querySelector(`[data-failure-index="${index}"]`);
     if (el) {
-      el.querySelector('.reason').textContent = 'Quarantined after taking ownership.';
+      el.querySelector('.reason').textContent = 'Moved to quarantine after taking ownership.';
       const actions = el.querySelector('.failure-actions');
       if (actions) actions.remove();
     }
@@ -1532,7 +1532,7 @@ async function confirmCancel() {
   if (wizState.currentScreenIndex > 0 && wizState.currentScreenIndex < 6) {
     const ok = await confirmDialog({
       title: 'Cancel this uninstall?',
-      body: 'The uninstall wizard will close. Anything already quarantined stays in the vault and can be restored from the Quarantine tab.',
+      body: 'This closes the uninstall wizard. Anything already moved to quarantine stays there, and you can restore it from the Quarantine tab.',
       confirmLabel: 'Cancel uninstall'
     });
     if (!ok) return;
@@ -1552,15 +1552,15 @@ function renderLeftoversTree() {
     tree.innerHTML = `
       <div class="empty-leftovers">
         <i class="fa-solid fa-circle-check"></i>
-        <h4 style="font-family: var(--font-title); font-weight: 700;">No leftovers found!</h4>
-        <p style="font-size: 12px; color: var(--text-gray);">This application uninstalled completely clean.</p>
+        <h4 style="font-family: var(--font-title); font-weight: 700;">No leftovers found</h4>
+        <p style="font-size: 12px; color: var(--text-gray);">This program removed itself cleanly.</p>
       </div>
     `;
-    elements.lblLeftoversSummary.textContent = 'Discovered 0 remnants';
+    elements.lblLeftoversSummary.textContent = '0 leftovers found';
     return;
   }
-  
-  elements.lblLeftoversSummary.textContent = `Discovered ${files.length + registry.length} remnants`;
+
+  elements.lblLeftoversSummary.textContent = `${files.length + registry.length} leftovers found`;
   
   // 1. Render Filesystem Remnants
   if (files.length > 0) {
@@ -1569,7 +1569,7 @@ function renderLeftoversTree() {
     fileGroup.innerHTML = `
       <div class="tree-group-header">
         <i class="fa-solid fa-folder-open"></i>
-        <span>Filesystem Remnants (${files.length})</span>
+        <span>Files and folders (${files.length})</span>
       </div>
     `;
     
@@ -1604,7 +1604,7 @@ function renderLeftoversTree() {
     regGroup.innerHTML = `
       <div class="tree-group-header">
         <i class="fa-solid fa-cube"></i>
-        <span>Registry Remnants (${registry.length})</span>
+        <span>Registry entries (${registry.length})</span>
       </div>
     `;
     
@@ -1666,7 +1666,7 @@ async function loadAuditData(force = false) {
   } catch (err) {
     loadingEl.innerHTML = `
       <i class="fa-solid fa-circle-xmark" style="font-size: 28px; color: var(--color-danger);"></i>
-      <div style="color: var(--color-danger);">Failed to load audit data: ${err.message}</div>
+      <div style="color: var(--color-danger);">Could not read your system information: ${err.message}</div>
     `;
   }
 }
@@ -1729,7 +1729,7 @@ function renderDiskBars(disks, error) {
   if (error) {
     list.innerHTML = `<div class="panel-state error" style="padding: 12px 0;">
       <i class="fa-solid fa-circle-xmark"></i>
-      <div>Could not read the drives on this machine: ${esc(error)}</div>
+      <div>Could not read the drives on this PC: ${esc(error)}</div>
     </div>`;
     return;
   }
@@ -1768,7 +1768,7 @@ function renderStartupTable(startup) {
 
   if (countBadge)  countBadge.textContent  = total;
   if (orphanBadge) {
-    orphanBadge.textContent = `${orphans} orphaned`;
+    orphanBadge.textContent = `${orphans} broken`;
     orphanBadge.style.display = orphans > 0 ? 'inline-flex' : 'none';
   }
 
@@ -1777,14 +1777,14 @@ function renderStartupTable(startup) {
   const noteEl = document.getElementById('audit-startup-note');
   if (noteEl) {
     noteEl.textContent = startup.detectionNote ||
-      'Vanish reports startup items; it does not change them yet.';
+      'Vanish lists what starts with Windows. It cannot change these yet.';
   }
 
   if (items.length === 0) {
     tbody.innerHTML = `
       <tr>
         <td colspan="4" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
-          <i class="fa-solid fa-circle-check" style="color:var(--color-success); margin-right:6px;"></i>No third-party startup items detected.
+          <i class="fa-solid fa-circle-check" style="color:var(--color-success); margin-right:6px;"></i>Nothing extra starts with Windows on this PC.
         </td>
       </tr>
     `;
@@ -1800,7 +1800,7 @@ function renderStartupTable(startup) {
     const dotClass = item.exeExists === false ? 'orphan'
                    : item.enabled ? 'active'
                    : 'passive';
-    const statusLabel = item.exeExists === false ? 'Orphaned'
+    const statusLabel = item.exeExists === false ? 'Broken'
                       : item.enabled ? 'Active'
                       : 'Inactive';
 
@@ -1817,7 +1817,7 @@ function renderStartupTable(startup) {
              <div class="startup-suggestion">
                <i class="fa-solid fa-lightbulb"></i>
                <div>
-                 <div><strong>Its program is gone from ${esc(item.exePath || 'disk')}, so this entry does nothing at every start-up.</strong></div>
+                 <div><strong>The program at ${esc(item.exePath || 'this location')} is gone, so this entry does nothing every time Windows starts.</strong></div>
                  <div>${esc(item.suggestion)}</div>
                </div>
              </div>
@@ -1850,7 +1850,7 @@ function renderRedundancyGroups(redundancy) {
     list.innerHTML = `
       <div class="audit-ok-box">
         <i class="fa-solid fa-circle-check"></i>
-        No redundant software categories detected. Your install list looks lean.
+        No programs here appear to overlap with each other.
       </div>
     `;
     return;
@@ -1895,9 +1895,9 @@ function setupQuarantineTab() {
       const ok = await confirmDialog({
         title: 'Enable automatic purge?',
         body:
-          `Quarantined entries older than ${retentionInput.value} day(s) will be permanently deleted ` +
-          'at app start, without another prompt. This is the one setting that lets Vanish destroy ' +
-          'something without you clicking it that day.',
+          `Anything in quarantine older than ${retentionInput.value} day(s) will be deleted permanently ` +
+          'each time Vanish starts, with no further prompt. This is the only setting that lets Vanish ' +
+          'destroy something you did not click that day.',
         confirmLabel: 'Enable'
       });
       if (!ok) {
@@ -1911,8 +1911,8 @@ function setupQuarantineTab() {
     });
     toast(
       appSettings.autoPurgeEnabled
-        ? `Automatic purge on, ${appSettings.autoPurgeRetentionDays} day retention.`
-        : 'Automatic purge off. Nothing leaves the vault without a click.',
+        ? `Automatic purge is on. Items are deleted after ${appSettings.autoPurgeRetentionDays} days.`
+        : 'Automatic purge is off. Nothing leaves quarantine unless you delete it.',
       'success'
     );
   });
@@ -1954,7 +1954,7 @@ async function loadVaultEntries() {
 
   if (!res || res.success !== true) {
     document.getElementById('vault-error-text').textContent =
-      (res && res.error) || 'Could not read the quarantine manifest.';
+      (res && res.error) || 'Could not read what is in quarantine.';
     errorBox.style.display = 'flex';
     return;
   }
@@ -1998,10 +1998,10 @@ function describeOrigin(origin) {
   const raw = String(origin || '');
   const known = {
     purge: 'the uninstall wizard',
-    'system-clean/context-menus': 'System Clean - context menu handlers',
-    'system-clean/services': 'System Clean - orphaned services',
-    'system-clean/associations': 'System Clean - file associations',
-    'system-clean/profiles': 'System Clean - other user profiles',
+    'system-clean/context-menus': 'System Clean - right-click menu entries',
+    'system-clean/services': 'System Clean - left-over services',
+    'system-clean/associations': 'System Clean - file types and links',
+    'system-clean/profiles': 'System Clean - other user accounts',
     'system-clean/drivers': 'System Clean - driver packages'
   };
   if (known[raw]) return known[raw];
@@ -2016,14 +2016,14 @@ function describeOrigin(origin) {
 // rather than assuming.
 function describeFate(entry) {
   if (entry.status === 'restored') {
-    return { text: 'Already restored to its original location. This is the record of that.', kind: 'calm' };
+    return { text: 'Already put back where it came from. This is the record of that.', kind: 'calm' };
   }
   if (entry.status === 'deleted') {
     return { text: 'Permanently deleted. Only this record remains.', kind: 'gone' };
   }
   if (!appSettings.autoPurgeEnabled) {
     return {
-      text: 'Kept here until you choose to restore or delete it. Nothing removes it on its own.',
+      text: 'Kept here until you restore it or delete it. Nothing removes it on its own.',
       kind: 'calm'
     };
   }
@@ -2031,13 +2031,13 @@ function describeFate(entry) {
   const retentionDays = parseInt(appSettings.autoPurgeRetentionDays, 10);
   const created = entry.createdAt ? new Date(entry.createdAt) : null;
   if (!created || Number.isNaN(created.getTime()) || !Number.isFinite(retentionDays)) {
-    return { text: `Automatic purge is on - this is deleted once it is ${retentionDays} days old.`, kind: 'warn' };
+    return { text: `Automatic purge is on. This is deleted permanently once it is ${retentionDays} days old.`, kind: 'warn' };
   }
 
   const dueMs = created.getTime() + retentionDays * 86400000;
   const daysLeft = Math.ceil((dueMs - Date.now()) / 86400000);
   if (daysLeft <= 0) {
-    return { text: 'Automatic purge is on and this is already past its retention - it will be deleted permanently at the next start.', kind: 'warn' };
+    return { text: 'Automatic purge is on and this is already older than the limit. It will be deleted permanently the next time Vanish starts.', kind: 'warn' };
   }
   return {
     text: `Automatic purge is on: this is deleted permanently on ${new Date(dueMs).toLocaleDateString()}, in ${daysLeft} day${daysLeft === 1 ? '' : 's'}.`,
@@ -2135,10 +2135,10 @@ function renderVaultEntry(entry) {
       </div>
       <div class="vault-entry-body">
         ${fileRows ? `<div class="vault-item-group-title">Files and folders</div>${fileRows}` : ''}
-        ${regRows ? `<div class="vault-item-group-title">Registry keys (.reg restore manifest)</div>${regRows}` : ''}
-        <div class="vault-item-group-title">Quarantined on</div>
+        ${regRows ? `<div class="vault-item-group-title">Registry entries (saved to a backup file)</div>${regRows}` : ''}
+        <div class="vault-item-group-title">Moved to quarantine on</div>
         <div class="vault-item"><span class="vault-item-path">${esc(dateStr)}</span></div>
-        <div class="vault-item-group-title">Vault location</div>
+        <div class="vault-item-group-title">Kept in</div>
         <div class="vault-item"><span class="vault-item-path">${esc(entry.vaultPath)}</span></div>
       </div>
     </div>`;
@@ -2168,7 +2168,7 @@ async function restoreVaultEntry(entryId) {
 
   const res = await window.api.vaultRestore({ entryId, onConflict: 'skip' });
   if (!res || res.success !== true) {
-    toast(`Restore failed: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not restore it: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
     return;
   }
 
@@ -2195,18 +2195,18 @@ async function restoreVaultEntry(entryId) {
 
 function reportRestore(res) {
   if (!res || res.success !== true) {
-    toast(`Restore failed: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not restore it: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
     return;
   }
   if (res.failed > 0) {
     const first = [...(res.files || []), ...(res.registry || [])].find((i) => i.status === 'failed');
     toast(
-      `Restored with ${res.failed} failure(s). First: ${(first && first.error) || 'unknown'}`,
+      `Restored, but ${res.failed} item(s) could not be put back. First problem: ${(first && first.error) || 'no reason given'}`,
       'warn',
       8000
     );
   } else if (res.skipped > 0) {
-    toast(`${res.skipped} item(s) skipped - originals still occupied.`, 'warn');
+    toast(`${res.skipped} item(s) skipped - something is already in their original place.`, 'warn');
   } else {
     toast('Everything in this entry is back where it came from.', 'success');
   }
@@ -2221,8 +2221,8 @@ async function deleteVaultEntry(entryId) {
   const first = await confirmDialog({
     title: 'Delete forever?',
     body:
-      `This permanently destroys ${itemCount} quarantined item(s) from "${entry.sourceApp}". ` +
-      'This is the only action in Vanish that cannot be undone - after this there is no copy anywhere.',
+      `This permanently deletes ${itemCount} quarantined item(s) from "${entry.sourceApp}". ` +
+      'This is the only thing Vanish does that cannot be undone - after this there is no copy anywhere.',
     confirmLabel: 'Continue'
   });
   if (!first) return;
@@ -2237,9 +2237,9 @@ async function deleteVaultEntry(entryId) {
 
   const res = await window.api.vaultDelete({ entryId });
   if (res && res.success) {
-    toast('Vault entry permanently deleted.', 'success');
+    toast('That quarantine entry was permanently deleted.', 'success');
   } else {
-    toast(`Delete failed: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not delete it: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
   }
   await loadVaultEntries();
 }
@@ -2328,7 +2328,7 @@ async function sampleProcesses() {
     if (!res || res.success !== true) {
       document.getElementById('process-tbody').innerHTML = `
         <tr><td colspan="6" class="table-state" style="color: var(--color-danger);">
-          <i class="fa-solid fa-circle-xmark"></i> ${esc((res && res.error) || 'The process engine did not respond.')}
+          <i class="fa-solid fa-circle-xmark"></i> ${esc((res && res.error) || 'Could not read the running programs.')}
         </td></tr>`;
       return;
     }
@@ -2361,7 +2361,7 @@ function renderProcessTable() {
   });
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="table-state">No process matches that filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="table-state">Nothing running matches that filter.</td></tr>`;
     return;
   }
 
@@ -2397,7 +2397,7 @@ function renderProcessTable() {
 }
 
 function indicatorShortLabel(kind) {
-  if (kind === 'suspicious-parent') return 'Shell spawn';
+  if (kind === 'suspicious-parent') return 'Script-started';
   if (kind === 'destructive-command') return 'Destructive';
   if (kind === 'persistence') return 'Autostart';
   return 'Indicator';
@@ -2412,7 +2412,7 @@ function renderProcessDetails(proc) {
   panel.classList.add('active');
 
   document.getElementById('proc-det-name').textContent = proc.name;
-  document.getElementById('proc-det-company').textContent = proc.imagePath ? 'Running image' : 'No image path available';
+  document.getElementById('proc-det-company').textContent = proc.imagePath ? 'Running now' : 'Program file not available';
   document.getElementById('proc-det-pid').textContent = proc.pid;
   document.getElementById('proc-det-parent').textContent = proc.parentName
     ? `${proc.parentName} (${proc.parentPid})`
@@ -2447,8 +2447,8 @@ async function killSelectedProcess() {
 
   if (PROCESS_KILL_DENYLIST_FATAL.has(nameLower)) {
     toast(
-      `${proc.name} is a core Windows process. Ending it will crash or force-restart your session - ` +
-      'Vanish will not do this from Task Manager.',
+      `${proc.name} is a core part of Windows. Ending it will crash this PC or sign you out, so Vanish ` +
+      'will not end it.',
       'error', 8000
     );
     return;
@@ -2458,12 +2458,11 @@ async function killSelectedProcess() {
   const ok = await confirmDialog({
     title: `End ${proc.name}?`,
     body: isRisky
-      ? `PID ${proc.pid} (${proc.name}) is a process Windows itself depends on for other things running ` +
-        'right now - ending the wrong one can take out networking, audio, or your desktop shell until you ' +
-        'sign out or reboot. Only proceed if you specifically mean to end this PID, not just "a" ' +
-        `${proc.name} instance.`
-      : `PID ${proc.pid} will be terminated immediately. Unsaved work in that process is lost, and ` +
-        'ending a system process can destabilise Windows until you reboot.',
+      ? `Windows uses ${proc.name} to run other things on this PC right now. Ending the wrong one can ` +
+        'take out your network, sound, or the desktop itself until you sign out or restart. Only continue ' +
+        `if you mean to end this exact one, PID ${proc.pid}, and not just any ${proc.name}.`
+      : `PID ${proc.pid} ends immediately. Any unsaved work in it is lost, and ending something Windows ` +
+        'needs can leave this PC unstable until you restart.',
     confirmLabel: 'End process',
     typed: isRisky ? proc.name : null
   });
@@ -2476,7 +2475,7 @@ async function killSelectedProcess() {
     renderProcessDetails(null);
     sampleProcesses();
   } else {
-    toast(`Could not end ${proc.name}: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not end ${proc.name}: ${(res && res.error) || 'no reason given'}`, 'error', 7000);
   }
 }
 
@@ -2527,20 +2526,20 @@ async function findLockers() {
     return;
   }
 
-  results.innerHTML = '<div class="panel-state"><i class="fa-solid fa-spinner fa-spin"></i><div>Asking the Restart Manager...</div></div>';
+  results.innerHTML = '<div class="panel-state"><i class="fa-solid fa-spinner fa-spin"></i><div>Asking Windows what is using it...</div></div>';
   gracefulBtn.style.display = 'none';
 
   const res = await window.api.listLockers({ path });
 
   if (!res || res.success !== true) {
-    results.innerHTML = `<div class="panel-state error"><i class="fa-solid fa-circle-xmark"></i><div>${esc((res && res.error) || 'Lookup failed.')}</div></div>`;
+    results.innerHTML = `<div class="panel-state error"><i class="fa-solid fa-circle-xmark"></i><div>${esc((res && res.error) || 'Could not check that file or folder.')}</div></div>`;
     return;
   }
 
   currentLockers = res.holders || [];
 
   if (currentLockers.length === 0) {
-    results.innerHTML = `<div class="panel-state"><i class="fa-solid fa-circle-check"></i><div>${esc(res.note || 'No processes hold this path.')}</div></div>`;
+    results.innerHTML = `<div class="panel-state"><i class="fa-solid fa-circle-check"></i><div>${esc(res.note || 'Nothing is using this right now.')}</div></div>`;
     return;
   }
 
@@ -2571,11 +2570,11 @@ async function closeLockers(force) {
 
   const res = await window.api.unlockPath({ path, force, pids: currentLockers.map((h) => h.pid) });
   if (!res || res.success !== true) {
-    toast(`Unlock failed: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not release it: ${(res && res.error) || 'no reason given'}`, 'error', 7000);
     return;
   }
 
-  toast(`Asked ${res.totalTargets} target(s) to release; re-checking holders.`, 'success');
+  toast(`Asked ${res.totalTargets} program(s) to let go of it. Checking again.`, 'success');
   await findLockers();
 }
 
@@ -2589,18 +2588,19 @@ async function forceEndHolder(pid) {
   const ok = await confirmDialog({
     title: `Force end ${holder ? holder.name : 'process'}?`,
     body:
-      'Graceful close was already offered. Forcing the process to end loses any unsaved work it holds. ' +
-      'Vanish will suspend the process tree first so a watchdog cannot respawn the lock, then release it.',
+      'You have already been offered the chance to close it normally. Forcing it to end loses any unsaved ' +
+      'work in it. Vanish pauses the program and anything it started first, so it cannot restart itself ' +
+      'and take hold of the file again.',
     confirmLabel: 'Force end'
   });
   if (!ok) return;
 
   const res = await window.api.unlockPath({ path, force: true, suspendTree: true, pids: [pid] });
   if (res && res.success) {
-    toast('Holder ended and lock released.', 'success');
+    toast('That program was ended and the file is free.', 'success');
     (res.notes || []).forEach((n) => toast(n, 'info', 6000));
   } else {
-    toast(`Force end failed: ${(res && res.error) || 'unknown error'}`, 'error', 7000);
+    toast(`Could not force it to end: ${(res && res.error) || 'no reason given'}`, 'error', 7000);
   }
   await findLockers();
 }
@@ -2626,7 +2626,7 @@ function setupQueuePanel() {
   document.getElementById('btn-queue-start').addEventListener('click', startQueue);
   document.getElementById('btn-queue-pause').addEventListener('click', async () => {
     await window.api.queuePause();
-    toast('Queue will pause after the current application finishes.', 'info');
+    toast('The queue will pause once the current program finishes.', 'info');
   });
   document.getElementById('btn-queue-clear').addEventListener('click', async () => {
     if (!guardFullMode()) return;
@@ -2654,10 +2654,10 @@ async function refreshQueue() {
 async function queueAddApp(app) {
   const res = await window.api.queueAdd(app);
   if (!res || res.success !== true) {
-    toast((res && res.error) || 'Could not queue that application.', 'warn');
+    toast((res && res.error) || 'Could not add that program to the queue.', 'warn');
     return;
   }
-  toast(`${app.name} added to the bulk queue.`, 'success');
+  toast(`${app.name} was added to the queue.`, 'success');
   document.getElementById('queue-panel').classList.remove('collapsed');
   await refreshQueue();
 }
@@ -2666,17 +2666,17 @@ async function startQueue() {
   if (!guardFullMode()) return;
   const pending = queueState.items.filter((i) => i.state === 'pending');
   if (pending.length === 0) {
-    toast('Nothing pending in the queue.', 'info');
+    toast('Nothing in the queue is waiting to run.', 'info');
     return;
   }
 
   const ok = await confirmDialog({
-    title: `Uninstall ${pending.length} application(s)?`,
+    title: `Uninstall ${pending.length} program(s)?`,
     body:
-      'Each application gets its own system restore point, then its uninstaller runs with the ' +
-      'silent switches Vanish resolved for it. Uninstallers that insist on showing a window are ' +
-      'marked "needs attention" so you can finish them by hand. Leftover scanning is separate - ' +
-      'nothing is quarantined by this queue.',
+      'Each program gets its own system restore point, then Vanish runs its uninstaller without ' +
+      'prompting where it can. Any uninstaller that insists on showing a window is marked "needs ' +
+      'attention" so you can finish it by hand. Scanning for leftovers is separate - this queue does ' +
+      'not move anything to quarantine.',
     confirmLabel: 'Start'
   });
   if (!ok) return;
@@ -2694,10 +2694,10 @@ async function startQueue() {
     const ackRisky = await confirmDialog({
       title: `${risky.length} uninstaller(s) cannot be fully trusted`,
       body:
-        'These entries would run with administrator rights, but they are the kind of entry ' +
-        'malware can create:\n\n' +
+        'These would run with administrator rights, but they are the kind of entry malware can ' +
+        'create:\n\n' +
         detail +
-        '\n\nSkip them unless you recognise every one. Type RUN to run them anyway; cancel to ' +
+        '\n\nSkip them unless you recognise every one. Type RUN to run them anyway, or cancel to ' +
         'uninstall everything else and mark these as needing attention.',
       confirmLabel: 'Run them too',
       typed: 'RUN'
@@ -2708,7 +2708,7 @@ async function startQueue() {
   window.api.queueStart({ acknowledgedIds });
   toast(
     risky.length > 0 && acknowledgedIds.length === 0
-      ? `Queue started. ${risky.length} untrusted uninstaller(s) will be skipped.`
+      ? `Queue started. ${risky.length} uninstaller(s) that could not be trusted will be skipped.`
       : 'Queue started.',
     'success'
   );
@@ -2737,7 +2737,7 @@ function renderQueue() {
   list.innerHTML = items
     .map((item) => {
       const methodBadge = item.method
-        ? `<span class="method-badge" title="${esc(item.meta && item.meta.matchedName ? 'Matched: ' + item.meta.matchedName : 'Rule 15 heuristic sequence')}">${esc(item.method)}</span>`
+        ? `<span class="method-badge" title="${esc(item.meta && item.meta.matchedName ? 'Matched: ' + item.meta.matchedName : 'How Vanish will run this uninstaller')}">${esc(item.method)}</span>`
         : '';
       const detail = queueItemDetail(item);
       const retryable = ['failed', 'rebootRequired', 'needsAttention'].includes(item.state);
@@ -2774,10 +2774,10 @@ function renderQueue() {
 
   if (counts.rebootRequired) {
     footer.innerHTML = `<i class="fa-solid fa-triangle-exclamation" style="color: var(--color-warning);"></i>
-      Queue paused: an uninstaller needs a reboot to finish. Restart Windows, then retry that item.`;
+      Queue paused: an uninstaller needs a restart to finish. Restart Windows, then retry that item.`;
   } else if (counts.needsAttention) {
     footer.innerHTML = `<i class="fa-solid fa-circle-info"></i>
-      Some uninstallers would not run silently and are waiting on you. ${esc(parts.join(', '))}`;
+      Some uninstallers would not run on their own and are waiting for you. ${esc(parts.join(', '))}`;
   } else {
     footer.textContent = parts.join(', ') || 'Queue empty';
   }
@@ -2788,8 +2788,8 @@ function renderQueue() {
 function queueItemDetail(item) {
   const meta = item.meta || {};
   if (item.state === 'failed' && meta.error) return meta.error;
-  if (item.state === 'failed' && item.exitCode !== null) return `Exit code ${item.exitCode}`;
-  if (item.state === 'rebootRequired') return `Exit code ${item.exitCode} - restart to finish`;
+  if (item.state === 'failed' && item.exitCode !== null) return `The uninstaller stopped with code ${item.exitCode}`;
+  if (item.state === 'rebootRequired') return 'Restart Windows to finish this one';
   if (item.state === 'needsAttention') return 'The uninstaller did not finish on its own';
   if (item.state === 'done') {
     const rp = meta.restorePoint ? `restore point ${meta.restorePoint}` : '';
@@ -2809,38 +2809,38 @@ const CLEANERS = [
   {
     id: 'context-menus',
     icon: 'fa-bars',
-    title: 'Context menu handlers',
-    desc: 'Shell extensions whose COM server is missing. These are what make a right-click menu slow or show dead entries.'
+    title: 'Right-click menu entries',
+    desc: 'Right-click menu entries whose program is no longer on this PC. These are what make the right-click menu slow or full of dead options.'
   },
   {
     id: 'services',
     icon: 'fa-gears',
-    title: 'Orphaned services',
-    desc: 'Service entries whose ImagePath points at an executable that is no longer on disk. Boot-start drivers are deliberately excluded.'
+    title: 'Left-over services',
+    desc: 'Background services that point at a program no longer on this PC. Drivers that Windows loads at startup are left alone.'
   },
   {
     id: 'drivers',
     icon: 'fa-microchip',
-    title: 'Driver store packages',
-    desc: 'Third-party driver packages whose published INF is missing. Audit only in this release - removal is the Stage 11 sweeper.'
+    title: 'Left-over driver packages',
+    desc: 'Driver packages from hardware or programs that are no longer set up on this PC. Vanish can list these but cannot remove them yet.'
   },
   {
     id: 'path',
     icon: 'fa-road',
     title: 'PATH entries',
-    desc: 'Directories in the user or system PATH that no longer exist. The whole Environment key is exported before any edit.'
+    desc: 'Folders listed in your PATH that no longer exist. The whole setting is backed up before anything is changed.'
   },
   {
     id: 'associations',
     icon: 'fa-file-circle-question',
     title: 'File associations and protocols',
-    desc: 'Extension and protocol handlers whose open command points at a missing executable.'
+    desc: 'File types and links set to open with a program that is no longer on this PC.'
   },
   {
     id: 'profiles',
     icon: 'fa-users',
     title: 'Other user profiles',
-    desc: 'Remnants in other local users\' registry hives. Loaded offline and always unloaded afterwards. Full Mode only.',
+    desc: 'Leftovers in the settings of other user accounts on this PC. Needs administrator rights.',
     needsKeyword: true
   }
 ];
@@ -2860,7 +2860,7 @@ function setupCleanTab() {
       if (c.needsKeyword) continue; // needs a search term from the user
       await scanCleaner(c.id, { expand: false });
     }
-    toast('All cleaners scanned.', 'success');
+    toast('Every section has been scanned.', 'success');
   });
 }
 
@@ -2948,7 +2948,7 @@ async function scanCleaner(cleanerId, options = {}) {
   stopScanTicker(`cleaner:${cleanerId}`);
 
   if (!res || res.success !== true) {
-    state.error = (res && res.error) || 'The scan engine did not respond.';
+    state.error = (res && res.error) || 'The scan did not return a result.';
     state.findings = [];
   } else {
     // PowerShell's ConvertTo-Json emits a null element for any finding that
@@ -2986,8 +2986,8 @@ function renderCleanerBody(cleaner) {
 
   const keywordRow = cleaner.needsKeyword
     ? `<div class="unlock-input-row">
-         <input type="text" class="search-input" id="cleaner-keyword-${esc(cleaner.id)}" placeholder="Application name to search for...">
-         <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}">Search profiles</button>
+         <input type="text" class="search-input" id="cleaner-keyword-${esc(cleaner.id)}" placeholder="Program name to search for">
+         <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}">Search other accounts</button>
        </div>`
     : '';
 
@@ -3018,7 +3018,7 @@ function renderCleanerBody(cleaner) {
         <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}">
           <i class="fa-solid fa-magnifying-glass"></i> Scan
         </button>
-        <span style="font-size: 11.5px; color: var(--text-muted);">Scanning is read-only.</span>
+        <span style="font-size: 11.5px; color: var(--text-muted);">Scanning only reads. It changes nothing.</span>
       </div>`;
     wireCleanerBody(cleaner);
     return;
@@ -3026,8 +3026,8 @@ function renderCleanerBody(cleaner) {
 
   if (state.findings.length === 0) {
     const cleared = state.resolvedCount > 0
-      ? `All ${state.resolvedCount} finding(s) have been moved to quarantine.`
-      : esc(state.note || 'No orphans found.');
+      ? `All ${state.resolvedCount} item(s) found here have been moved to quarantine.`
+      : esc(state.note || 'Nothing left behind here.');
     body.innerHTML = `${keywordRow}
       <div class="panel-state">
         <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
@@ -3070,7 +3070,7 @@ function renderCleanerBody(cleaner) {
           ? `<button class="btn-danger btn-compact" data-purge="${esc(cleaner.id)}" data-destructive="true">
                <i class="fa-solid fa-box-archive"></i> Move selected to quarantine
              </button>`
-          : `<span style="font-size: 11.5px; color: var(--color-warning);">Audit only - no removal path in this release.</span>`
+          : `<span style="font-size: 11.5px; color: var(--color-warning);">Vanish can list these but cannot remove them yet.</span>`
       }
     </div>`;
 
@@ -3139,7 +3139,7 @@ async function purgeCleaner(cleanerId) {
   const checked = Array.from(body.querySelectorAll('input[type="checkbox"]:checked'));
 
   if (checked.length === 0) {
-    toast('Tick the findings you want quarantined first.', 'warn');
+    toast('Tick what you want moved to quarantine first.', 'warn');
     return;
   }
 
@@ -3149,10 +3149,10 @@ async function purgeCleaner(cleanerId) {
     title: `Quarantine ${selected.length} item(s)?`,
     body:
       cleanerId === 'path'
-        ? 'The whole Environment key is exported to a .reg restore manifest before the PATH value is rewritten. ' +
-          'Restoring the vault entry puts the exact prior PATH string back.'
-        : 'The selected registry keys are exported to .reg restore manifests, then removed. Nothing is deleted - ' +
-          'everything lands in the Quarantine tab and can be restored from there.',
+        ? 'Your whole PATH setting is saved to a backup file before it is rewritten. Restoring this from the ' +
+          'Quarantine tab puts the exact previous PATH back.'
+        : 'The selected registry entries are saved to a backup file, then removed. Nothing is deleted - it all ' +
+          'goes to the Quarantine tab, and you can put it back from there.',
     confirmLabel: 'Move to quarantine'
   });
   if (!ok) return;
@@ -3165,7 +3165,7 @@ async function purgeCleaner(cleanerId) {
   }
 
   const count = res.quarantinedCount ?? selected.length;
-  toast(`${count} item(s) moved to quarantine. Restore them any time from the Quarantine tab.`, 'success', 6000);
+  toast(`${count} item(s) moved to quarantine. You can put them back any time from the Quarantine tab.`, 'success', 6000);
 
   // 7oo.5: update the view for what just happened instead of re-running the
   // whole scan. This used to end in `await scanCleaner(cleanerId)` - a fresh
@@ -3231,7 +3231,7 @@ async function loadBrokenEntries() {
   if (!res || res.success !== true) {
     empty.style.display = 'flex';
     empty.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: var(--color-danger);"></i>
-      <div>${esc((res && res.error) || 'Could not read the uninstall entries.')}</div>`;
+      <div>${esc((res && res.error) || 'Could not read your installed programs.')}</div>`;
     return;
   }
 
@@ -3258,7 +3258,7 @@ async function loadBrokenEntries() {
           </div>
           <div class="vault-entry-actions">
             <button class="btn-sec btn-compact" data-force-entry="${esc(index)}">
-              <i class="fa-solid fa-magnifying-glass"></i> Scan traces
+              <i class="fa-solid fa-magnifying-glass"></i> Find what it left behind
             </button>
           </div>
         </div>
@@ -3271,7 +3271,7 @@ async function loadBrokenEntries() {
           <div class="vault-item"><span class="vault-item-path">${esc(entry.registryPath)}</span></div>
           ${
             entry.uninstallString
-              ? `<div class="vault-item-group-title">Recorded uninstall command</div>
+              ? `<div class="vault-item-group-title">The uninstall command it recorded</div>
                  <div class="vault-item"><span class="vault-item-path">${esc(entry.uninstallString)}</span></div>`
               : ''
           }
@@ -3299,8 +3299,8 @@ async function scanBrokenEntry(index) {
     const runIt = await confirmDialog({
       title: 'This one can still uninstall itself',
       body:
-        `${entry.displayName} has a working uninstaller, even though ${entry.reasons.join('; ')}. ` +
-        'Running the real uninstaller is always cleaner than forcing. Run it now instead?',
+        `${entry.displayName} still has a working uninstaller, even though ${entry.reasons.join('; ')}. ` +
+        'Letting the program uninstall itself is always cleaner than forcing it. Run it now instead?',
       confirmLabel: 'Run its uninstaller'
     });
     if (runIt) {
@@ -3312,8 +3312,8 @@ async function scanBrokenEntry(index) {
       });
       toast(
         res.success
-          ? 'Uninstaller finished. Re-scan to check for leftovers.'
-          : `Uninstaller did not complete: ${res.error}`,
+          ? 'The uninstaller finished. Scan again to check for leftovers.'
+          : `The uninstaller did not finish: ${res.error}`,
         res.success ? 'success' : 'warn',
         7000
       );
@@ -3332,12 +3332,12 @@ async function runForceScan(options = {}) {
   const results = document.getElementById('force-results');
 
   if (!name && !installLocation) {
-    toast('Enter an application name or an install folder first.', 'warn');
+    toast('Enter a program name or its folder first.', 'warn');
     return;
   }
 
   results.innerHTML = `<div class="panel-state"><i class="fa-solid fa-spinner fa-spin"></i>
-    <div>Scanning the registry and filesystem for traces of "${esc(name || installLocation)}"...</div></div>`;
+    <div>Looking for anything left behind by "${esc(name || installLocation)}"...</div></div>`;
 
   const scan = await window.api.scanLeftovers({
     appName: name || installLocation.split('\\').pop(),
@@ -3375,7 +3375,7 @@ function renderForceResults() {
   if (total === 0) {
     results.innerHTML = `<div class="panel-state">
       <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
-      <div>No traces of "${esc(forceContext.name)}" found at this depth.</div></div>`;
+      <div>Nothing left behind by "${esc(forceContext.name)}" was found at this depth.</div></div>`;
     return;
   }
 
@@ -3402,7 +3402,7 @@ function renderForceResults() {
           <div class="finding-label mono">${esc(r.path)}</div>
           <div class="finding-evidence">${
             r.isUninstallEntry
-              ? 'the uninstall entry itself - removing this is what takes it out of Programs and Features'
+              ? 'The uninstall entry itself. Removing this is what takes the program out of Programs and Features.'
               : esc(r.type)
           }</div>
         </div>
@@ -3412,11 +3412,11 @@ function renderForceResults() {
     .join('');
 
   results.innerHTML = `
-    <div class="settings-group-title">Found ${total} trace(s) of "${esc(forceContext.name)}"</div>
+    <div class="settings-group-title">Found ${total} item(s) left behind by "${esc(forceContext.name)}"</div>
     <div class="cleaner-section expanded">
       <div class="cleaner-section-body" style="display:block; border-top:none;">
         ${files.length ? `<div class="vault-item-group-title">Files and folders (${files.length})</div><div class="cleaner-findings">${fileRows}</div>` : ''}
-        ${registry.length ? `<div class="vault-item-group-title">Registry (${registry.length})</div><div class="cleaner-findings">${regRows}</div>` : ''}
+        ${registry.length ? `<div class="vault-item-group-title">Registry entries (${registry.length})</div><div class="cleaner-findings">${regRows}</div>` : ''}
         <div class="cleaner-actions">
           <button class="btn-sec btn-compact" id="btn-force-select-all">Select all</button>
           <button class="btn-danger btn-compact" id="btn-force-purge" data-destructive="true">
@@ -3447,17 +3447,17 @@ async function forcePurge() {
     .map((r) => ({ path: r.path }));
 
   if (files.length + registry.length === 0) {
-    toast('Tick what you want quarantined first.', 'warn');
+    toast('Tick what you want moved to quarantine first.', 'warn');
     return;
   }
 
   const ok = await confirmDialog({
     title: `Force uninstall "${forceContext.name}"?`,
     body:
-      `${files.length + registry.length} item(s) will be moved into the quarantine vault - files moved, ` +
-      'registry keys exported to a .reg restore manifest first. Nothing is deleted, and restoring the ' +
-      'vault entry brings the application listing back too. This bypasses the application\'s own ' +
-      'uninstaller, so it cannot run any cleanup of its own.',
+      `${files.length + registry.length} item(s) will be moved to quarantine. Files are moved, and registry ` +
+      'entries are saved to a backup file first. Nothing is deleted, and restoring this from the Quarantine ' +
+      'tab brings the program listing back too. This skips the program\'s own uninstaller, so the program ' +
+      'gets no chance to clean up after itself.',
     confirmLabel: 'Move to quarantine'
   });
   if (!ok) return;
@@ -3477,12 +3477,12 @@ async function forcePurge() {
   const failed = [...(res.files || []), ...(res.registry || [])].filter((i) => i.status === 'failed');
   if (failed.length > 0) {
     toast(
-      `${res.quarantinedCount} item(s) quarantined; ${failed.length} left in place (${failed[0].error}).`,
+      `${res.quarantinedCount} item(s) moved to quarantine. ${failed.length} were left in place (${failed[0].error}).`,
       'warn',
       9000
     );
   } else {
-    toast(`${res.quarantinedCount} item(s) quarantined. Restore any time from the Quarantine tab.`, 'success', 6000);
+    toast(`${res.quarantinedCount} item(s) moved to quarantine. You can put them back any time from the Quarantine tab.`, 'success', 6000);
   }
 
   await loadBrokenEntries();

@@ -551,14 +551,26 @@ function Get-UwpApps {
             if ([string]::IsNullOrEmpty($pkg.InstallLocation)) { continue }
             if ($pkg.Name -match "Microsoft.NET" -or $pkg.Name -match "Microsoft.VCLibs" -or $pkg.Name -match "Microsoft.UI.Xaml") { continue }
 
-            # Estimate install date from folder creation
+            # Estimate install date from folder creation. One stat call, not a
+            # Test-Path followed by a Get-Item - that was two filesystem round
+            # trips per package, 123 packages deep.
             $date = $null
-            if (Test-Path $pkg.InstallLocation) {
-                $date = (Get-Item $pkg.InstallLocation).CreationTime.ToString("yyyy-MM-dd")
-            }
+            try {
+                $date = ([System.IO.DirectoryInfo]$pkg.InstallLocation).CreationTime.ToString("yyyy-MM-dd")
+            } catch {}
 
-            # Size estimation
-            $sizeBytes = Get-FolderSize $pkg.InstallLocation
+            # PERFORMANCE (operator 2026-08-07: "all programs takes a lot of
+            # time to list installed apps"). This used to call Get-FolderSize,
+            # which does Get-ChildItem -Recurse -File over the ENTIRE package
+            # directory, for every package. On this machine that is 123 full
+            # recursive directory walks before a single row can be drawn, and it
+            # was the whole of the 10-15 second wait - the registry half of the
+            # list costs well under a second.
+            #
+            # A Store app's size is not worth ten seconds of a person's time on
+            # every single launch. Reported as unknown; the row still renders,
+            # still sorts, and still uninstalls.
+            $sizeBytes = 0
 
             # Display Name fallback
             $name = $pkg.Name
@@ -982,11 +994,33 @@ function Get-SystemDiagnostics {
     } catch {}
 
     # --- GPU ---
+    #
+    # PERFORMANCE: Win32_VideoController is the slowest class touched here by a
+    # wide margin - instantiating it makes Windows enumerate and wake display
+    # adapters, which on a laptop with switchable graphics can stall for
+    # seconds. The registry holds the same adapter name and answers instantly.
+    # Fall back to the CIM class only if the registry does not have it.
     $gpuName = $null
     try {
-        $gpu = Get-CimInstance -Query "SELECT Name FROM Win32_VideoController" -ErrorAction Stop | Select-Object -First 1
-        $gpuName = if ($gpu) { $gpu.Name } else { $null }
+        # Report EVERY adapter, not the first. A laptop with switchable graphics
+        # has the integrated chip at 0000 and the discrete card after it, so
+        # taking the first would tell someone with an RTX 3080 that they have
+        # Radeon graphics - accurate about one adapter and wrong about their
+        # machine.
+        $videoKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}'
+        $adapters = @()
+        foreach ($sub in @('0000','0001','0002','0003')) {
+            $desc = (Get-ItemProperty -Path "$videoKey\$sub" -Name 'DriverDesc' -ErrorAction SilentlyContinue).DriverDesc
+            if ($desc -and $desc -notmatch 'Basic Display|Basic Render') { $adapters += [string]$desc }
+        }
+        if ($adapters.Count -gt 0) { $gpuName = ($adapters | Select-Object -Unique) -join ' + ' }
     } catch {}
+    if (-not $gpuName) {
+        try {
+            $gpu = Get-CimInstance -Query "SELECT Name FROM Win32_VideoController" -ErrorAction Stop | Select-Object -First 1
+            $gpuName = if ($gpu) { $gpu.Name } else { $null }
+        } catch {}
+    }
 
     # --- Uptime ---
     $uptimeHours = $null
