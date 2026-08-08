@@ -10,6 +10,9 @@ prompt" or "a clean machine" -- it does NOT cover Windows 10 (Sandbox always
 mirrors the host OS version, which is Windows 11). TASK-17 needs a separate
 Win10 pass; see the note at the bottom.
 
+Sections in order: 0 (jhh, do first) -> 1 (69a) -> 2 (kt0) -> 3 (1qp) -> 3b
+(udu) -> 3c (dmu) -> 3d (bfh.2) -> 3e (9sy) -> 4 (0xt, Win11 half).
+
 In the sandbox PowerShell window, `npm start` launches the app
 (`node_modules\.bin\electron.cmd .` if `npm start` doesn't resolve).
 
@@ -133,6 +136,102 @@ sandbox has no Store app worth removing, install one from the Store first.
       intact (`Get-ChildItem -Recurse` it and compare).
 
 Record result in `bd show vanish-uninstaller-udu` notes.
+
+## 3c. vanish-uninstaller-dmu -- the three startup actions, live
+
+`test/network-verify.ps1` and the unelevated real-data pass cover everything
+that does not write: refusal by tier, refusal of anything outside each verb's
+own surface, the button rendering inert in Audit Mode. What has not run is any
+of the three verbs actually writing something and actually putting it back.
+
+- [ ] Launch elevated. Health Advisor -> Startup Items.
+- [ ] **Registry remove**: pick any row whose Source is `Registry` (not one
+      you rely on -- planting a throwaway one first is fine:
+      `New-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name VanishSandboxTest -Value notepad.exe`).
+      Click its action button, confirm the dialog, confirm it.
+      -> Expect: the value is gone from the registry
+      (`Get-ItemProperty HKCU:\Software\...\Run` no longer lists it) and a
+      new entry named "Startup entries" appears in the Quarantine tab.
+- [ ] Restore that entry from Quarantine.
+      -> Expect: the value is back, byte-identical
+      (`(Get-ItemProperty ... -Name VanishSandboxTest).VanishSandboxTest`
+      reads `notepad.exe` again).
+- [ ] **Service to manual**: pick a non-Microsoft auto-start service row.
+      Click its action, confirm.
+      -> Expect: `(Get-Service <name>).StartType` reads `Manual`, the
+      service itself is untouched (still installed, can still be started),
+      and a "Startup services" entry appears in Quarantine.
+- [ ] Restore it.
+      -> Expect: `StartType` is back to `Automatic`.
+- [ ] **Task disable**: pick a scheduled-task row. Click Disable.
+      -> Expect: `(Get-ScheduledTask -TaskName <name>).State` reads
+      `Disabled`. No Quarantine entry -- disabling is reversible in place,
+      nothing was exported.
+- [ ] Click the same button again (now labelled Enable).
+      -> Expect: `State` is back to `Ready`.
+
+Record result in `bd show vanish-uninstaller-dmu` notes, then
+`bd close vanish-uninstaller-dmu --reason="..."` if all three round trips
+pass.
+
+## 3d. vanish-uninstaller-bfh.2 -- network hold, applied and released
+
+The one item on this list that needs you to kill the app on purpose. Capture
+is written to disk *before* anything changes specifically so this is safe to
+test destructively.
+
+- [ ] Launch elevated. Health Advisor -> Network activity -> Hold.
+      -> Expect: the confirm dialog names what changes (Delivery
+      Optimization capped, running background transfers paused) and what it
+      cannot do (no more speed, nothing about other devices).
+- [ ] Confirm. 
+      -> Expect: the row turns to "Background transfers are being held",
+      naming how many transfers were paused (0 is a valid, expected answer
+      if nothing was mid-download).
+- [ ] Check the machine directly:
+      `Get-ItemProperty HKLM:\SOFTWARE\Policies\Microsoft\Windows\DeliveryOptimization -Name DOPercentageMaxBackgroundBandwidth`
+      -> Expect: `1`.
+- [ ] **Kill Vanish while the hold is on** -- Task Manager, End Task (or
+      close the sandbox's PowerShell window if that's what's running it).
+      Do not use the in-app Release button first.
+- [ ] Relaunch Vanish elevated.
+      -> Expect: within a few seconds of startup, re-run the registry check
+      above -- `DOPercentageMaxBackgroundBandwidth` should be gone entirely
+      (it did not exist before the hold, so revert deletes it rather than
+      zeroing it), or the policy key itself should be gone if Vanish created
+      it. The Network activity row should show "Hold background transfers"
+      (off), not the held state.
+- [ ] Check the oplog for a `network-release-stale` entry:
+      `Get-Content (Join-Path $env:APPDATA "vanish\oplog.jsonl") -Tail 5`
+      (adjust the path if `set-oplog-path` in Settings shows a different one)
+      -> Expect: one line with `"action":"network-release-stale"` and
+      `"outcome":"success"`.
+- [ ] Repeat the whole sequence once more, this time using the in-app
+      **Release** button instead of killing the app.
+      -> Expect: same end state, immediate rather than on next launch, toast
+      confirms "Every setting is back where it was."
+
+Record result in `bd show vanish-uninstaller-bfh.2` notes, then
+`bd close vanish-uninstaller-bfh.2 --reason="..."` if both the crash-recovery
+and the normal-release paths restore the machine exactly.
+
+## 3e. vanish-uninstaller-9sy -- elevated `npm run verify`
+
+One command, and it re-checks most of the sections above from a different
+angle (the real renderer against the real backend, not manual clicking). Run
+it after 3c and 3d rather than before -- it is more useful once the machine
+has some real startup/network state to look at.
+
+- [ ] From the elevated PowerShell window: `npm run verify`
+      -> Expect: ends with `Result: N passed, 0 failed`. The prior recorded
+      run was 148/0 on a smaller suite; today's suite is 177 assertions
+      unelevated, so this elevated number will be higher -- record whatever
+      it actually says, not the old number.
+- [ ] Read anything under "Not verified by this run" at the end -- that
+      section is supposed to shrink now that this is an elevated pass.
+
+Record the pass/fail count in `bd show vanish-uninstaller-9sy` notes, then
+close it.
 
 ## 4. TASK-17 (Win11 half only) -- vanish-uninstaller-0xt
 
