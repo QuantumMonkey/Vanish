@@ -10,6 +10,82 @@ full decision rules.
 
 ## [Unreleased]
 
+### Fixed — the operator's punch list from the installed build
+
+Twelve issues reported after installing and using the sent executable, plus
+three found while fixing them. The recurring theme the operator named twice
+was honesty: several screens stated more certainty than the data supported.
+
+* **Uninstall completion screen no longer overclaims** (`xw2`). A run where
+  0 items moved to quarantine used the partial-success wording and showed
+  "Unknown" freed. Nothing moving is a failure, not a lesser success: it now
+  has its own state — "Nothing was moved to quarantine", failed styling, and
+  an explicit "0 B".
+* **"Left in place" failures are reachable** (`vej`). The per-item reason was
+  always rendered; the completion screen had no `overflow-y`, so an
+  ancestor's `overflow: hidden` clipped it off the fixed-height wizard with
+  no way to scroll to it.
+* **Network Activity stops calling a quiet sample an idle machine** (`h8j`).
+  The verdict is computed from a ~1s byte-rate sample, which can land in a
+  gap of genuinely bursty traffic. With programs holding open connections it
+  now reads "Low traffic in this sample — not necessarily idle" and states
+  the sample length; the confident "Nothing on this PC is using the network"
+  is reserved for a quiet sample with *no* open connections.
+* **A high connection count is explained, not just counted** (`hks`). 54
+  open connections on one program read as alarming with no context. A local
+  process-kind classifier (browsers, sync clients, launchers, security
+  software, updaters, dev tools…) explains what is normal for that kind of
+  program — visible in-row above 10 connections, in a tooltip always. No
+  risk score, no safe/unsafe verdict, no trusted-process list (Rule 6), and
+  no lookups of any kind (INV-4). An unrecognised program is explicitly
+  described as meaning nothing either way.
+* **GPU column says which kind of nothing it means** (`3nd`). The engine
+  drops zero readings, so one "-" meant both "measured, idle" and "never
+  measured". Now three distinct states — "measuring…", an honest "0%", and
+  "-" only for a process newer than the last sample — plus a visible note
+  and header tooltip stating the 15s cadence and that the percentage sums
+  across the GPU's engines.
+* **Guided tour's welcome step is readable** (`0ct`). The step with no
+  spotlight target hid the spotlight with `opacity: 0`, which also killed
+  the box-shadow that does the dimming — so the one step that most needed a
+  dim never had one, and its tooltip sat on a bright app list.
+* **Sticky table headers** (`h0i`) across all four column-header tables.
+* **All Programs layout** (`ri6`). Date and Size had no width floor and
+  wrapped to two lines once the details sidebar compressed the table; the
+  sidebar also claimed its full width while invisible, before any selection.
+* **Column header said "Publisher", showed a type badge** (`qq5`) — renamed
+  to "Type"; the publisher was always under the app name in column 1.
+* **System Clean header buttons** (`l0t`) — "Scan all" and "Clean all" were
+  spread apart by the shared header's `space-between`.
+* **The bulk queue stops fighting its own user** (`2pc`). It re-expanded on
+  every add and toasted each time, so collapsing it was undone by the next
+  thing you did. It now announces itself once per batch, and collapsed
+  shrinks from 400×419 to 391×57 — about 87% less screen area.
+
+### Added — Network Activity download/upload tiles
+
+* Download, Upload and a de-emphasised adapter tile (`anc`) replace the text
+  fragment that used to sit inside the "Looked at:" line. Deliberately *not*
+  shown as a percentage of link speed: that is the negotiated rate to the
+  router, not the internet connection behind it.
+
+### Fixed — test coverage that looked like coverage
+
+* **Seven `window.api` methods were missing from the shared test fixture**,
+  so the Health Advisor tab was a hard TypeError under test — and the suite
+  stayed green, because nothing ever navigated there. All 48 methods are now
+  covered, found by diffing the renderer's calls against the fixture's keys
+  rather than one crash at a time.
+* **Every tab is now smoke-checked** (`k0k`): the suite clicks all 8 tabs and
+  asserts a panel is visible, carries no visible error state, and contains
+  no "is not a function" text. Verified by deliberately re-breaking the
+  fixture and confirming the suite goes red.
+* **Three icons were rendering as invisible blank squares** — caught by this
+  project's own `test/icon-verify.js`, which exists for exactly that silent
+  no-op. Added to the vendored set; 55 referenced, 55 defined.
+
+`npm test`: **395 passed, 0 failed** (was 371 before the new assertions).
+
 ### Added — guided tour, ambient background, codebase cleanup
 
 * **Guided tour.** A hand-rolled spotlight walkthrough (no third-party tour
