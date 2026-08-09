@@ -59,6 +59,33 @@ body {
   position: relative;
 }
 
+/* Ambient background wash - a slow, low-opacity drift of the app's own
+ * accent colors behind the glass panels. z-index: -1 keeps it above body's
+ * own background-color (so it's visible) but below every real panel/card
+ * (so it never competes with content). Kept deliberately subtle: this is a
+ * trust-focused audit tool, not a marketing page - a flashy background
+ * would work against the tone everywhere else in this app tries to hold. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: -10%;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 15% 20%, hsla(220, 90%, 60%, 0.05), transparent 45%),
+    radial-gradient(circle at 85% 75%, hsla(265, 70%, 60%, 0.045), transparent 50%);
+  animation: ambient-drift 75s ease-in-out infinite alternate;
+}
+
+@keyframes ambient-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(-3%, 2%) scale(1.06); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body::before { animation: none; }
+}
+
 /* Scrollbar Customization */
 ::-webkit-scrollbar {
   width: 6px;
@@ -951,6 +978,87 @@ body {
 #elevation-modal-overlay { z-index: 140; }
 #unlock-modal-overlay    { z-index: 150; }
 #confirm-modal-overlay   { z-index: 160; }
+#tour-overlay             { z-index: 200; }
+
+/* Guided tour: a spotlight cutout over the current step's real UI element,
+ * not a description of it in the abstract. The cutout is one CSS trick - an
+ * element with a border-radius and a box-shadow big enough to blanket the
+ * whole viewport, so everything OUTSIDE its own box reads as dimmed and
+ * everything INSIDE it (the real, live app) stays fully visible and
+ * interactive-looking. No spotlight target (the welcome step) just centers
+ * the tooltip with a plain full-screen dim. */
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition: opacity 200ms ease-out;
+}
+
+.tour-overlay.active {
+  opacity: 1;
+  pointer-events: all;
+  visibility: visible;
+}
+
+.tour-spotlight {
+  position: absolute;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(5, 8, 15, 0.8);
+  transition: top 250ms ease, left 250ms ease, width 250ms ease, height 250ms ease, opacity 200ms ease;
+  pointer-events: none;
+}
+
+.tour-spotlight.is-hidden {
+  opacity: 0;
+  box-shadow: 0 0 0 9999px rgba(5, 8, 15, 0.8);
+}
+
+.tour-tooltip {
+  position: absolute;
+  width: 320px;
+  background: var(--bg-dark-card);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  transition: top 250ms ease, left 250ms ease;
+}
+
+.tour-tooltip-step {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.tour-tooltip h3 {
+  margin: 0 0 8px;
+  font-family: var(--font-title);
+  font-size: 15px;
+  color: var(--text-white);
+}
+
+.tour-tooltip p {
+  margin: 0 0 14px;
+  font-size: 13px;
+  color: var(--text-gray);
+  line-height: 1.5;
+}
+
+.tour-tooltip-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tour-overlay, .tour-spotlight, .tour-tooltip { transition: none; }
+}
 
 .wizard-modal {
   width: 680px;

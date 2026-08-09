@@ -665,6 +665,22 @@
             </button>
           </div>
 
+          <div class="settings-group-title">Help</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Guided tour</div>
+              <div class="settings-row-desc">
+                A quick, six-step walkthrough of what each part of Vanish does. Shown automatically the
+                first time Vanish opens; replay it here any time.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <button class="btn-sec btn-compact" id="set-take-tour">
+                <i class="fa-solid fa-lightbulb"></i> Take the tour
+              </button>
+            </div>
+          </div>
+
           <div class="settings-group-title">Startup</div>
           <div class="settings-row">
             <div class="settings-row-main">
@@ -855,6 +871,27 @@
         </div>
       </div><!-- /about-panel -->
 
+    </div>
+  </div>
+
+  <!-- First-time tour: a spotlight cutout over the current step's target
+       element plus a positioned tooltip, not a centered modal - the whole
+       point is pointing at the real UI, not describing it in the abstract.
+       Auto-shown once (settings.hasSeenTour), always replayable from
+       Settings ("Take the tour"). No third-party tour library - hand-rolled,
+       same zero-dependency approach as assets/icons.css. -->
+  <div class="tour-overlay" id="tour-overlay">
+    <div class="tour-spotlight" id="tour-spotlight"></div>
+    <div class="tour-tooltip" id="tour-tooltip">
+      <div class="tour-tooltip-step" id="tour-step-counter"></div>
+      <h3 id="tour-title"></h3>
+      <p id="tour-body"></p>
+      <div class="tour-tooltip-actions">
+        <button class="btn-sec btn-compact" id="tour-skip">Skip tour</button>
+        <span style="flex: 1;"></span>
+        <button class="btn-sec btn-compact" id="tour-back">Back</button>
+        <button class="btn-primary btn-compact" id="tour-next">Next</button>
+      </div>
     </div>
   </div>
 

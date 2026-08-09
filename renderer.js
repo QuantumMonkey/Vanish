@@ -320,6 +320,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupSettingsTab();
   setupForceUninstall();
   setupScanProgress();
+  setupTour();
 
   await loadSettings();
   await checkElevation();
@@ -331,6 +332,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   syncSettingsPanel();
   await loadApplications();
   await maybeOfferElevation();
+
+  // First-launch guided tour. Skipped (not just delayed) if the elevation
+  // offer is showing on this same launch - two full-screen overlays
+  // stacking on the very first frame is worse than needing to find "Take
+  // the tour" in Settings once. hasSeenTour stays false in that case, so a
+  // later launch that doesn't offer elevation still gets it automatically.
+  if (!appSettings.hasSeenTour) {
+    const elevationShowing = document.getElementById('elevation-modal-overlay').classList.contains('active');
+    if (!elevationShowing) startTour();
+  }
 });
 
 // Titlebar Button Events
@@ -4350,4 +4361,167 @@ async function forcePurge() {
 
   await loadBrokenEntries();
   await runForceScan({ extraRegistryPath: null });
+}
+
+// ==========================================
+// GUIDED TOUR
+// ==========================================
+//
+// A spotlight cutout over the real, live sidebar item for each step, not a
+// slideshow describing the app in the abstract - see the CSS comment on
+// .tour-spotlight for the mechanism. Auto-shown once per the operator's own
+// wording ("runnable on demand from settings" implies it is not just a
+// first-run thing) - see the hasSeenTour comment in lib/store.js for when
+// the automatic showing does and does not fire.
+
+const TOUR_STEPS = [
+  {
+    selector: null,
+    title: 'Welcome to Vanish',
+    body: 'A 60-second look at what each part of the app does. Skip any time - you can always replay this from Settings.'
+  },
+  {
+    selector: '#admin-indicator',
+    title: 'Audit Mode vs Full Mode',
+    body: 'Vanish opens read-only by default. It can list, scan and explain everything, but cannot remove anything until you grant administrator rights - nothing here can surprise you.'
+  },
+  {
+    selector: '.nav-item[data-tab="all-apps"]',
+    title: 'All Programs',
+    body: 'Every installed program, desktop and Store apps together - including real install sizes for Steam and Epic games, not just whatever Windows happens to track.'
+  },
+  {
+    selector: '.nav-item[data-tab="audit"]',
+    title: 'Health Advisor',
+    body: 'A system-wide check: startup items, redundant software, network activity, disk health - in plain language, with a verdict, not just a wall of numbers.'
+  },
+  {
+    selector: '.nav-item[data-tab="system-clean"]',
+    title: 'System Clean',
+    body: 'Finds leftovers a normal uninstall leaves behind - dead registry entries, orphaned services, broken shortcuts - and shows you before touching anything.'
+  },
+  {
+    selector: '.nav-item[data-tab="quarantine"]',
+    title: 'Nothing is ever just deleted',
+    body: 'Every removal goes here first. Anything Vanish takes off your PC can be put back from this tab, until you choose to delete it for good.'
+  },
+  {
+    selector: '.nav-item[data-tab="settings"]',
+    title: 'Come back any time',
+    body: "That's the tour. This is also where it lives if you want to see it again, or tune how Vanish behaves."
+  }
+];
+
+let tourStepIndex = 0;
+
+function setupTour() {
+  document.getElementById('tour-skip').addEventListener('click', endTour);
+  document.getElementById('tour-back').addEventListener('click', () => {
+    if (tourStepIndex > 0) {
+      tourStepIndex--;
+      renderTourStep();
+    }
+  });
+  document.getElementById('tour-next').addEventListener('click', onTourNext);
+
+  const takeTourBtn = document.getElementById('set-take-tour');
+  if (takeTourBtn) takeTourBtn.addEventListener('click', startTour);
+
+  window.addEventListener('resize', () => {
+    if (document.getElementById('tour-overlay').classList.contains('active')) {
+      positionTourSpotlight(TOUR_STEPS[tourStepIndex].selector);
+    }
+  });
+}
+
+function startTour() {
+  tourStepIndex = 0;
+  document.getElementById('tour-overlay').classList.add('active');
+  renderTourStep();
+}
+
+function endTour() {
+  document.getElementById('tour-overlay').classList.remove('active');
+  if (!appSettings.hasSeenTour) saveSettings({ hasSeenTour: true });
+}
+
+function onTourNext() {
+  // A step pointing at a sidebar tab switches to it - so the spotlight
+  // frames the real destination, not just the nav item with the previous
+  // tab's content sitting dimmed behind it.
+  const step = TOUR_STEPS[tourStepIndex];
+  if (step && step.selector && step.selector.startsWith('.nav-item')) {
+    const target = document.querySelector(step.selector);
+    const tab = target && target.getAttribute('data-tab');
+    if (tab) switchTab(tab);
+  }
+
+  if (tourStepIndex < TOUR_STEPS.length - 1) {
+    tourStepIndex++;
+    // Two frames: one for the tab-switch's own DOM changes to apply, one
+    // for layout to settle, before re-measuring the next target's position.
+    requestAnimationFrame(() => requestAnimationFrame(renderTourStep));
+  } else {
+    endTour();
+  }
+}
+
+function renderTourStep() {
+  const step = TOUR_STEPS[tourStepIndex];
+  if (!step) {
+    endTour();
+    return;
+  }
+
+  document.getElementById('tour-step-counter').textContent = `${tourStepIndex + 1} of ${TOUR_STEPS.length}`;
+  document.getElementById('tour-title').textContent = step.title;
+  document.getElementById('tour-body').textContent = step.body;
+
+  const backBtn = document.getElementById('tour-back');
+  const nextBtn = document.getElementById('tour-next');
+  backBtn.style.visibility = tourStepIndex === 0 ? 'hidden' : 'visible';
+  nextBtn.textContent = tourStepIndex === TOUR_STEPS.length - 1 ? 'Done' : 'Next';
+
+  positionTourSpotlight(step.selector);
+}
+
+function positionTourSpotlight(selector) {
+  const spotlight = document.getElementById('tour-spotlight');
+  const tooltip = document.getElementById('tour-tooltip');
+  const target = selector ? document.querySelector(selector) : null;
+
+  if (!target) {
+    spotlight.classList.add('is-hidden');
+    tooltip.style.transform = 'translate(-50%, -50%)';
+    tooltip.style.top = '50%';
+    tooltip.style.left = '50%';
+    return;
+  }
+
+  const rect = target.getBoundingClientRect();
+  const pad = 6;
+  spotlight.classList.remove('is-hidden');
+  spotlight.style.top = `${rect.top - pad}px`;
+  spotlight.style.left = `${rect.left - pad}px`;
+  spotlight.style.width = `${rect.width + pad * 2}px`;
+  spotlight.style.height = `${rect.height + pad * 2}px`;
+
+  // Prefer the right of the target (every current target is in the left
+  // sidebar); fall back to the left if there is not enough room, and clamp
+  // vertically so the tooltip never runs off the bottom of a short window.
+  tooltip.style.transform = 'none';
+  const tooltipWidth = 320;
+  const tooltipHeightEstimate = 170;
+  const margin = 16;
+
+  let left = rect.right + margin;
+  if (left + tooltipWidth > window.innerWidth - margin) {
+    left = Math.max(margin, rect.left - tooltipWidth - margin);
+  }
+  let top = rect.top;
+  if (top + tooltipHeightEstimate > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - tooltipHeightEstimate - margin);
+  }
+  tooltip.style.top = `${top}px`;
+  tooltip.style.left = `${left}px`;
 }

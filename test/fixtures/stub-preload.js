@@ -87,13 +87,22 @@ contextBridge.exposeInMainWorld('api', {
   vaultDelete: stub('vaultDelete', { success: true }),
   openVaultFolder: async () => ({ success: true }),
   openDataFolder: async () => ({ success: true }),
+  // hasSeenTour: true - these fixtures simulate an already-onboarded user.
+  // Without it, appSettings.hasSeenTour comes back undefined (falsy) and the
+  // guided tour auto-starts as a full-screen, pointer-events:all overlay,
+  // blocking every click the UI-interaction suites make (caught live: 30
+  // failures in the Full Mode suite alone, every one "blocked by
+  // DIV#tour-overlay"). A suite that specifically wants first-run behaviour
+  // can still override this per-test.
   getSettings: async () => ({
     autoPurgeEnabled: false, autoPurgeRetentionDays: 30,
-    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit'
+    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit',
+    hasSeenTour: true
   }),
   setSettings: async (p) => ({
     autoPurgeEnabled: false, autoPurgeRetentionDays: 30,
-    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit', ...p
+    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit',
+    hasSeenTour: true, ...p
   }),
   getAppInfo: async () => ({
     name: 'vanish-uninstaller', version: '0.3.0', tier: fullMode ? 'full' : 'audit',

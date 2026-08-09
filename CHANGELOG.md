@@ -10,6 +10,30 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added — guided tour, ambient background, codebase cleanup
+
+* **Guided tour.** A hand-rolled spotlight walkthrough (no third-party tour
+  library) - 7 steps covering Audit/Full Mode, All Programs, Health
+  Advisor, System Clean, and the quarantine vault's "nothing is ever just
+  deleted" promise. Auto-shows once on first launch, replayable any time
+  from a new "Take the tour" row in Settings. Caught a real regression
+  before it shipped: the tour's full-screen overlay auto-started during the
+  Full Mode UI-interaction test suite (a fresh test fixture defaults
+  `hasSeenTour` to falsy) and blocked all 30 of that suite's clicks - fixed
+  in the test fixture (an already-onboarded user is the correct default for
+  a UI test), not by weakening the tour's real blocking behavior.
+* **Ambient background wash.** A very low-opacity, slow-drifting radial
+  gradient behind the glass panels, respecting `prefers-reduced-motion`.
+  Deliberately subtle - this is a trust-focused audit tool, not a
+  marketing page.
+* **Codebase clutter scan.** Full pass for dead code, duplicate logic,
+  orphaned files, unused dependencies, unused CSS, and unused icons came
+  back clean - no dead functions, no duplicate logic meeting the bar, no
+  orphaned tracked files, no unused dependencies. Removed one genuinely
+  unused CSS class (`.flex-row`) and marked three fully-superseded
+  documentation artifacts as historical rather than deleting them, matching
+  this project's existing keep-and-mark convention.
+
 ### Added — real install sizes for Steam (and documented support for Epic) games
 
 * **Steam/Epic games no longer show "unknown size."** Confirmed the actual
