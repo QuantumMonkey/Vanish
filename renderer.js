@@ -2918,6 +2918,10 @@ let processPaused = false;
 // Keyed by pid (string, since JSON object keys always are).
 let gpuUsageByPid = {};
 let gpuAdapterUsage = []; // [{ physIndex, percent }] - system-wide, not per-process
+// Static per-boot hardware info (name/vendor/logo), fetched once and cached -
+// unlike gpuAdapterUsage this doesn't change between samples. null = not
+// fetched yet, [] = fetched and no real adapters found.
+let gpuVendorInfo = null;
 let gpuSampleTimer = null;
 let gpuSampling = false;
 const GPU_SAMPLE_INTERVAL_MS = 15000;
@@ -3008,6 +3012,14 @@ async function sampleGpuUsage() {
 
 function startGpuSampling() {
   stopGpuSampling();
+  if (gpuVendorInfo === null) {
+    // Static hardware info - fetched once per session, not on the sampling
+    // interval. renderGpuAdapterSummary() re-renders once this resolves.
+    window.api.getGpuVendors().then((vendors) => {
+      gpuVendorInfo = vendors || [];
+      renderGpuAdapterSummary();
+    });
+  }
   sampleGpuUsage();
   gpuSampleTimer = setInterval(sampleGpuUsage, GPU_SAMPLE_INTERVAL_MS);
 }
@@ -3020,9 +3032,13 @@ function stopGpuSampling() {
 }
 
 // "Active GPU icons, so we know which GPU is doing what" - a small,
-// system-wide (not per-process) summary. Adapters are labelled generically
-// by phys index (GPU 0 / GPU 1), matching Windows' own Task Manager - see
-// Get-GpuUsageByProcess for why a friendly vendor name is not reliable here.
+// system-wide (not per-process) summary. The numeric GPU 0/GPU 1 label
+// always stays (matches real Task Manager's own precedent for the same
+// phys-index limitation - see Get-GpuUsageByProcess); a real vendor logo is
+// layered on top from gpuVendorInfo (app.getGPUInfo, main.js) when a phys
+// index has a corresponding entry, by array-order best-effort correlation -
+// see the get-gpu-vendors handler for exactly what that promise does and
+// does not rest on.
 function renderGpuAdapterSummary() {
   const el = document.getElementById('gpu-adapter-summary');
   if (!el) return;
@@ -3031,12 +3047,17 @@ function renderGpuAdapterSummary() {
     return;
   }
   el.innerHTML = gpuAdapterUsage
-    .map(
-      (a) =>
-        `<span class="gpu-adapter-pill${a.percent > 0 ? ' is-active' : ''}">
-           <i class="fa-solid fa-microchip"></i> GPU ${esc(a.physIndex)}: ${esc(a.percent.toFixed(0))}%
-         </span>`
-    )
+    .map((a) => {
+      const vendorMatch = (gpuVendorInfo || []).find((v) => v.physIndex === a.physIndex);
+      const icon = vendorMatch && vendorMatch.vendor === 'amd' ? 'fa-amd'
+        : vendorMatch && vendorMatch.vendor === 'nvidia' ? 'fa-nvidia'
+        : 'fa-microchip';
+      const title = vendorMatch ? ` title="${esc(vendorMatch.name)}"` : '';
+      return `
+        <span class="gpu-adapter-pill${a.percent > 0 ? ' is-active' : ''}"${title}>
+           <i class="fa-solid ${icon}"></i> GPU ${esc(a.physIndex)}: ${esc(a.percent.toFixed(0))}%
+         </span>`;
+    })
     .join('');
 }
 

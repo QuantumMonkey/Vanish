@@ -902,6 +902,34 @@ ipcMain.handle('get-gpu-usage', async () => {
   }
 });
 
+// Operator: "i need amd and nvidia logos for the respective gpu." Electron
+// already enumerates every adapter for its own rendering (app.getGPUInfo) -
+// this needed no custom native interop, unlike an earlier DXGI COM interop
+// attempt that a vtable-declaration bug left non-functional (see CHANGELOG).
+// One real limitation carried over honestly: this API exposes vendorId and
+// deviceString per adapter, but no LUID, so there is no proven way to
+// confirm its array order matches the GPU Engine perf counter's phys_N
+// index used by get-gpu-usage above - both ultimately enumerate the same OS
+// adapter list, which makes index-order a reasonable best-effort
+// correlation, not a guaranteed one. The renderer keeps the numeric
+// "GPU 0/GPU 1" label alongside any logo for exactly this reason.
+ipcMain.handle('get-gpu-vendors', async () => {
+  try {
+    const info = await app.getGPUInfo('complete');
+    const devices = (info && info.gpuDevice) || [];
+    return devices
+      .filter((d) => d.vendorId !== 0x1414) // Microsoft Basic Render Driver - not a real GPU
+      .map((d, i) => ({
+        physIndex: i,
+        name: d.deviceString,
+        vendor: d.vendorId === 0x1002 ? 'amd' : d.vendorId === 0x10de ? 'nvidia' : null,
+        active: d.active === true
+      }));
+  } catch {
+    return [];
+  }
+});
+
 fullModeOnly('kill-process', async (event, params) => {
   try {
     const res = await runPowerShell('kill-process', params || {});

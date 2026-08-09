@@ -45,6 +45,7 @@ contextBridge.exposeInMainWorld('api', {
   // Stage 3 - Task Manager & Unlocker (REQ-06..REQ-09)
   listProcesses: (params) => ipcRenderer.invoke('list-processes', params),
   getGpuUsage: () => ipcRenderer.invoke('get-gpu-usage'),
+  getGpuVendors: () => ipcRenderer.invoke('get-gpu-vendors'),
   killProcess: (params) => ipcRenderer.invoke('kill-process', params),
   listLockers: (params) => ipcRenderer.invoke('list-lockers', params),
   unlockPath: (params) => ipcRenderer.invoke('unlock-path', params),

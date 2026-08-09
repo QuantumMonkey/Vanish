@@ -27,17 +27,19 @@ full decision rules.
   its total/broken badges. A waived group's own "N installed" badge also
   drops its red/danger styling, since it is an acknowledged choice, not a
   live warning.
-* **GPU vendor logos: attempted, blocked, documented rather than guessed.**
-  Real AMD/NVIDIA logos on the Task Manager GPU pills need the perf
-  counter's `phys_N` index correlated to a real vendor - attempted via DXGI
-  COM interop (`CreateDXGIFactory1`/`IDXGIAdapter1.GetDesc1`, the
-  authoritative source for adapter LUID + vendor). The interop's vtable
-  declaration was incomplete (`IDXGIFactory1` inherits `IDXGIObject`/
-  `IDXGIFactory` methods ahead of `EnumAdapters1`) and produced no usable
-  result rather than silently-wrong data - the safer failure mode, but still
-  not shippable. Generic "GPU 0/GPU 1" labels stay in place (matches real
-  Task Manager's own precedent for the identical limitation) rather than
-  guessing a vendor-to-index mapping that could be wrong.
+* **GPU vendor logos, working.** A first attempt at DXGI COM interop
+  (`CreateDXGIFactory1`/`IDXGIAdapter1.GetDesc1`) hit an incomplete vtable
+  declaration and produced no usable result - documented, not shipped.
+  Resolved through a much simpler, already-battle-tested path instead:
+  Electron enumerates every GPU adapter internally for its own rendering,
+  and `app.getGPUInfo('complete')` exposes vendor ID and name per adapter
+  with zero custom interop. Real AMD/NVIDIA marks (Simple Icons, CC0-
+  licensed files; the marks themselves remain their respective trademark
+  owners, informational hardware-identification use) now render on the Task
+  Manager GPU pills. The correlation from a vendor to the GPU Engine perf
+  counter's `phys_N` index is still array-order best-effort (no LUID is
+  exposed to prove it definitively) - the numeric "GPU 0/GPU 1" label stays
+  alongside the logo for exactly that reason.
 
 ### Added / Fixed — GPU visibility, network telemetry, redundancy waivers, startup latency
 
