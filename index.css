@@ -2628,6 +2628,12 @@ input:checked + .slider:before {
 }
 .queue-panel.active { display: flex; }
 .queue-panel.collapsed .queue-list, .queue-panel.collapsed .queue-footer { display: none; }
+/* 2pc: let collapsed shrink to its own header rather than holding the full
+   400px. Measured: 400x419 expanded -> 391x57 collapsed, so ~87% less screen
+   area. The width barely moves (the header's title + count + Start + Clear
+   genuinely need ~391px) - the height is where the win is, and it is enough
+   that a collapsed queue no longer sits over the app list. */
+.queue-panel.collapsed { width: auto; max-width: 400px; }
 .queue-panel-header {
   display: flex;
   align-items: center;

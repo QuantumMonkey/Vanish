@@ -3607,14 +3607,29 @@ async function refreshQueue() {
   renderQueue();
 }
 
+// 2pc: the panel used to force itself open on EVERY add and fire a toast each
+// time, so collapsing it out of the way was undone by the very next add -
+// "causes friction for its own interactions", almost verbatim. It now
+// announces itself once, when the queue goes from empty to non-empty, and
+// then respects whatever the user did with it. The count badge in its own
+// header is the better feedback channel for adds 2..N, and it is always
+// visible even when collapsed.
+let queueHasAnnounced = false;
+
 async function queueAddApp(app) {
   const res = await window.api.queueAdd(app);
   if (!res || res.success !== true) {
     toast((res && res.error) || 'Could not add that program to the queue.', 'warn');
     return;
   }
-  toast(`${app.name} was added to the queue.`, 'success');
-  document.getElementById('queue-panel').classList.remove('collapsed');
+
+  const firstOfABatch = !queueHasAnnounced;
+  if (firstOfABatch) {
+    queueHasAnnounced = true;
+    document.getElementById('queue-panel').classList.remove('collapsed');
+    toast(`${app.name} was added to the queue. Add more, then press Start.`, 'success');
+  }
+
   await refreshQueue();
 }
 
@@ -3682,6 +3697,9 @@ function renderQueue() {
 
   if (items.length === 0) {
     panel.classList.remove('active');
+    // 2pc: an emptied queue resets the one-time announcement, so the next
+    // batch the user starts building gets the panel opened for them again.
+    queueHasAnnounced = false;
     return;
   }
 
