@@ -2450,6 +2450,49 @@ input:checked + .slider:before {
   color: var(--color-warning);
   margin-bottom: 8px;
 }
+/* anc: download / upload / adapter as real tiles instead of a fragment of
+   text inside the "Looked at:" line. Auto-fit so they reflow to one column
+   on a narrow window rather than squeezing. */
+.net-rate-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 12px 0 4px;
+}
+.net-rate-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-dark-card);
+  border: 1px solid var(--border-glass);
+  border-radius: 12px;
+  padding: 12px 14px;
+  min-width: 0;
+}
+.net-rate-icon { font-size: 16px; color: var(--text-muted); flex-shrink: 0; }
+.net-rate-icon.is-down { color: hsl(217, 91%, 65%); }
+.net-rate-icon.is-up { color: hsl(250, 95%, 70%); }
+.net-rate-text { min-width: 0; }
+.net-rate-value {
+  font-family: var(--font-title);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--text-white);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.net-rate-label {
+  font-size: 11px;
+  color: var(--text-gray);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The adapter tile is context, not a measurement - de-emphasised so the two
+   numbers that ARE measurements read first. */
+.net-rate-tile.is-meta .net-rate-value { font-size: 13px; font-weight: 600; color: var(--text-gray); }
+
 /* hks: the "normal for a web browser" note beside a high connection count.
    Muted on purpose - it is reassurance, and reassurance that shouts reads
    as a warning. */

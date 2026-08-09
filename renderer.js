@@ -2064,13 +2064,46 @@ function renderNetworkActivity(net) {
   // per adapter (they already drive the busy/quiet verdict) - only the split
   // figures themselves were never displayed. No new engine capability, no
   // new network I/O, just surfacing a number already in the response.
-  const speedLine = primary
-    ? `${rate(primary.receiveBytesPerSecond)} down / ${rate(primary.sendBytesPerSecond)} up`
-    : null;
+  // anc: these two were a fragment of text inside the "Looked at:" line. They
+  // are the two numbers most people come to this panel for, so they get their
+  // own tiles. Ping is deliberately absent - see bd kp0, still an open
+  // decision, and this was built so it does not depend on that outcome.
+  //
+  // The tiles show the adapter carrying the default route. Deliberately NOT
+  // expressed as a percentage of link speed: linkSpeedBps is the negotiated
+  // rate to the router, not the speed of the internet connection behind it,
+  // and "0.4% used" against the wrong denominator is a confident wrong answer.
+  const rateTiles = primary
+    ? `<div class="net-rate-tiles">
+         <div class="net-rate-tile">
+           <i class="fa-solid fa-arrow-down net-rate-icon is-down"></i>
+           <div class="net-rate-text">
+             <div class="net-rate-value">${esc(rate(primary.receiveBytesPerSecond))}</div>
+             <div class="net-rate-label">Download</div>
+           </div>
+         </div>
+         <div class="net-rate-tile">
+           <i class="fa-solid fa-arrow-up net-rate-icon is-up"></i>
+           <div class="net-rate-text">
+             <div class="net-rate-value">${esc(rate(primary.sendBytesPerSecond))}</div>
+             <div class="net-rate-label">Upload</div>
+           </div>
+         </div>
+         <div class="net-rate-tile is-meta">
+           <i class="fa-solid fa-ethernet net-rate-icon"></i>
+           <div class="net-rate-text">
+             <div class="net-rate-value">${esc(primary.name)}</div>
+             <div class="net-rate-label">${primary.isWireless ? 'Wi-Fi' : 'Wired'}${
+               net.signalPercent != null ? ` &middot; signal ${esc(net.signalPercent)}%` : ''
+             }</div>
+           </div>
+         </div>
+       </div>`
+    : '';
 
   const examined = [
-    primary ? `${esc(primary.name)} (${primary.isWireless ? 'Wi-Fi' : 'wired'})` : null,
-    speedLine ? esc(speedLine) : null,
+    // anc: adapter name and the up/down rates moved into the tiles above -
+    // repeating them here would just be the old inline text back again.
     `${processes.length} program(s) with a connection open`,
     net.updateTransfers != null
       ? `Windows Update: ${net.updateTransfers === 0 ? 'not downloading' : `${net.updateTransfers} download(s) running`}`
@@ -2135,6 +2168,8 @@ function renderNetworkActivity(net) {
         <i class="fa-solid fa-rotate-right"></i> Measure again
       </button>
     </div>
+
+    ${rateTiles}
 
     <div class="panel-inline-note">Looked at: ${examined.map(esc).join(' &middot; ')}${signalLine ? ` &middot; ${esc(signalLine)}` : ''}</div>
 
