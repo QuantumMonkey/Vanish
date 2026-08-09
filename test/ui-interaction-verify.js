@@ -412,6 +412,53 @@ app.whenReady().then(async () => {
   assert(locked.locked === locked.total, 'every destructive control is locked in Audit Mode');
   assert(locked.titled === locked.total, 'every locked control explains why in its tooltip');
 
+  // --- k0k: actually OPEN each tab and check it rendered -------------------
+  //
+  // The loop above proves each nav item is clickable. It does not prove the
+  // panel behind it renders, and that gap hid a real defect: five window.api
+  // methods were missing from the fixture entirely, so the Health Advisor tab
+  // rendered nothing but "window.api.getNetworkActivity is not a function" -
+  // while this suite reported 62/62 green, because nothing ever navigated
+  // there and looked. A tab can be completely dead and every assertion above
+  // still passes.
+  //
+  // Deliberately generic rather than a per-tab content assertion: the failure
+  // being guarded against is "this whole panel blew up", which looks the same
+  // on every tab, and a generic check keeps working when panels gain content.
+  console.log('');
+  console.log('k0k: every tab renders without an error state');
+  for (const tab of ['all-apps', 'audit', 'task-manager', 'system-clean', 'quarantine', 'force-uninstall', 'settings', 'about']) {
+    await win.webContents.executeJavaScript(`document.querySelector('.nav-item[data-tab="${tab}"]').click()`);
+    await new Promise((r) => setTimeout(r, 700));
+    const state = await win.webContents.executeJavaScript(`(() => {
+      const panel = Array.from(document.querySelectorAll('.content-area'))
+        .find((p) => p.style.display !== 'none');
+      if (!panel) return { rendered: false, errors: [] };
+      return {
+        rendered: true,
+        panelId: panel.id,
+        // The app's own error rendering, plus the specific shape a missing
+        // preload method produces - a TypeError message reaching a panel.
+        //
+        // VISIBLE errors only. Some panels keep a permanently-present error
+        // placeholder hidden by inline style (#vault-error on Quarantine),
+        // which is not a failure - offsetParent is null for anything with a
+        // display:none ancestor, so it filters those without needing to know
+        // which panels have one.
+        errors: Array.from(panel.querySelectorAll('.panel-state.error'))
+          .filter((e) => e.offsetParent !== null)
+          .map((e) => e.textContent.replace(/\s+/g, ' ').trim().slice(0, 120)),
+        notAFunction: /is not a function/.test(panel.textContent)
+      };
+    })()`);
+    assert(state.rendered, `${tab}: a panel is actually visible after clicking the tab`);
+    assert(
+      state.errors.length === 0,
+      `${tab}: panel rendered with no error state${state.errors.length ? ` (${state.errors[0]})` : ''}`
+    );
+    assert(!state.notAFunction, `${tab}: no "is not a function" text reached the panel`);
+  }
+
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
   app.exit(fail > 0 ? 1 : 0);
