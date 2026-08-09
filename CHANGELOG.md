@@ -10,6 +10,44 @@ full decision rules.
 
 ## [Unreleased]
 
+### Fixed / Added — seven operator-reported issues from a live session
+
+* **UAC diagnostics (`ytv`).** The "Windows did not grant administrator
+  rights" message never said why. `scanner.ps1` now reads `EnableLUA` and
+  checks Administrators-group membership independently of the current
+  process's own (UAC-filtered) token, and `relaunch-elevated` tells a real
+  UAC decline (Win32 1223) apart from the account not being an administrator
+  at all, or UAC being off on the machine. The renderer shows a
+  cause-specific message instead of one generic banner. Needs console/VM
+  verification, same as every other elevation-dependent item.
+* **System Overview cards wrapped to a second row even maximized (`7d8`).**
+  `.audit-cards-grid`'s minmax bounds needed up to 1610px for all 6 cards to
+  share one row; lowered to 150-220px so ~950-1310px is enough.
+* **Clean All (`zl4`).** Scan All never had a purge-side complement. Clean
+  All now purges every removable finding in every already-scanned System
+  Clean section behind one aggregate confirmation, and requires typing CLEAN
+  if any selected item is `Advanced`-risk (mirrors the existing untrusted-
+  uninstaller warning). Tier-locked in Audit Mode like every other
+  destructive control.
+* **Elevation-toggle info text could show stale state (`bim`).** "Always
+  start with administrator rights" flips its checkbox natively and
+  instantly; the "Next start: ..." line under it used to wait for the
+  settings save's IPC round-trip before updating, a real (if narrow) window
+  where the two described different states. Now applied optimistically on
+  the same `change` event.
+* **Raw PowerShell errors reaching the UI (`frr`).** A portable-build temp-
+  extraction race could leave `scanner.ps1` missing, and Task Manager showed
+  the raw "PowerShell exited with code 4294770688..." text. `runPowerShell()`
+  now checks the file exists before spawning, offers a one-time native
+  "Restart Vanish" dialog that re-extracts cleanly (reusing the
+  `PORTABLE_EXECUTABLE_FILE`-safe relaunch path), and no longer surfaces raw
+  stderr or exit codes to any renderer-facing error message.
+* **Audit Mode write-attempt UX (`k87`) and About page disclosure (`3ri`)**
+  reviewed, no code change: `guardFullMode()`'s toast plus `data-destructive`
+  tier-locking already explain the block outside of About; About's full
+  tech-stack/data-folder disclosure was kept deliberately (zero network I/O,
+  matches the project's transparency stance).
+
 ### Changed — commercialization: personal use free, commercial use paid (ADR 0002)
 
 [`adrs/0002-commercialization-b2b-paid-personal-free.md`](adrs/0002-commercialization-b2b-paid-personal-free.md)

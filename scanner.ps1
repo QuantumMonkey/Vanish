@@ -942,7 +942,51 @@ function Scan-Leftovers {
 # 5.5 Check Admin Elevation - WindowsPrincipal API (Promptgate Rule 13; replaces banned 'net session')
 function Check-AdminStatus {
     $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-    return @{ isAdmin = $isAdmin } | ConvertTo-Json
+    return @{ isAdmin = $isAdmin; uac = (Get-UacDiagnostics) } | ConvertTo-Json -Depth 4
+}
+
+# 5.6 UAC / elevation-path diagnostics (operator report: "admin not granted on
+# a UAC-disabled machine" -- Check-AdminStatus alone only says whether THIS
+# process is elevated, never why an elevation attempt failed. Two machine
+# facts resolve that:
+#   - enableLua: is UAC itself turned on at all (HKLM Policies\System).
+#   - isGroupMember: is this account in Administrators, independent of
+#     whether the current token is elevated. WindowsPrincipal.IsInRole is
+#     deliberately unreliable here -- UAC hands an unelevated admin a
+#     FILTERED token that reports IsInRole = $false, identically to a
+#     standard user who was never an admin at all. That collapse is exactly
+#     the ambiguity a caller needs resolved, so it cannot be the source of
+#     the answer. Get-LocalGroupMember reads local group membership
+#     directly and is unaffected by the calling process's own elevation
+#     state.
+function Get-UacDiagnostics {
+    $enableLua = $null
+    try {
+        $val = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name EnableLUA -ErrorAction Stop
+        $enableLua = [bool]$val.EnableLUA
+    } catch {
+        $enableLua = $null   # missing key (some Server SKUs) or unreadable -- unknown, not "off"
+    }
+
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    $isElevatedNow = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+    $isGroupMember = $null
+    try {
+        $me = "$env:USERDOMAIN\$env:USERNAME"
+        $members = Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop
+        $isGroupMember = [bool]($members | Where-Object {
+            $_.Name -eq $me -or ($_.SID -and $identity.User -and $_.SID.Value -eq $identity.User.Value)
+        })
+    } catch {
+        $isGroupMember = $null   # domain policy blocks the query, module missing, etc -- unknown
+    }
+
+    return @{
+        enableLua     = $enableLua
+        isElevatedNow = $isElevatedNow
+        isGroupMember = $isGroupMember
+    }
 }
 
 # ==========================================
@@ -4880,7 +4924,36 @@ if ($Action) {
                 }
                 @{ success = $true } | ConvertTo-Json -Compress
             } catch {
-                @{ success = $false; declined = $true; error = $_.Exception.Message } | ConvertTo-Json -Compress
+                # Every Start-Process -Verb RunAs failure used to collapse into
+                # the same declined:true, whether it was a real UAC "No" click,
+                # a machine where the account isn't an administrator at all,
+                # or a UAC-disabled machine where no consent dialog exists to
+                # click through. Win32 1223 (ERROR_CANCELLED) is the ONE code
+                # that specifically means "the user dismissed the prompt" --
+                # everything else is a different, more useful cause to report.
+                $nativeCode = $null
+                if ($_.Exception -is [System.ComponentModel.Win32Exception]) {
+                    $nativeCode = $_.Exception.NativeErrorCode
+                } elseif ($_.Exception.InnerException -is [System.ComponentModel.Win32Exception]) {
+                    $nativeCode = $_.Exception.InnerException.NativeErrorCode
+                }
+                $uac = Get-UacDiagnostics
+                $cause = 'unknown'
+                if ($nativeCode -eq 1223) {
+                    $cause = 'declined'
+                } elseif ($uac.isGroupMember -eq $false) {
+                    $cause = 'not-admin'
+                } elseif ($uac.enableLua -eq $false) {
+                    $cause = 'uac-disabled'
+                }
+                @{
+                    success         = $false
+                    declined        = ($cause -eq 'declined')
+                    cause           = $cause
+                    nativeErrorCode = $nativeCode
+                    uac             = $uac
+                    error           = $_.Exception.Message
+                } | ConvertTo-Json -Compress -Depth 4
             }
         }
         # ---- STAGE 2: AUDIT & HEALTH ADVISOR ----

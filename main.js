@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain, shell, dialog } = require('electron');
 const path = require('node:path');
+const fs = require('node:fs');
 // SEC-1: spawn only. Nothing in this process may hand a string to a shell.
 const { spawn } = require('node:child_process');
 
@@ -42,6 +43,10 @@ const TIER_AUDIT = 'audit';
 
 let currentTier = TIER_AUDIT;
 let elevationOfferPending = false;
+// EnableLUA / Administrators-group facts from the most recent UAC check
+// (boot-time check-admin, or a later relaunch-elevated attempt). Null until
+// the first check-admin call resolves.
+let lastUacDiagnostics = null;
 
 function isFullMode() {
   return currentTier === TIER_FULL;
@@ -131,6 +136,7 @@ const bootstrapped = app.whenReady().then(async () => {
   try {
     const admin = await runPowerShell('check-admin');
     currentTier = admin && admin.isAdmin === true ? TIER_FULL : TIER_AUDIT;
+    lastUacDiagnostics = (admin && admin.uac) || null;
   } catch {
     currentTier = TIER_AUDIT;
   }
@@ -264,6 +270,53 @@ function enginePath() {
     : path.join(__dirname, 'scanner.ps1');
 }
 
+// Shown at most ONCE per session, ever - not just while open. Task Manager
+// alone re-calls list-processes on a multi-second interval; if a "Not now"
+// dismissal re-armed this, the very next poll against a still-missing file
+// would pop the same modal again, and again, for as long as the panel stays
+// open. One explanation is enough - every later failure still gets the same
+// friendly (non-raw) error text in its own panel without a repeat interrupt.
+let engineMissingDialogShown = false;
+
+// Portable builds unpack to a fresh %TEMP% folder on every launch
+// (attemptElevatedRelaunch above documents the same class of race). If that
+// folder is gone mid-session - a duplicate instance's cleanup, antivirus
+// quarantine, the user emptying Temp - the fix is the same either way: throw
+// the current, now-broken extraction away and get a fresh one. app.relaunch()
+// with PORTABLE_EXECUTABLE_FILE (the ORIGINAL exe the user double-clicked,
+// never the temp copy) makes electron-builder's portable launcher perform
+// that fresh extraction independently, exactly like a normal re-launch.
+function relaunchAppInPlace() {
+  const exePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  const argList = app.isPackaged ? [] : [app.getAppPath()];
+  app.relaunch({ execPath: exePath, args: argList });
+  app.exit(0);
+}
+
+// Operator report: the Task Manager panel once showed "PowerShell exited with
+// code 4294770688. Error: The argument '...\resources\scanner.ps1' to the
+// -File parameter does not exist" verbatim - a raw process-binding error, not
+// anything scanner.ps1 itself said. That text should never reach a user; this
+// is the one, recognizable, actionable response to it.
+function notifyEngineMissingAndOfferRestart(scriptPath) {
+  if (engineMissingDialogShown) return;
+  engineMissingDialogShown = true;
+  const choice = dialog.showMessageBoxSync(mainWindow || undefined, {
+    type: 'warning',
+    title: 'Vanish needs to restart',
+    message: "Vanish's own files went missing from its temporary folder.",
+    detail:
+      'This can happen if two copies of the portable app were open at once, or antivirus software removed ' +
+      'a file. Restarting Vanish re-extracts everything fresh, which normally fixes it immediately - nothing ' +
+      'on this PC is changed either way.',
+    buttons: ['Restart Vanish', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true
+  });
+  if (choice === 0) relaunchAppInPlace(); // process is exiting; nothing after this runs
+}
+
 // Helper to run scanner.ps1 functions
 //
 // `onProgress` receives each progress record the engine emits while it works.
@@ -271,6 +324,15 @@ function enginePath() {
 function runPowerShell(action, params = {}, onProgress = null) {
   return new Promise((resolve, reject) => {
     const scriptPath = enginePath();
+
+    if (!fs.existsSync(scriptPath)) {
+      notifyEngineMissingAndOfferRestart(scriptPath);
+      const err = new Error("Vanish couldn't find its own scanning engine. Restarting Vanish usually fixes this.");
+      err.code = 'ENGINE_MISSING';
+      reject(err);
+      return;
+    }
+
     const paramsJson = JSON.stringify(params);
     const paramsBase64 = Buffer.from(paramsJson, 'utf8').toString('base64');
 
@@ -314,14 +376,29 @@ function runPowerShell(action, params = {}, onProgress = null) {
 
     ps.on('close', (code) => {
       if (code !== 0) {
-        reject(new Error(`PowerShell exited with code ${code}. Error: ${stderr}`));
+        // This is a process-level failure (execution policy, PowerShell itself
+        // crashing, a malformed -File argument) - NOT a scanner.ps1 action
+        // returning its own {success:false, error:'...'} JSON, which is the
+        // normal, already-friendly failure path every UI panel expects. The
+        // raw exit code and stderr are real information, just not for a user
+        // mid-task - they stay in the main-process console for diagnosis.
+        console.error(`PowerShell exited with code ${code}. Error: ${stderr}`);
+        const err = new Error(
+          "Vanish's scanning engine hit an unexpected error and couldn't finish. Try again, or restart " +
+          'Vanish if it keeps happening.'
+        );
+        err.code = 'ENGINE_PROCESS_FAILED';
+        reject(err);
         return;
       }
       try {
         const json = JSON.parse(stdout);
         resolve(json);
       } catch (err) {
-        reject(new Error(`Failed to parse PowerShell JSON: ${err.message}. Output was: ${stdout}`));
+        console.error(`Failed to parse PowerShell JSON: ${err.message}. Output was: ${stdout}`);
+        const parseErr = new Error("Vanish's scanning engine returned something unexpected. Try again.");
+        parseErr.code = 'ENGINE_BAD_OUTPUT';
+        reject(parseErr);
       }
     });
   });
@@ -642,12 +719,27 @@ async function attemptElevatedRelaunch(trigger) {
       tier: currentTier,
       items: {},
       outcome: res && res.success ? 'success' : 'declined',
-      meta: { trigger }
+      meta: { trigger, cause: res && res.cause }
     });
     if (res && res.success) return { success: true };
-    return { success: false, declined: true, error: (res && res.error) || 'Elevation was declined.' };
+    if (res && res.uac) lastUacDiagnostics = res.uac;
+    // scanner.ps1 now tells apart a real UAC decline (cause: 'declined') from
+    // the account not being an administrator at all ('not-admin') or UAC
+    // being turned off on this machine ('uac-disabled') -- forward that
+    // instead of collapsing every failure back into "declined".
+    const cause = (res && res.cause) || 'unknown';
+    return {
+      success: false,
+      declined: cause === 'declined',
+      cause,
+      error: (res && res.error) || 'Elevation was declined.'
+    };
   } catch (error) {
-    return { success: false, declined: true, error: error.message };
+    // runPowerShell() itself threw -- the engine couldn't be reached at all
+    // (e.g. the missing-scanner.ps1 case), not a UAC decision. Reporting this
+    // as "declined" told the user Windows refused them when nothing about
+    // Windows or UAC was even involved.
+    return { success: false, declined: false, cause: 'engine-error', error: error.message };
   }
 }
 
@@ -746,6 +838,7 @@ ipcMain.handle('get-app-info', async () => {
     version: app.getVersion(),
     tier: currentTier,
     isFullMode: isFullMode(),
+    uac: lastUacDiagnostics,
     dataDir: store.dataDir(),
     vaultRoot: store.vaultRoot(),
     oplogPath: store.oplogPath(),

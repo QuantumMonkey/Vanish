@@ -432,7 +432,30 @@ async function requestElevation(overlay) {
   }
 
   if (wait) wait.classList.remove('active');
-  toast('Windows did not grant administrator rights. Vanish stays in Audit Mode.', 'warn');
+  toast(elevationFailureMessage(res && res.cause), 'warn', 9000);
+}
+
+// scanner.ps1 now tells apart WHY a relaunch-elevated attempt failed instead
+// of reporting every case as a generic decline (operator report: "admin is
+// not getting granted on a UAC-disabled machine" -- the old one-size message
+// told them Windows refused them, when the real cause was that there was no
+// UAC prompt to refuse in the first place).
+function elevationFailureMessage(cause) {
+  switch (cause) {
+    case 'not-admin':
+      return "This Windows account isn't an administrator, so there is no elevated permission to grant. " +
+        'Sign in with an administrator account, or ask one to add this account to the Administrators group.';
+    case 'uac-disabled':
+      return 'User Account Control is turned off on this machine, so Windows never showed a permission ' +
+        "prompt to accept. Vanish stays in Audit Mode - check this PC's UAC/Group Policy settings, or " +
+        'sign in from an account that is already an administrator.';
+    case 'engine-error':
+      return "Vanish couldn't reach its own scanning engine to request elevation. Try restarting Vanish.";
+    case 'declined':
+      return 'You declined the Windows permission prompt. Vanish stays in Audit Mode.';
+    default:
+      return 'Windows did not grant administrator rights. Vanish stays in Audit Mode.';
+  }
 }
 
 // 7oo.3: the protected set is now tiny and evidence-backed - Windows servicing
@@ -929,9 +952,20 @@ function setupSettingsTab() {
   // elevated. Does not itself do anything destructive - it only changes when
   // Vanish asks Windows for elevation, not whether Windows asks - so it gets
   // no confirmDialog, matching the other non-destructive settings here.
-  startupElevated.addEventListener('change', () =>
-    saveSettings({ startupMode: startupElevated.checked ? 'full' : 'audit' })
-  );
+  //
+  // BUG (operator report, screenshot showed the toggle ON next to "opens
+  // read-only next start"): a native checkbox flips its own visual the
+  // instant it's clicked, but the "Next start" line only used to update after
+  // saveSettings()'s awaited IPC round-trip resolved. On any real latency
+  // (disk I/O in writeSettings) that left a real, screenshot-catchable window
+  // where the toggle and the text described two different states. Applying
+  // the copy synchronously, before the await, closes that window - the text
+  // now always matches what the user just clicked, and syncSettingsPanel()
+  // reconciling it again once the save resolves is a no-op on the happy path.
+  startupElevated.addEventListener('change', () => {
+    applyStartupElevatedCopy(startupElevated.checked);
+    saveSettings({ startupMode: startupElevated.checked ? 'full' : 'audit' });
+  });
 
   autoPurge.addEventListener('change', async () => {
     if (autoPurge.checked) {
@@ -978,6 +1012,19 @@ async function saveSettings(patch) {
   toast('Setting saved.', 'success', 2200);
 }
 
+// 388: the toggle's own name does not say what happens next, and the setting
+// is about a launch that has not happened yet. Spell out the next start, and
+// say it in terms of the toggle position itself so the two can never be read
+// as describing different states.
+function applyStartupElevatedCopy(startsElevated) {
+  const startupState = document.getElementById('set-startup-elevated-state');
+  if (!startupState) return;
+  startupState.innerHTML = startsElevated
+    ? '<i class="fa-solid fa-circle-check"></i> ON - Next start: Vanish asks Windows for administrator rights straight away, before any window shows.'
+    : '<i class="fa-solid fa-circle-info"></i> OFF - Next start: Vanish opens read-only (Audit Mode). Turn this on, or click "Restart as administrator" any time, to switch.';
+  startupState.style.color = startsElevated ? 'var(--color-success)' : 'var(--text-gray)';
+}
+
 function syncSettingsPanel() {
   const autoPurge = document.getElementById('set-auto-purge');
   if (!autoPurge) return;
@@ -988,16 +1035,7 @@ function syncSettingsPanel() {
 
   const startsElevated = appSettings.startupMode === 'full';
   document.getElementById('set-startup-elevated').checked = startsElevated;
-
-  // 388: the toggle's own name does not say what happens next, and the setting
-  // is about a launch that has not happened yet. Spell out the next start.
-  const startupState = document.getElementById('set-startup-elevated-state');
-  if (startupState) {
-    startupState.innerHTML = startsElevated
-      ? '<i class="fa-solid fa-circle-check"></i> Next start: Vanish asks Windows for administrator rights straight away.'
-      : '<i class="fa-solid fa-circle-info"></i> Next start: Vanish opens read-only. You can switch any time.';
-    startupState.style.color = startsElevated ? 'var(--color-success)' : 'var(--text-gray)';
-  }
+  applyStartupElevatedCopy(startsElevated);
 
   syncModeCard();
 
@@ -3304,6 +3342,9 @@ function setupCleanTab() {
     }
     toast('Every section has been scanned.', 'success');
   });
+
+  const cleanAllBtn = document.getElementById('btn-clean-all-cleaners');
+  if (cleanAllBtn) cleanAllBtn.addEventListener('click', () => cleanAllCleaners());
 }
 
 function renderCleanerSections() {
@@ -3630,20 +3671,103 @@ async function purgeCleaner(cleanerId) {
 
   const count = res.quarantinedCount ?? selected.length;
   toast(`${count} item(s) moved to quarantine. You can put them back any time from the Quarantine tab.`, 'success', 6000);
+  applyPurgeResult(cleanerId, selected, count);
+}
 
-  // 7oo.5: update the view for what just happened instead of re-running the
-  // whole scan. This used to end in `await scanCleaner(cleanerId)` - a fresh
-  // full sweep, measured at 180 seconds for context menus on the operator's
-  // machine - to learn something the app already knew: the items it just
-  // quarantined are gone. Quarantining is a change WE made, so the result is
-  // not in doubt, and re-deriving it from scratch was pure waiting.
-  const purgedIds = new Set(selected.map((f) => f.id));
+// 7oo.5: update the view for what just happened instead of re-running the
+// whole scan. This used to end in `await scanCleaner(cleanerId)` - a fresh
+// full sweep, measured at 180 seconds for context menus on the operator's
+// machine - to learn something the app already knew: the items it just
+// quarantined are gone. Quarantining is a change WE made, so the result is
+// not in doubt, and re-deriving it from scratch was pure waiting. Shared by
+// purgeCleaner (one section) and cleanAllCleaners (every scanned section).
+function applyPurgeResult(cleanerId, purgedItems, count) {
+  const state = cleanerState[cleanerId];
+  const purgedIds = new Set(purgedItems.map((f) => f.id));
   state.findings = state.findings.filter((f) => !purgedIds.has(f.id));
   if (state.selected) purgedIds.forEach((id) => state.selected.delete(id));
   state.resolvedCount = (state.resolvedCount || 0) + count;
 
   renderCleanerBody(CLEANERS.find((c) => c.id === cleanerId));
   updateCleanerBadge(cleanerId);
+}
+
+// Scan All's complement: purge every removable finding in every section that
+// already has a scan on screen, not just what happens to be ticked in each
+// one - the same "everywhere, not just here" relationship Scan All has to a
+// single section's Scan button. One aggregate confirmation covers every
+// section at once; if any selected item is Advanced-risk, that confirmation
+// requires typing CLEAN rather than a single click (mirrors the untrusted-
+// uninstaller warning in startQueue() above) so an unsafe-tier item can never
+// be removed as an unnoticed side effect of a routine "clean everything" click.
+async function cleanAllCleaners() {
+  if (!guardFullMode()) return;
+
+  const byCleaner = CLEANERS
+    .filter((c) => !c.needsKeyword)
+    .map((cleaner) => ({ cleaner, state: cleanerState[cleaner.id] }))
+    .filter(({ state }) => state && state.scanned && state.findings.length > 0)
+    .map(({ cleaner, state }) => ({
+      cleaner,
+      items: state.findings.filter((f) => f.removable !== false)
+    }))
+    .filter(({ items }) => items.length > 0);
+
+  if (byCleaner.length === 0) {
+    toast('Nothing to clean yet - scan first, or everything found so far is list-only.', 'info');
+    return;
+  }
+
+  const totalCount = byCleaner.reduce((sum, b) => sum + b.items.length, 0);
+  const advanced = byCleaner.flatMap(({ cleaner, items }) =>
+    items.filter((f) => f.risk === 'Advanced').map((f) => ({ cleaner, finding: f }))
+  );
+  const sectionSummary = byCleaner.map(({ cleaner, items }) => `${cleaner.title}: ${items.length}`).join('\n');
+
+  const ok = advanced.length > 0
+    ? await confirmDialog({
+        title: `Clean ${totalCount} item(s) across ${byCleaner.length} section(s)?`,
+        body:
+          `${sectionSummary}\n\n${advanced.length} of these are flagged Advanced risk - removing them can ` +
+          `affect software that is still installed:\n\n${advanced.map(({ cleaner, finding }) => `${cleaner.title} - ${finding.label}`).join('\n')}\n\n` +
+          'Everything still moves to Quarantine first and can be put back. Type CLEAN to include the ' +
+          'Advanced-risk items too, or cancel and clear the other sections individually to review these first.',
+        confirmLabel: 'Clean all',
+        typed: 'CLEAN'
+      })
+    : await confirmDialog({
+        title: `Clean ${totalCount} item(s) across ${byCleaner.length} section(s)?`,
+        body: `${sectionSummary}\n\nEverything moves to the Quarantine tab first and can be put back from there.`,
+        confirmLabel: 'Clean all'
+      });
+  if (!ok) return;
+
+  let cleanedTotal = 0;
+  const failedSections = [];
+  for (const { cleaner, items } of byCleaner) {
+    const res = await window.api.cleanerPurge({ cleaner: cleaner.id, items });
+    if (!res || res.success !== true) {
+      failedSections.push(cleaner.title);
+      continue;
+    }
+    const count = res.quarantinedCount ?? items.length;
+    cleanedTotal += count;
+    applyPurgeResult(cleaner.id, items, count);
+  }
+
+  if (failedSections.length > 0) {
+    toast(
+      `${cleanedTotal} item(s) moved to quarantine. ${failedSections.join(', ')} could not be cleaned - try that section individually.`,
+      'warn',
+      9000
+    );
+  } else {
+    toast(
+      `${cleanedTotal} item(s) moved to quarantine across ${byCleaner.length} section(s). You can put any of it back from the Quarantine tab.`,
+      'success',
+      6000
+    );
+  }
 }
 
 // ==========================================

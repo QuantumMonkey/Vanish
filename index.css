@@ -1605,10 +1605,18 @@ input:checked + .slider:before {
  * are columns sits jammed against the left with dead space beside it. auto-FIT
  * collapses those tracks, and a max track size stops two cards on their own row
  * from stretching to half the window each; justify-content then centres the
- * whole block. The result reads the same with four cards or ten. */
+ * whole block. The result reads the same with four cards or ten.
+ *
+ * The 6 System Overview cards need up to 6*260+5*10=1610px of track width to
+ * share one row, more than the maximized content area on common laptop
+ * screens actually has once the 240px sidebar and padding come out - so a
+ * card would wrap to its own second row even maximized (operator report).
+ * Narrower min/max bounds let auto-fit reach 6-across from ~950px of content
+ * width instead of ~1610px, while still wrapping to 2+ rows below that on a
+ * genuinely narrow or non-maximized window. */
 .audit-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 260px));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 220px));
   justify-content: center;
   gap: 10px;
 }
