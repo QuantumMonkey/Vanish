@@ -491,6 +491,17 @@
 
         <div class="gpu-adapter-summary" id="gpu-adapter-summary"></div>
 
+        <!-- 3nd: the GPU column's two surprises, stated where someone using
+             the app can actually read them instead of only in code comments:
+             it samples on its own slower clock than the rest of the table,
+             and its percentage is a sum across a process's GPU engines. -->
+        <div class="panel-inline-note" id="gpu-column-note">
+          GPU is measured every 15 seconds, on its own slower clock than the rest of this table - a program that
+          started since the last measurement shows &ldquo;-&rdquo; until the next one, not 0%. The percentage adds up
+          that program's work across all of the GPU's engines (3D, video, copy), so it is a rough measure of how busy
+          it is keeping the card, and will not always match Task Manager's own figure exactly.
+        </div>
+
         <div class="process-workspace">
           <div class="process-list-container">
             <table class="apps-table process-table">
@@ -499,7 +510,7 @@
                   <th data-sort="name" style="width: 30%;">Process</th>
                   <th data-sort="pid" style="width: 8%;">PID</th>
                   <th data-sort="cpu" style="width: 10%;">CPU</th>
-                  <th data-sort="gpu" style="width: 10%;">GPU</th>
+                  <th data-sort="gpu" style="width: 10%;" title="Measured every 15 seconds, on its own slower clock than this table. The percentage is that program's work summed across all of the GPU's engines (3D, video, copy), so it will not always match Task Manager's own figure exactly.">GPU</th>
                   <th data-sort="memory" style="width: 12%;">Memory</th>
                   <th data-sort="io" style="width: 12%;">Disk I/O</th>
                   <th style="width: 18%;">Indicators</th>

@@ -2450,6 +2450,17 @@ input:checked + .slider:before {
   color: var(--color-warning);
   margin-bottom: 8px;
 }
+/* hks: the "normal for a web browser" note beside a high connection count.
+   Muted on purpose - it is reassurance, and reassurance that shouts reads
+   as a warning. */
+.net-kind-note {
+  display: block;
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  margin-top: 2px;
+}
+
 .summary-failure-item { font-size: 11px; color: var(--text-gray); padding: 4px 0; }
 .summary-failure-item .path { font-family: var(--mono); color: var(--text-white); word-break: break-all; }
 .summary-failure-item .reason { color: var(--text-muted); }

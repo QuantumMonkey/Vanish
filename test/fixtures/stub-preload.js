@@ -131,6 +131,34 @@ contextBridge.exposeInMainWorld('api', {
       startedAt: '2026-01-01 00:00:00', indicators: []
     }]
   }),
+  // --- Previously-missing methods (found 2026-08-09) -----------------------
+  //
+  // These seven were called by renderer.js but absent from this fixture
+  // entirely, so the tabs that use them died on "window.api.X is not a
+  // function" under test - the Health Advisor tab rendered nothing but that
+  // error, which is how they were noticed at all. Same class of gap as the
+  // four hardcoded methods noted above.
+  //
+  // Found by diffing every `window.api.*` in renderer.js against the keys
+  // defined here, rather than one at a time as each broke. Worth re-running
+  // that diff when adding a new IPC method:
+  //   grep -oh "window\.api\.[a-zA-Z0-9_]*" renderer.js | sed 's/window\.api\.//' | sort -u
+  getGpuUsage: stub('getGpuUsage', { success: true, byPid: {}, byAdapter: [] }),
+  getGpuVendors: stub('getGpuVendors', []),
+  getNetworkActivity: stub('getNetworkActivity', {
+    success: true, verdict: 'quiet', sampleMs: 1000,
+    adapters: [{
+      name: 'Test Adapter', description: 'Test', type: 'Ethernet', isWireless: false,
+      hasGateway: true, linkSpeedBps: 1000000000,
+      receiveBytesPerSecond: 0, sendBytesPerSecond: 0, totalBytesPerSecond: 0
+    }],
+    processes: [], totalBytesPerSecond: 0, busyThresholdBytesPerSecond: 50000,
+    signalPercent: null, signalNote: null, updateTransfers: 0, bitsJobs: 0, elevated: false
+  }),
+  networkHoldState: stub('networkHoldState', { active: false, record: null }),
+  networkHoldApply: stub('networkHoldApply', { success: true }),
+  networkHoldRevert: stub('networkHoldRevert', { success: true }),
+  startupAction: stub('startupAction', { success: true }),
   killProcess: stub('killProcess', { success: true }),
   listLockers: stub('listLockers', { success: true, holders: [] }),
   unlockPath: stub('unlockPath', { success: true, closedTargets: 0, totalTargets: 0, notes: [] }),

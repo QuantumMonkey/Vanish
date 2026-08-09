@@ -1889,6 +1889,90 @@ function shortenCpuName(name) {
 }
 
 // bfh.1. The output of this section is a VERDICT, not a list of connections.
+// hks. A bare connection count reads as a threat number: the operator's own
+// words were "one program holding 54 open connections looks worrisome". For
+// most of what actually holds dozens of sockets - a browser, a sync client, a
+// game launcher - that count is just how the program works, and the useful
+// thing to show is what is normal FOR THAT KIND of program.
+//
+// Deliberately context, never a verdict. This does not score risk, does not
+// call anything safe, and does not call anything suspicious - Rule 6 keeps
+// this panel out of security/firewall framing, and a "trusted process" list
+// would be exactly that framing wearing a friendlier label. Matching is on
+// the process name only, entirely local: no lookup, no reverse-DNS, no
+// outbound I/O of any kind (INV-4).
+const NET_PROGRAM_KINDS = [
+  {
+    kind: 'a web browser',
+    test: /^(chrome|firefox|msedge|brave|opera|opera_gx|vivaldi|chromium|iexplore|arc|librewolf|waterfox|tor)$/,
+    normal: 'Browsers open a separate connection per tab, per ad, per tracker and per background sync, so dozens at once is ordinary even when you are only reading one page.'
+  },
+  {
+    kind: 'a file-sync program',
+    test: /^(onedrive|dropbox|googledrivefs|googledrivesync|box|boxdrive|megasync|nextcloud|owncloud|icloud|pcloud|sync|resilio|syncthing)$/,
+    normal: 'Sync clients keep several connections open at once so uploads, downloads and change-notifications do not queue behind each other.'
+  },
+  {
+    kind: 'a game launcher or store',
+    test: /^(steam|steamwebhelper|epicgameslauncher|epicwebhelper|battle\.net|agent|galaxyclient|galaxy|origin|eadesktop|easteamproxy|ubisoftconnect|upc|riotclient|riotclientservices|playnite)$/,
+    normal: 'Launchers keep a store page, a friends/chat service, a download manager and an update checker connected at the same time, and content downloads often use many parallel connections on purpose.'
+  },
+  {
+    kind: 'a chat or meeting program',
+    test: /^(teams|ms-teams|slack|discord|zoom|skype|telegram|whatsapp|signal|element|webexmta|webex)$/,
+    normal: 'Chat and meeting apps hold a live connection for messages plus separate ones for presence, media and file transfers.'
+  },
+  {
+    kind: 'security software',
+    test: /^(avp|avpui|kavfs|msmpeng|mpdefendercoreservice|nissrv|avgui|avgsvc|avastui|afwserv|mbam|mbamservice|nortonsecurity|ns|mcshield|masvc|sentinelagent|csfalconservice|csfalconcontainer|bdagent|vsserv|ekrn|egui)$/,
+    normal: 'Security software checks files and pages against its vendor\'s cloud service, which means many short-lived connections while it is scanning.'
+  },
+  {
+    kind: 'an updater or download service',
+    test: /^(svchost|googleupdate|goog(le)?updater|msedgeupdate|microsoftedgeupdate|adobearmsvc|adobeupdateservice|squirrel|update|updater|wuauclt|usocoreworker|deliveryoptimization|dosvc)$/,
+    normal: 'Update and delivery services fetch from several servers at once, and Windows itself shares parts of an update between machines, so the count moves around a lot.'
+  },
+  {
+    kind: 'a developer tool',
+    test: /^(code|code - insiders|node|npm|claude|python|pythonw|docker|dockerd|com\.docker\.backend|git|ssh|java|javaw|devenv|rider64|idea64|pycharm64|wsl|wslservice)$/,
+    normal: 'Developer tools talk to package registries, language servers, containers and remote APIs at the same time, often several per project you have open.'
+  },
+  {
+    kind: 'a media or streaming app',
+    test: /^(spotify|itunes|applemusic|vlc|plex|plexmediaserver|netflix|obs64|obs|steamstreaming)$/,
+    normal: 'Streaming apps hold a media connection plus separate ones for artwork, recommendations and playback reporting.'
+  },
+  {
+    kind: 'part of Windows',
+    test: /^(system|lsass|services|spoolsv|searchindexer|searchapp|explorer|taskhostw|backgroundtaskhost|runtimebroker|smartscreen|settingssynchost|wsappx|startmenuexperiencehost)$/,
+    normal: 'Windows components fetch content, licences, time and telemetry-free service data on their own schedule, independent of anything you opened.'
+  }
+];
+
+// The count at which a bare number starts reading as alarming rather than
+// incidental. Below this the tooltip still explains the program, but nothing
+// visible is added to the row - the number speaks for itself.
+const NET_NOTABLE_CONNECTION_COUNT = 10;
+
+function classifyNetProgram(name) {
+  const key = String(name || '').toLowerCase().replace(/\.exe$/, '').trim();
+  return NET_PROGRAM_KINDS.find((k) => k.test.test(key)) || null;
+}
+
+// The tooltip text for one row's connection count. Always says what was
+// counted; adds the per-kind reassurance when the program is recognised, and
+// says plainly that it does not recognise the program when it does not -
+// rather than implying the unrecognised case is the suspicious one.
+function netConnectionTitle(name, count) {
+  const kind = classifyNetProgram(name);
+  const counted = `${count} connection${count === 1 ? '' : 's'} open right now. This is a count of connections, not of bandwidth used.`;
+  if (kind) return `${counted}\n\n${name} is ${kind.kind}. ${kind.normal}`;
+  return (
+    `${counted}\n\nVanish does not have a description for this program, which says nothing either way about it - ` +
+    'most programs that talk to the internet keep several connections open. Expand the row to see the addresses it is connected to.'
+  );
+}
+
 // "Nothing on this PC is using the network" is a first-class answer here, not
 // an empty state - it is the answer that tells someone to stop looking at their
 // PC and go look at their router.
@@ -2013,11 +2097,20 @@ function renderNetworkActivity(net) {
     .map((p, i) => {
       const peers = Array.isArray(p.peers) ? p.peers : [];
       const rowId = `net-peers-${i}`;
+      // hks: a high count is where the reassurance has to be VISIBLE, not
+      // only on hover - the whole complaint was that the bare number reads
+      // as worrying on sight. Below the threshold the tooltip still carries
+      // the same context for anyone who goes looking.
+      const kind = classifyNetProgram(p.name);
+      const countLabel =
+        kind && p.connectionCount >= NET_NOTABLE_CONNECTION_COUNT
+          ? `${esc(p.connectionCount)} <span class="net-kind-note">normal for ${esc(kind.kind)}</span>`
+          : esc(p.connectionCount);
       return `
       <tr class="app-row${peers.length ? ' net-row-expandable' : ''}" ${peers.length ? `data-peers-toggle="${rowId}"` : ''}>
         <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
         <td style="font-size: 12px; color: var(--text-gray);">${esc(p.processId)}</td>
-        <td style="font-size: 12px; color: var(--text-gray);">${esc(p.connectionCount)}</td>
+        <td style="font-size: 12px; color: var(--text-gray);" title="${esc(netConnectionTitle(p.name, p.connectionCount))}">${countLabel}</td>
         <td style="font-size: 12px; color: var(--text-gray);">
           ${esc(p.peerCount)}${peers.length ? ' <i class="fa-solid fa-chevron-right net-peers-chevron"></i>' : ''}
         </td>
@@ -2977,6 +3070,29 @@ let gpuSampleTimer = null;
 let gpuSampling = false;
 const GPU_SAMPLE_INTERVAL_MS = 15000;
 
+// 3nd: which PIDs existed when the last GPU sample was TAKEN. Needed because
+// scanner.ps1's Get-GpuUsageByProcess drops any engine reading of 0 (`if
+// ($sample.CookedValue -le 0) { continue }`), so a PID missing from byPid is
+// ambiguous on its own - it means either "measured, genuinely idle" or "never
+// measured, because this process did not exist yet". Those deserve different
+// cells: the first is 0%, the second is a dash that says why. null = no
+// sample has completed yet this session, which is a third state again.
+let gpuSampledPids = null;
+
+// The GPU cell's three honest states. Kept as a function rather than inlined
+// so the "-" case can never silently drift back into meaning "zero".
+function gpuCellHtml(pid) {
+  const value = gpuUsageByPid[pid];
+  if (value != null) return `${esc(value.toFixed(1))}%`;
+  if (gpuSampledPids === null) {
+    return '<span title="The first GPU measurement of this session has not finished yet.">measuring...</span>';
+  }
+  if (!gpuSampledPids.has(pid)) {
+    return '<span title="This program started after the last GPU measurement. GPU is measured every 15 seconds - it will have a figure at the next one.">-</span>';
+  }
+  return '<span title="Measured, and this program was not using the GPU at that moment.">0%</span>';
+}
+
 const PROCESS_SORTERS = {
   name: (a, b) => a.name.localeCompare(b.name),
   pid: (a, b) => a.pid - b.pid,
@@ -3048,10 +3164,15 @@ function stopProcessRefresh() {
 async function sampleGpuUsage() {
   if (gpuSampling) return;
   gpuSampling = true;
+  // Captured BEFORE the await, not after: the counter read happens at the
+  // start of this call, so "which processes existed at sample time" is the
+  // list as it stands now, not 1.5-3s later once the engine has returned.
+  const pidsAtSampleTime = new Set(processes.map((p) => p.pid));
   try {
     const res = await window.api.getGpuUsage();
     if (res && res.success === true) {
       gpuUsageByPid = res.byPid || {};
+      gpuSampledPids = pidsAtSampleTime;
       gpuAdapterUsage = res.byAdapter || [];
       renderGpuAdapterSummary();
       renderProcessTable();
@@ -3179,7 +3300,7 @@ function renderProcessTable() {
           <td style="font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
           <td style="color: var(--text-gray);">${esc(p.pid)}</td>
           <td style="color: var(--text-gray);">${esc(p.cpuPercent.toFixed(1))}%</td>
-          <td style="color: var(--text-gray);">${gpuUsageByPid[p.pid] != null ? esc(gpuUsageByPid[p.pid].toFixed(1)) + '%' : '-'}</td>
+          <td style="color: var(--text-gray);">${gpuCellHtml(p.pid)}</td>
           <td style="color: var(--text-gray);">${esc(formatBytes(p.memoryBytes, 1))}</td>
           <td style="color: var(--text-gray);">${p.ioBytesPerSec > 0 ? esc(formatBytes(p.ioBytesPerSec, 1)) + '/s' : '-'}</td>
           <td>${chips}</td>
