@@ -1450,12 +1450,6 @@ input:checked + .slider:before {
 }
 
 /* Utility classes */
-.flex-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .pulse {
   animation: pulse-glow 2s infinite ease-in-out;
 }

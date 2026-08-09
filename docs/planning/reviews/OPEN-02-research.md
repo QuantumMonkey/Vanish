@@ -1,5 +1,9 @@
 # Antigravity Research Request -- Vanish / OPEN-02 (offline winget lookup)
 
+> **FULFILLED.** bd issue `vanish-uninstaller-1gi` (TASK-10) is closed; the
+> findings this prompt requested already landed there. Kept as a record of
+> what was asked and why, not as an open request.
+
 > Run this in Antigravity (Gemini Pro) with the repo open. Paste ONLY the
 > findings block back into bd issue vanish-uninstaller-1gi (TASK-10).
 > Claude Code never re-reads the full research body (token discipline).

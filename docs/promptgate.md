@@ -227,8 +227,8 @@ Local paths (e.g. `d:\path\to\vanish`) expose developer environment structure in
 
 ---
 
-### Rule 19 — `docs/handoff.md` must have per-file status indicators
-Every source file entry in the File Structure Map must include a status field:
+### Rule 19 — the current dated handoff must have per-file status indicators
+`docs/handoff.md` is a frozen, pre-2026-08-03 snapshot — its own header says so and points to `CHANGELOG.md`'s `[Unreleased]` section as the source of truth instead. It is kept for its still-valid reasoning, not maintained further. Live status now lives in the newest `docs/HANDOFF-YYYY-MM-DD.md` file (each one names the file it supersedes); THAT file's File Structure Map, where present, is what must carry a status field per source file:
 - `*(Status: Complete)*`
 - `*(Status: In Progress — [what remains])*`
 - `*(Status: Stub)*`
@@ -237,8 +237,8 @@ Without status indicators an LLM resuming work has no signal about what is imple
 
 ---
 
-### Rule 20 — `docs/handoff.md` must reference `docs/roadmap.md` for Stages 6+
-The checklist in `handoff.md` covers Core tier stages only and must say so explicitly. It must direct any resuming agent to `docs/roadmap.md` for the full plan.
+### Rule 20 — the current dated handoff must reference `docs/roadmap.md` for Stages 6+
+The Core-tier checklist in the newest `docs/HANDOFF-YYYY-MM-DD.md` must say explicitly that it covers Core tier stages only, and must direct any resuming agent to `docs/roadmap.md` for the full plan.
 
 ---
 

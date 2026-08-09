@@ -1,5 +1,9 @@
 # Vanish Docs: Corrections Report
 
+> **COMPLETED.** Every fix below was already applied to the target files.
+> Kept as a historical record of what changed and why, not as a pending
+> action list — nothing here still needs doing.
+
 Covers all five markdown files reviewed: `research.md`, `CHANGELOG.md`, `docs/architecture.md`, `docs/handoff.md`, `docs/roadmap.md`. Each fix is formatted as a direct find-and-replace with rationale.
 
 ---
