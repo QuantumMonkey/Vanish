@@ -10,6 +10,35 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added / Confirmed — startup latency root cause, redundancy discount badge
+
+* **Startup latency: root cause confirmed with a live A/B measurement.**
+  Built and installed the NSIS package, then timed launch-to-real-window on
+  both packaging formats with the same script, same machine, same session:
+  **NSIS-installed 4.2s vs portable 20.4s** - a ~5x difference. Confirms the
+  portable format's self-extraction (likely compounded by antivirus scanning
+  the freshly-extracted files) as the dominant cause, not app code. No
+  further code fix exists on the Vanish side for this - recommendation is to
+  default to the installed build for regular use.
+* **Redundant Software: a "discount" badge, matching Startup Items' own
+  pattern.** The section header now shows a primary count (waived groups
+  excluded - "discounted" out of it) and a secondary "N waived" pill when
+  any exist, the same count/sub-count pair Startup Items already uses for
+  its total/broken badges. A waived group's own "N installed" badge also
+  drops its red/danger styling, since it is an acknowledged choice, not a
+  live warning.
+* **GPU vendor logos: attempted, blocked, documented rather than guessed.**
+  Real AMD/NVIDIA logos on the Task Manager GPU pills need the perf
+  counter's `phys_N` index correlated to a real vendor - attempted via DXGI
+  COM interop (`CreateDXGIFactory1`/`IDXGIAdapter1.GetDesc1`, the
+  authoritative source for adapter LUID + vendor). The interop's vtable
+  declaration was incomplete (`IDXGIFactory1` inherits `IDXGIObject`/
+  `IDXGIFactory` methods ahead of `EnumAdapters1`) and produced no usable
+  result rather than silently-wrong data - the safer failure mode, but still
+  not shippable. Generic "GPU 0/GPU 1" labels stay in place (matches real
+  Task Manager's own precedent for the identical limitation) rather than
+  guessing a vendor-to-index mapping that could be wrong.
+
 ### Added / Fixed — GPU visibility, network telemetry, redundancy waivers, startup latency
 
 * **System Overview grid, real fix this time.** The prior width-guessed

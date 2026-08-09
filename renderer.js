@@ -2416,9 +2416,28 @@ async function runStartupAction(index) {
 // ability to act on it later.
 function renderRedundancyGroups(redundancy) {
   const list = document.getElementById('audit-redundancy-list');
+  const countBadge = document.getElementById('audit-redundancy-count');
+  const waivedBadge = document.getElementById('audit-redundancy-waived-count');
   if (!list) return;
 
   const groups = redundancy.groups ?? [];
+  const waived = new Set(appSettings.redundancyWaivers || []);
+  const waivedCount = groups.filter((g) => waived.has(g.category)).length;
+
+  // Same count/sub-count pill pattern as Startup Items' "N broken" badge -
+  // operator: "discounts it while showing the discount on the header pill,
+  // like how broken from startup shows up." The primary badge is what still
+  // needs a look (waived groups excluded, i.e. discounted out of it); the
+  // second badge accounts for the difference instead of hiding it.
+  if (countBadge) {
+    const active = groups.length - waivedCount;
+    countBadge.textContent = active;
+    countBadge.style.display = active > 0 ? 'inline-flex' : 'none';
+  }
+  if (waivedBadge) {
+    waivedBadge.textContent = `${waivedCount} waived`;
+    waivedBadge.style.display = waivedCount > 0 ? 'inline-flex' : 'none';
+  }
 
   if (groups.length === 0) {
     list.innerHTML = `
@@ -2429,8 +2448,6 @@ function renderRedundancyGroups(redundancy) {
     `;
     return;
   }
-
-  const waived = new Set(appSettings.redundancyWaivers || []);
 
   list.innerHTML = groups.map(g => {
     const isWaived = waived.has(g.category);
@@ -2446,7 +2463,7 @@ function renderRedundancyGroups(redundancy) {
       <div class="redundancy-group${isWaived ? ' is-waived' : ''}">
         <div class="redundancy-group-header">
           <span class="redundancy-category"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${esc(g.category)}</span>
-          <span class="audit-badge danger">${esc(g.count)} installed</span>
+          <span class="audit-badge${isWaived ? '' : ' danger'}">${esc(g.count)} installed</span>
         </div>
         <div class="redundancy-tip">${esc(g.tip)}</div>
         ${isWaived

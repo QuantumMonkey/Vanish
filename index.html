@@ -383,7 +383,11 @@
 
             <!-- Section: Redundant Software -->
             <div class="audit-section" id="audit-redundancy-section">
-              <div class="audit-section-title"><i class="fa-solid fa-clone"></i> Redundant Software</div>
+              <div class="audit-section-title">
+                <i class="fa-solid fa-clone"></i> Redundant Software
+                <span class="audit-badge danger" id="audit-redundancy-count" style="display:none;">0</span>
+                <span class="audit-badge" id="audit-redundancy-waived-count" style="display:none;">0 waived</span>
+              </div>
               <div id="audit-redundancy-list" style="display: flex; flex-direction: column; gap: 10px;">
                 <!-- redundancy groups injected by renderer -->
               </div>
