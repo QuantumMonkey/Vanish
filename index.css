@@ -567,6 +567,20 @@ body::before {
   border-spacing: 0 8px;
 }
 
+/* ri6: the details sidebar correctly compresses this table via flexbox
+   (.apps-list-container is flex:1) - the bug was that Date/Size, short
+   fixed-format columns, had no floor and wrapped to two lines ("2026-" /
+   "01-01") under compression, reading as broken. table-layout:auto already
+   reserves a nowrap column's min-content width and lets other columns
+   absorb the squeeze instead, so pinning just these two is enough - Name
+   and Publisher already wrap cleanly onto extra lines when space is short. */
+#all-apps-table th:nth-child(3),
+#all-apps-table th:nth-child(4),
+#all-apps-table td:nth-child(3),
+#all-apps-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
 .apps-table th {
   padding: 12px 16px;
   text-align: left;
@@ -576,6 +590,20 @@ body::before {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  /* h0i: column names should stay put while the body scrolls under them.
+     Sticky is scoped to each table's own nearest scrolling ancestor, so
+     this is correct whether the table owns its own scroll box (All
+     Programs, Task Manager) or shares one with several stacked sections
+     (Health Advisor's startup table and Network Activity's process table) -
+     it unsticks once that table's own rows scroll out of view either way.
+     Near-opaque + blur, not a flat color, to match the glass-panel look
+     used everywhere else (.wizard-modal, .summary-failures) rather than
+     looking like a different surface pasted on top. */
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: rgba(11, 15, 25, 0.92);
+  backdrop-filter: blur(12px);
 }
 
 .app-row {
@@ -701,8 +729,19 @@ body::before {
   overflow: hidden;
   opacity: 0;
   transform: translateX(30px);
-  transition: opacity 0.3s ease, transform 0.3s ease;
+  transition: opacity 0.3s ease, transform 0.3s ease, width 0.3s ease, padding 0.3s ease, border-width 0.3s ease;
   pointer-events: none;
+}
+
+/* ri6: before any selection this panel was invisible (opacity:0) but still
+   claiming its full clamp() width from the workspace, permanently squeezing
+   the app list for nothing. Collapse it to zero out of the layout instead -
+   scoped to the All Programs sidebar specifically, since that is what was
+   reported; Task Manager's process-details panel is unchanged. */
+#details-sidebar:not(.active) {
+  width: 0;
+  padding: 0;
+  border-width: 0;
 }
 
 /* Header, divider and every action button keep their natural height; only the
