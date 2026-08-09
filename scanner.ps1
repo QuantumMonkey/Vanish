@@ -3213,6 +3213,7 @@ function Get-ProcessIndicators {
 function Get-GpuUsageByProcess {
     $byPid = @{}
     $byAdapter = @{}
+    $luidByAdapter = @{}
 
     try {
         $counters = Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop
@@ -3220,11 +3221,28 @@ function Get-GpuUsageByProcess {
         return @{ success = $false; error = $_.Exception.Message; byPid = @{}; byAdapter = @() }
     }
 
+    # Operator: "you got ids returned from both of them, so why not remember
+    # those ids... phys_N is friction since a card can be turned off by an
+    # OEM app." Right - phys_N is an ordinal into whichever adapters happen
+    # to have an active engine RIGHT NOW, not a stable identity; it can shift
+    # or vanish as a discrete GPU sleeps/wakes under hybrid graphics. The
+    # LUID embedded in the same instance name IS the stable per-boot adapter
+    # identity (confirmed live: matches exactly what chrome://gpu reports for
+    # the same physical adapter, see main.js get-gpu-vendors) - captured here
+    # per phys_N group so the caller can join on LUID instead of ordinal
+    # position.
     foreach ($sample in $counters.CounterSamples) {
+        if ($sample.InstanceName -notmatch 'pid_(\d+)_luid_0x([0-9a-fA-F]+)_0x([0-9a-fA-F]+)_phys_(\d+)_eng_') { continue }
+        $procId    = [int]$Matches[1]
+        $luidHigh  = [Convert]::ToInt32($Matches[2], 16)
+        $luidLow   = [Convert]::ToUInt32($Matches[3], 16)
+        $physIdx   = [int]$Matches[4]
+
+        if (-not $luidByAdapter.ContainsKey($physIdx)) {
+            $luidByAdapter[$physIdx] = @{ high = $luidHigh; low = $luidLow }
+        }
+
         if ($sample.CookedValue -le 0) { continue }
-        if ($sample.InstanceName -notmatch 'pid_(\d+)_luid_.*_phys_(\d+)_eng_') { continue }
-        $procId  = [int]$Matches[1]
-        $physIdx = [int]$Matches[2]
 
         if (-not $byPid.ContainsKey($procId)) { $byPid[$procId] = 0.0 }
         $byPid[$procId] += $sample.CookedValue
@@ -3238,8 +3256,18 @@ function Get-GpuUsageByProcess {
         $pidResult["$k"] = [Math]::Round([Math]::Min(100, $byPid[$k]), 1)
     }
 
-    $adapterResult = @($byAdapter.Keys | Sort-Object | ForEach-Object {
-        @{ physIndex = $_; percent = [Math]::Round([Math]::Min(100, $byAdapter[$_]), 1) }
+    # Every phys_N seen this sample gets an entry, even at 0% - a LUID with no
+    # current engine activity is still a real, present adapter the caller may
+    # want to show as idle rather than silently dropped.
+    $allPhys = @($luidByAdapter.Keys) + @($byAdapter.Keys) | Sort-Object -Unique
+    $adapterResult = @($allPhys | ForEach-Object {
+        $luid = $luidByAdapter[$_]
+        @{
+            physIndex = $_
+            percent   = if ($byAdapter.ContainsKey($_)) { [Math]::Round([Math]::Min(100, $byAdapter[$_]), 1) } else { 0.0 }
+            luidHigh  = if ($luid) { $luid.high } else { $null }
+            luidLow   = if ($luid) { $luid.low } else { $null }
+        }
     })
 
     return @{ success = $true; byPid = $pidResult; byAdapter = $adapterResult }

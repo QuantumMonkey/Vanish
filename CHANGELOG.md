@@ -27,19 +27,25 @@ full decision rules.
   its total/broken badges. A waived group's own "N installed" badge also
   drops its red/danger styling, since it is an acknowledged choice, not a
   live warning.
-* **GPU vendor logos, working.** A first attempt at DXGI COM interop
-  (`CreateDXGIFactory1`/`IDXGIAdapter1.GetDesc1`) hit an incomplete vtable
-  declaration and produced no usable result - documented, not shipped.
-  Resolved through a much simpler, already-battle-tested path instead:
-  Electron enumerates every GPU adapter internally for its own rendering,
-  and `app.getGPUInfo('complete')` exposes vendor ID and name per adapter
-  with zero custom interop. Real AMD/NVIDIA marks (Simple Icons, CC0-
-  licensed files; the marks themselves remain their respective trademark
-  owners, informational hardware-identification use) now render on the Task
-  Manager GPU pills. The correlation from a vendor to the GPU Engine perf
-  counter's `phys_N` index is still array-order best-effort (no LUID is
-  exposed to prove it definitively) - the numeric "GPU 0/GPU 1" label stays
-  alongside the logo for exactly that reason.
+* **GPU vendor logos, matched by a stable id instead of guessed order.** A
+  first attempt at DXGI COM interop hit an incomplete vtable declaration and
+  produced nothing usable - documented, not shipped. A second attempt
+  (`app.getGPUInfo`) worked but could only correlate a vendor to the perf
+  counter's `phys_N` index by array order, with no way to prove it - and,
+  as pointed out, `phys_N` is exactly the wrong thing to key on anyway,
+  since a discrete GPU can drop out of it entirely (or shift position)
+  whenever an OEM app powers it down under hybrid graphics. Fixed properly:
+  `chrome://gpu` (Electron's own diagnostics page, loaded once in a hidden
+  window) reports each adapter's LUID alongside its vendor - live-verified
+  to be bit-for-bit the same LUID the perf counter already reports for the
+  same physical card. `Get-GpuUsageByProcess` now returns `luidHigh`/
+  `luidLow` per adapter; `get-gpu-vendors` (cached once per process
+  lifetime, not re-queried per sample) does the same from `chrome://gpu`;
+  the renderer matches the two by LUID equality. Real AMD/NVIDIA marks
+  (Simple Icons, CC0-licensed files; the marks themselves remain their
+  respective trademark owners, informational hardware-identification use)
+  render on the Task Manager GPU pills, correctly labelled regardless of
+  which adapter happens to be awake at query time.
 
 ### Added / Fixed — GPU visibility, network telemetry, redundancy waivers, startup latency
 

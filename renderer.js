@@ -2917,10 +2917,10 @@ let processPaused = false;
 // the startup/latency work done the same session this was requested in.
 // Keyed by pid (string, since JSON object keys always are).
 let gpuUsageByPid = {};
-let gpuAdapterUsage = []; // [{ physIndex, percent }] - system-wide, not per-process
-// Static per-boot hardware info (name/vendor/logo), fetched once and cached -
-// unlike gpuAdapterUsage this doesn't change between samples. null = not
-// fetched yet, [] = fetched and no real adapters found.
+let gpuAdapterUsage = []; // [{ physIndex, percent, luidHigh, luidLow }] - system-wide, not per-process
+// Static per-boot hardware info (name/vendor/logo/luidHigh/luidLow), fetched
+// once and cached - unlike gpuAdapterUsage this doesn't change between
+// samples. null = not fetched yet, [] = fetched and no real adapters found.
 let gpuVendorInfo = null;
 let gpuSampleTimer = null;
 let gpuSampling = false;
@@ -3031,14 +3031,18 @@ function stopGpuSampling() {
   }
 }
 
-// "Active GPU icons, so we know which GPU is doing what" - a small,
-// system-wide (not per-process) summary. The numeric GPU 0/GPU 1 label
-// always stays (matches real Task Manager's own precedent for the same
-// phys-index limitation - see Get-GpuUsageByProcess); a real vendor logo is
-// layered on top from gpuVendorInfo (app.getGPUInfo, main.js) when a phys
-// index has a corresponding entry, by array-order best-effort correlation -
-// see the get-gpu-vendors handler for exactly what that promise does and
-// does not rest on.
+// "Active GPU icons, so we know which GPU is doing what... remember those
+// ids permanently, phys_N is friction." Matched on LUID now, not phys_N or
+// array position - phys_N is only an ordinal into whichever adapters have
+// an active engine at sample time, and shifts or drops out entirely when a
+// discrete GPU sleeps under hybrid graphics (exactly what happened during
+// testing: the dGPU had zero perf-counter presence while idle). LUID is the
+// actual stable per-boot adapter identity, verified to match bit-for-bit
+// between the perf counter and chrome://gpu for the same physical card -
+// see get-gpu-vendors (main.js). The numeric "GPU N" label still stays
+// alongside the logo: a LUID this sample has never seen before (freshly
+// woken GPU, or gpuVendorInfo not loaded yet) has nothing to match against,
+// and falls back to it cleanly rather than guessing.
 function renderGpuAdapterSummary() {
   const el = document.getElementById('gpu-adapter-summary');
   if (!el) return;
@@ -3048,7 +3052,9 @@ function renderGpuAdapterSummary() {
   }
   el.innerHTML = gpuAdapterUsage
     .map((a) => {
-      const vendorMatch = (gpuVendorInfo || []).find((v) => v.physIndex === a.physIndex);
+      const vendorMatch = (gpuVendorInfo || []).find(
+        (v) => v.luidHigh === a.luidHigh && v.luidLow === a.luidLow
+      );
       const icon = vendorMatch && vendorMatch.vendor === 'amd' ? 'fa-amd'
         : vendorMatch && vendorMatch.vendor === 'nvidia' ? 'fa-nvidia'
         : 'fa-microchip';

@@ -902,32 +902,79 @@ ipcMain.handle('get-gpu-usage', async () => {
   }
 });
 
-// Operator: "i need amd and nvidia logos for the respective gpu." Electron
-// already enumerates every adapter for its own rendering (app.getGPUInfo) -
-// this needed no custom native interop, unlike an earlier DXGI COM interop
-// attempt that a vtable-declaration bug left non-functional (see CHANGELOG).
-// One real limitation carried over honestly: this API exposes vendorId and
-// deviceString per adapter, but no LUID, so there is no proven way to
-// confirm its array order matches the GPU Engine perf counter's phys_N
-// index used by get-gpu-usage above - both ultimately enumerate the same OS
-// adapter list, which makes index-order a reasonable best-effort
-// correlation, not a guaranteed one. The renderer keeps the numeric
-// "GPU 0/GPU 1" label alongside any logo for exactly this reason.
-ipcMain.handle('get-gpu-vendors', async () => {
+// Operator: "i need amd and nvidia logos for the respective gpu... phys_N is
+// friction since a card may be turned off by the OEM app... remember those
+// ids permanently." Right on all counts. First cut used app.getGPUInfo()
+// correlated to phys_N by array order - no LUID exposed, so no proof it
+// lined up, and it would have silently broken the moment the discrete GPU's
+// enumerated position shifted (exactly the hibernation case named). Fixed
+// properly: Electron's own chrome://gpu diagnostics page lists every
+// adapter's VENDOR, DEVICE, name and LUID together in one table - loaded
+// once in a hidden window and parsed. Verified live: the LUID reported here
+// for the AMD adapter (0, 62611) is bit-for-bit the same LUID
+// Get-GpuUsageByProcess reads from the perf counter for that same physical
+// card. LUID, not phys_N or array position, is the actual stable identity -
+// matching on it means a sleeping/waking discrete GPU is still labelled
+// correctly whenever it reappears, with nothing to re-guess.
+//
+// Cached for the life of the process (module-level, not re-queried per
+// sample) - this is real, per-boot hardware inventory, not something that
+// changes while Vanish is running. Lazy: nothing calls this until Task
+// Manager's GPU sampling actually starts, so it never touches app startup
+// time (~3s, live-measured, would undo the whole point of the same
+// session's latency work if it ran eagerly).
+let gpuVendorCache = null;
+
+async function fetchGpuVendorsFromChromeInternals() {
+  const win = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true } });
   try {
-    const info = await app.getGPUInfo('complete');
-    const devices = (info && info.gpuDevice) || [];
-    return devices
-      .filter((d) => d.vendorId !== 0x1414) // Microsoft Basic Render Driver - not a real GPU
-      .map((d, i) => ({
-        physIndex: i,
-        name: d.deviceString,
-        vendor: d.vendorId === 0x1002 ? 'amd' : d.vendorId === 0x10de ? 'nvidia' : null,
-        active: d.active === true
-      }));
+    await win.loadURL('chrome://gpu');
+    // The page's content lives inside a Shadow DOM custom element
+    // (<info-view>) - plain innerText/outerHTML do not see inside a shadow
+    // root, so this walks it explicitly. Text nodes come back as separate
+    // array entries in DOM order; each GPU's full descriptor (including
+    // *ACTIVE* when present) stays together in one entry because it is one
+    // table cell's content.
+    const text = await win.webContents.executeJavaScript(`
+      (function walk(node, out) {
+        if (node.shadowRoot) walk(node.shadowRoot, out);
+        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) out.push(node.textContent.trim());
+        for (const child of node.childNodes || []) walk(child, out);
+        return out;
+      })(document.documentElement, []).join('\\n');
+    `);
+
+    const results = [];
+    for (const line of text.split('\n')) {
+      if (!line.includes('VENDOR=')) continue;
+      const m = line.match(/VENDOR=\s*0x([0-9a-fA-F]+),\s*DEVICE=0x([0-9a-fA-F]+)\s*\[([^\]]*)\].*?LUID=\{(-?\d+),\s*(-?\d+)\}/);
+      if (!m) continue;
+      const vendorId = parseInt(m[1], 16);
+      if (vendorId === 0x1414) continue; // Microsoft Basic Render Driver - not a real GPU
+      results.push({
+        luidHigh: parseInt(m[4], 10),
+        luidLow: parseInt(m[5], 10),
+        name: m[3],
+        vendor: vendorId === 0x1002 ? 'amd' : vendorId === 0x10de ? 'nvidia' : null,
+        active: line.includes('*ACTIVE*')
+      });
+    }
+    return results;
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+ipcMain.handle('get-gpu-vendors', async () => {
+  if (gpuVendorCache !== null) return gpuVendorCache;
+  try {
+    gpuVendorCache = await fetchGpuVendorsFromChromeInternals();
   } catch {
+    // Leave null uncached on failure - a transient GPU-process hiccup should
+    // get another real attempt next time, not a permanently empty result.
     return [];
   }
+  return gpuVendorCache;
 });
 
 fullModeOnly('kill-process', async (event, params) => {
