@@ -384,17 +384,44 @@ function Get-EpicManifestSizes {
     return $sizesByPath
 }
 
+# Researched but NOT implemented: GOG Galaxy, Ubisoft Connect, EA App/
+# Origin, Battle.net. GOG in particular got real research (its per-game
+# goggame-<id>.info file does exist and does carry install-size-shaped data
+# in a "depots" array), but every source found describes the DOWNLOAD-TIME
+# content-manifest shape, not confirmed against what actually sits in that
+# file post-install on a real machine - and a wrong field name here would
+# not fail loudly, it would silently attach a plausible-looking wrong number
+# to a real game (worse than "unknown", the status quo). Same bar Epic was
+# held to (documented format, flagged not-live-tested) - GOG doesn't clear
+# it yet. Add a provider below once verified against a real install, same
+# shape as Get-SteamLibrarySizes/Get-EpicManifestSizes: return a hashtable
+# of lowercased install-path -> sizeBytes, add it to $script:GamePlatformSizeProviders.
+
+# Ordered by confidence: Steam is live-verified against a real install with
+# two libraries; Epic matches its documented .item manifest shape but has
+# not been run against a real Epic install (not present on the machine this
+# was written against).
+$script:GamePlatformSizeProviders = @(
+    ${function:Get-SteamLibrarySizes},
+    ${function:Get-EpicManifestSizes}
+)
+
 # Backfills ONLY sizeBytes, and only when the registry itself reported none -
 # nothing else about an entry (name, uninstall string, publisher) is ever
-# touched by this. Steam checked before Epic simply because Steam is the
-# platform confirmed present on the machine this was written against; a miss
-# on both is silent and leaves the entry exactly as it already rendered
-# (unknown size, still fully listable and uninstallable).
+# touched by this. Providers run in the order above and stop at the first
+# match; each provider's own lookup table is built at most once per call,
+# only if a candidate entry actually needs it. A miss across every provider
+# is silent and leaves the entry exactly as it already rendered (unknown
+# size, still fully listable and uninstallable).
 function Add-GamePlatformSizes {
     param([object[]]$entries)
 
-    $steamSizes = $null
-    $epicSizes = $null
+    # Indexed by provider position, not name - a scriptblock reference
+    # (${function:Name}) does not reliably expose its own function name back
+    # (its .Ast is the body's ScriptBlockAst, not a FunctionDefinitionAst),
+    # and an index is simpler and just as correct for a cache keyed only
+    # within this one call.
+    $providerCache = @{}
 
     foreach ($e in $entries) {
         if ($e.sizeBytes -gt 0) { continue }
@@ -402,15 +429,15 @@ function Add-GamePlatformSizes {
 
         $key = $e.installLocation.ToLowerInvariant().TrimEnd('\')
 
-        if ($null -eq $steamSizes) { $steamSizes = Get-SteamLibrarySizes }
-        if ($steamSizes.ContainsKey($key)) {
-            $e.sizeBytes = $steamSizes[$key]
-            continue
-        }
-
-        if ($null -eq $epicSizes) { $epicSizes = Get-EpicManifestSizes }
-        if ($epicSizes.ContainsKey($key)) {
-            $e.sizeBytes = $epicSizes[$key]
+        for ($i = 0; $i -lt $script:GamePlatformSizeProviders.Count; $i++) {
+            if (-not $providerCache.ContainsKey($i)) {
+                $providerCache[$i] = & $script:GamePlatformSizeProviders[$i]
+            }
+            $sizes = $providerCache[$i]
+            if ($sizes.ContainsKey($key)) {
+                $e.sizeBytes = $sizes[$key]
+                break
+            }
         }
     }
 }
