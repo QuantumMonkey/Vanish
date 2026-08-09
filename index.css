@@ -2136,6 +2136,11 @@ input:checked + .slider:before {
   padding-bottom: 16px;
   margin-bottom: 0;
 }
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .panel-title {
   font-family: var(--font-title);
   font-size: 18px;
@@ -2370,6 +2375,11 @@ input:checked + .slider:before {
 .status-pill.deleted { color: var(--text-muted); border-color: var(--border-glass); }
 
 /* --- SCR-06: purge summary ---------------------------------------------- */
+/* #scr-complete overrides .wizard-screen's centering to flex-start/stretch
+   (see index.html) but that alone does not make it scrollable - a long
+   failures list (vej) was clipped by .wizard-screens' overflow:hidden with
+   no way to reach the rest of it. */
+#scr-complete { overflow-y: auto; }
 .summary-layout { display: flex; flex-direction: column; gap: 18px; width: 100%; max-width: 560px; margin: 0 auto; }
 .summary-hero { display: flex; align-items: flex-start; gap: 16px; }
 .summary-hero i { font-size: 38px; color: var(--color-primary); margin-top: 4px; }

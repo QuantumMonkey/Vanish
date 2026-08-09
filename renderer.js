@@ -1542,7 +1542,13 @@ function renderPurgeSummary(res, requestedCount) {
   const problems = [...files, ...registry].filter((i) => i.status === 'failed');
   const missing = [...files, ...registry].filter((i) => i.status === 'missing').length;
 
-  document.getElementById('lbl-space-saved').textContent = formatBytes(wizState.spaceReclaimedBytes, 1);
+  // xw2: nothing actually moved is a failure, not a lesser variant of success -
+  // "Unknown" (formatBytes(0)'s label for an untracked size) read as if
+  // something might have been freed when the true answer is "0, because
+  // nothing succeeded". Set this explicitly before the generic formatter runs.
+  const fullFailure = quarantined === 0 && problems.length > 0;
+  document.getElementById('lbl-space-saved').textContent =
+    fullFailure ? '0 B' : formatBytes(wizState.spaceReclaimedBytes, 1);
   document.getElementById('lbl-quarantined-count').textContent = String(quarantined);
   document.getElementById('btn-review-quarantine').style.display = quarantined > 0 ? '' : 'none';
 
@@ -1556,12 +1562,21 @@ function renderPurgeSummary(res, requestedCount) {
       (missing > 0 ? ` ${missing} item(s) were already gone.` : '');
     failuresBox.style.display = 'none';
   } else {
-    hero.classList.add('partial');
-    icon.className = 'fa-solid fa-triangle-exclamation';
-    title.textContent = 'Moved to quarantine, with some items left in place';
-    elements.lblPurgeResultText.textContent =
-      `${quarantined} item(s) moved to quarantine. ${problems.length} could not be moved and were left ` +
-      'exactly as they were - nothing is half-removed.';
+    if (fullFailure) {
+      hero.classList.add('failed');
+      icon.className = 'fa-solid fa-circle-xmark';
+      title.textContent = 'Nothing was moved to quarantine';
+      elements.lblPurgeResultText.textContent =
+        `All ${problems.length} item(s) you selected failed to move and were left exactly as they were - ` +
+        'nothing is half-removed.';
+    } else {
+      hero.classList.add('partial');
+      icon.className = 'fa-solid fa-triangle-exclamation';
+      title.textContent = 'Moved to quarantine, with some items left in place';
+      elements.lblPurgeResultText.textContent =
+        `${quarantined} item(s) moved to quarantine. ${problems.length} could not be moved and were left ` +
+        'exactly as they were - nothing is half-removed.';
+    }
     failuresTitle.textContent = `Left in place (${problems.length})`;
 
     // REQ-19: offer the ownership elevator per item, and only for the items
@@ -1897,11 +1912,25 @@ function renderNetworkActivity(net) {
     return;
   }
 
-  const rate = (bytesPerSecond) => `${formatBytes(bytesPerSecond || 0, 1)}/s`;
+  // formatBytes(0) returns 'Unknown' (its convention for an untracked size,
+  // see xw2) - wrong here, where 0 is a confirmed reading, not a missing one.
+  const rate = (bytesPerSecond) => {
+    const b = bytesPerSecond || 0;
+    return b === 0 ? '0 B/s' : `${formatBytes(b, 1)}/s`;
+  };
   const gateway = (net.adapters || []).filter((a) => a.hasGateway);
   const primary = gateway.length ? gateway[0] : (net.adapters || [])[0];
   const processes = net.processes || [];
   const top = processes.slice(0, 6);
+
+  // h8j: the byte-rate sample is short (sampleMs, default 1s) and can land in
+  // a quiet gap of genuinely bursty traffic - "the rate was low right now" and
+  // "nothing is using the network" are different claims, and conflating them
+  // is exactly what an operator with real open connections during a quiet
+  // sample caught. A low rate with open connections gets its own, more
+  // honestly-hedged wording instead of reusing the true-idle verdict.
+  const sampleSeconds = (net.sampleMs || 1000) / 1000;
+  const quietWithConnections = processes.length > 0;
 
   const verdicts = {
     busy: {
@@ -1914,15 +1943,26 @@ function renderNetworkActivity(net) {
           ? `${top.length === 1 ? 'One program has' : `${top.length} programs have`} connections open right now.`
           : 'No program held an open connection, so this is Windows itself.')
     },
-    quiet: {
-      icon: 'fa-circle-check',
-      cls: 'is-quiet',
-      title: 'Nothing on this PC is using the network',
-      detail:
-        `The connection carried ${rate(net.totalBytesPerSecond)} while this was measured, which is an idle machine. ` +
-        'If something still feels slow, the cause is not on this PC - it is the router or the connection beyond it, ' +
-        'and nothing Vanish can change here will help.'
-    },
+    quiet: quietWithConnections
+      ? {
+          icon: 'fa-circle-check',
+          cls: 'is-quiet',
+          title: 'Low traffic in this sample - not necessarily idle',
+          detail:
+            `The connection carried ${rate(net.totalBytesPerSecond)} during a ${sampleSeconds}s sample, but ` +
+            `${processes.length === 1 ? '1 program has' : `${processes.length} programs have`} a connection open right ` +
+            'now. A short sample can land in a quiet gap of bursty traffic, so a low reading here does not mean ' +
+            'nothing is using the network - only that little moved in that instant.'
+        }
+      : {
+          icon: 'fa-circle-check',
+          cls: 'is-quiet',
+          title: 'Nothing on this PC is using the network',
+          detail:
+            `The connection carried ${rate(net.totalBytesPerSecond)} while this was measured, and no program held an ` +
+            'open connection. If something still feels slow, the cause is not on this PC - it is the router or the ' +
+            'connection beyond it, and nothing Vanish can change here will help.'
+        },
     'link-weak': {
       icon: 'fa-triangle-exclamation',
       cls: 'is-weak',
