@@ -302,6 +302,119 @@ function Get-UninstallRegistryEntries {
     return $entries
 }
 
+# Operator: "vanish doesnt correctly detect games entirely... detected GTA 5
+# installed, but with unknown size. Steam, Epic and other game platforms
+# manage installs, sizes, caches independently... some data is still
+# available." Confirmed: Steam and Epic each still write a normal
+# Programs-and-Features row per game (so the entry itself, uninstall string,
+# and install location are all already correct), but never populate
+# EstimatedSize, because the platform - not Windows - owns that number.
+# Both platforms publish an already-computed real size in their own catalog
+# files, which this reads directly. This is NOT the recursive folder-size
+# walk that cost Get-UwpApps 10-15 seconds per launch and was removed for
+# it (2026-08-07) - it is a handful of small, already-written text/JSON
+# files (one per installed game, no filesystem tree walk), read only when an
+# entry with a blank size and a real install location is actually found.
+function Get-SteamLibrarySizes {
+    $sizesByPath = @{}
+    try {
+        $steamPath = $null
+        $prop = Get-ItemProperty 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam' -ErrorAction SilentlyContinue
+        if ($prop -and $prop.InstallPath) { $steamPath = [string]$prop.InstallPath }
+        if (-not $steamPath) {
+            $prop = Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction SilentlyContinue
+            if ($prop -and $prop.SteamPath) { $steamPath = ([string]$prop.SteamPath) -replace '/', '\' }
+        }
+        if (-not $steamPath) { return $sizesByPath }
+
+        $libraryVdf = Join-Path $steamPath 'steamapps\libraryfolders.vdf'
+        if (-not (Test-Path $libraryVdf)) { return $sizesByPath }
+
+        # Minimal VDF (Valve Data Format) reader - this only ever needs flat
+        # "key" "value" pairs, never a real parse tree. Every library root is
+        # a "path" value; libraryfolders.vdf lists all of them (a Steam
+        # install can and often does span multiple drives, as it does on the
+        # machine this was written against).
+        $libraries = [System.Collections.Generic.List[string]]::new()
+        foreach ($line in Get-Content -LiteralPath $libraryVdf -ErrorAction Stop) {
+            if ($line -match '"path"\s+"([^"]+)"') {
+                $libraries.Add(($Matches[1] -replace '\\\\', '\'))
+            }
+        }
+
+        foreach ($libRoot in $libraries) {
+            $steamappsDir = Join-Path $libRoot 'steamapps'
+            if (-not (Test-Path $steamappsDir)) { continue }
+            foreach ($manifest in (Get-ChildItem -LiteralPath $steamappsDir -Filter 'appmanifest_*.acf' -ErrorAction SilentlyContinue)) {
+                $installDir = $null
+                $size = $null
+                foreach ($line in Get-Content -LiteralPath $manifest.FullName -ErrorAction SilentlyContinue) {
+                    if ($line -match '"installdir"\s+"([^"]+)"') { $installDir = $Matches[1] }
+                    if ($line -match '"SizeOnDisk"\s+"(\d+)"') { $size = [long]$Matches[1] }
+                }
+                if ($installDir -and $size) {
+                    $fullPath = Join-Path $steamappsDir "common\$installDir"
+                    $sizesByPath[$fullPath.ToLowerInvariant().TrimEnd('\')] = $size
+                }
+            }
+        }
+    } catch {}
+    return $sizesByPath
+}
+
+# Not live-tested against a real Epic install (not present on the machine
+# this was written against) - implemented against the documented .item
+# manifest shape (JSON: InstallLocation, InstallSize, DisplayName, AppName).
+# Any parse failure on a single file is swallowed per-file, same as Steam
+# above; a miss here leaves the entry exactly as it already rendered.
+function Get-EpicManifestSizes {
+    $sizesByPath = @{}
+    try {
+        $manifestDir = Join-Path $env:ProgramData 'Epic\EpicGamesLauncher\Data\Manifests'
+        if (-not (Test-Path $manifestDir)) { return $sizesByPath }
+        foreach ($file in (Get-ChildItem -LiteralPath $manifestDir -Filter '*.item' -ErrorAction SilentlyContinue)) {
+            try {
+                $data = Get-Content -LiteralPath $file.FullName -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+                if ($data.InstallLocation -and $data.InstallSize) {
+                    $sizesByPath[([string]$data.InstallLocation).ToLowerInvariant().TrimEnd('\')] = [long]$data.InstallSize
+                }
+            } catch {}
+        }
+    } catch {}
+    return $sizesByPath
+}
+
+# Backfills ONLY sizeBytes, and only when the registry itself reported none -
+# nothing else about an entry (name, uninstall string, publisher) is ever
+# touched by this. Steam checked before Epic simply because Steam is the
+# platform confirmed present on the machine this was written against; a miss
+# on both is silent and leaves the entry exactly as it already rendered
+# (unknown size, still fully listable and uninstallable).
+function Add-GamePlatformSizes {
+    param([object[]]$entries)
+
+    $steamSizes = $null
+    $epicSizes = $null
+
+    foreach ($e in $entries) {
+        if ($e.sizeBytes -gt 0) { continue }
+        if ([string]::IsNullOrWhiteSpace($e.installLocation)) { continue }
+
+        $key = $e.installLocation.ToLowerInvariant().TrimEnd('\')
+
+        if ($null -eq $steamSizes) { $steamSizes = Get-SteamLibrarySizes }
+        if ($steamSizes.ContainsKey($key)) {
+            $e.sizeBytes = $steamSizes[$key]
+            continue
+        }
+
+        if ($null -eq $epicSizes) { $epicSizes = Get-EpicManifestSizes }
+        if ($epicSizes.ContainsKey($key)) {
+            $e.sizeBytes = $epicSizes[$key]
+        }
+    }
+}
+
 # Decide what each entry IS. Every branch records a reason, because a
 # classification the user cannot see the basis for is just another silent filter.
 function Add-EntryClassification {
@@ -460,6 +573,7 @@ function Add-EntryClassification {
 
 function Get-InstalledApps {
     $entries = Add-EntryClassification (Get-UninstallRegistryEntries)
+    Add-GamePlatformSizes $entries
 
     $apps = foreach ($e in $entries) {
         [PSCustomObject]@{

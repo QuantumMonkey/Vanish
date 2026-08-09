@@ -10,6 +10,28 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added — real install sizes for Steam (and documented support for Epic) games
+
+* **Steam/Epic games no longer show "unknown size."** Confirmed the actual
+  gap: Steam (and Epic) still write a normal Programs-and-Features entry per
+  game - name, uninstall string, and install location are all already
+  correct - only `EstimatedSize` is blank, because the platform owns that
+  number, not Windows. Now reads it from the platform's own already-computed
+  catalog instead: `steamapps/libraryfolders.vdf` for every Steam library
+  (a Steam install can span multiple drives - true on the machine this was
+  built against), then each library's `appmanifest_<id>.acf` for the real
+  size, matched to the registry entry by install path. Only `sizeBytes` is
+  ever backfilled, and only when the registry itself reported none - nothing
+  else about an entry changes. Live-verified: Grand Theft Auto V Enhanced
+  now reports its real ~96GB size. This is a handful of small text-file
+  reads (one per installed game), not the recursive folder-size walk that
+  cost `Get-UwpApps` 10-15s per launch and was removed earlier this session
+  - measured 1209ms for a full list scan (up from ~350ms baseline), lazy
+  (only triggers when a blank-size entry with a real install path is
+  actually found). Epic support implemented against its documented `.item`
+  manifest shape but not live-tested - Epic isn't installed on the machine
+  this was built against.
+
 ### Added / Confirmed — startup latency root cause, redundancy discount badge
 
 * **Startup latency: root cause confirmed with a live A/B measurement.**
