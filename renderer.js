@@ -4531,7 +4531,17 @@ function positionTourSpotlight(selector) {
   const target = selector ? document.querySelector(selector) : null;
 
   if (!target) {
-    spotlight.classList.add('is-hidden');
+    // No spotlight target (the welcome step): the dim comes from the SAME
+    // box-shadow trick as every other step, just around a zero-size box, so
+    // it still darkens the whole viewport instead of leaving the busy app
+    // list at full brightness behind a 40%-opaque tooltip card (l0t-shaped
+    // bug: 'is-hidden' set opacity:0, which silently killed its own
+    // box-shadow along with the cutout it was meant to hide).
+    spotlight.classList.remove('is-hidden');
+    spotlight.style.top = '50%';
+    spotlight.style.left = '50%';
+    spotlight.style.width = '0px';
+    spotlight.style.height = '0px';
     tooltip.style.transform = 'translate(-50%, -50%)';
     tooltip.style.top = '50%';
     tooltip.style.left = '50%';

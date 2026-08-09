@@ -1011,11 +1011,6 @@ body::before {
   pointer-events: none;
 }
 
-.tour-spotlight.is-hidden {
-  opacity: 0;
-  box-shadow: 0 0 0 9999px rgba(5, 8, 15, 0.8);
-}
-
 .tour-tooltip {
   position: absolute;
   width: 320px;
