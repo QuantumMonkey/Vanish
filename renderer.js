@@ -495,11 +495,13 @@ function guardFullMode() {
 // Load both Desktop and UWP Apps
 async function loadApplications() {
   showLoadingState();
-  // UWP enumeration in particular can genuinely take 10+ seconds on a real
-  // machine (Get-UwpApps walks every package's full folder size before
-  // returning) - a bare "0" on the dashboard for that whole window is
-  // indistinguishable from "not implemented." Loading state distinguishes
-  // "still counting" from "counted zero."
+  // Get-UwpApps used to walk every package's full folder size (10+ seconds
+  // on a real machine) - that walk is gone (scanner.ps1, sizeBytes hardcoded
+  // to 0, operator 2026-08-07) and both desktop/UWP reads now measure
+  // ~350ms combined. The loading state stays regardless: a bare "0" on the
+  // dashboard while ANY read is in flight is indistinguishable from "not
+  // implemented," and a future slow field on either side should not have to
+  // rediscover that.
   elements.statTotalApps.textContent = '...';
   elements.statUwpApps.textContent = '...';
   elements.statTotalSize.textContent = '...';
@@ -844,15 +846,17 @@ function setupFilters() {
     filterAndRenderApps();
   });
 
-  document.getElementById('btn-clear-filters').addEventListener('click', () => {
-    filterText = '';
-    filterType = 'all';
-    elements.searchBar.value = '';
-    document.querySelectorAll('#type-toggle .toggle-btn').forEach((btn) => {
-      btn.classList.toggle('active', btn.getAttribute('data-type') === 'all');
-    });
-    filterAndRenderApps();
+  document.getElementById('btn-clear-filters').addEventListener('click', () => clearAppFilters());
+}
+
+function clearAppFilters() {
+  filterText = '';
+  filterType = 'all';
+  elements.searchBar.value = '';
+  document.querySelectorAll('#type-toggle .toggle-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.getAttribute('data-type') === 'all');
   });
+  filterAndRenderApps();
 }
 
 // Setup Sidebar tabs (tab map per 03-appflow.md)
@@ -884,6 +888,7 @@ function switchTab(tabName) {
 
   // The process sampler only runs while its tab is visible.
   if (tabName !== 'task-manager') stopProcessRefresh();
+  if (tabName !== 'audit') stopNetworkAutoRefresh();
 
   if (tabName === 'all-apps') {
     if (appsContentArea) appsContentArea.style.display = '';
@@ -893,14 +898,14 @@ function switchTab(tabName) {
     elements.sortSelector.disabled = false;
     elements.detailsSidebar.classList.remove('active');
     // Returning to this tab is not new evidence about the machine, so it does
-    // not re-scan it. Enumerating desktop + UWP applications takes 10-15
-    // seconds on a real machine; re-running that on every visit blanked the
-    // list, threw away the user's sort and search, and made the app feel like
-    // it was thinking rather than working (7oo.5, same class as the System
-    // Clean re-scan). Re-render what is already loaded; scan only if we have
-    // never successfully loaded, and after an action that actually changed the
-    // machine - closeUninstallWizard and the queue already call
-    // loadApplications() directly for exactly that reason.
+    // not re-scan it. Re-running the full enumeration on every visit (even
+    // now that it measures well under a second, see loadApplications) would
+    // still blank the list, throw away the user's sort and search, and make
+    // the app feel like it was thinking rather than working (7oo.5, same
+    // class as the System Clean re-scan). Re-render what is already loaded;
+    // scan only if we have never successfully loaded, and after an action
+    // that actually changed the machine - closeUninstallWizard and the queue
+    // already call loadApplications() directly for exactly that reason.
     if (allApps.length === 0) {
       loadApplications();
     } else {
@@ -921,7 +926,7 @@ function switchTab(tabName) {
     panel.style.overflow = 'hidden';
   }
 
-  if (tabName === 'audit') loadAuditData();
+  if (tabName === 'audit') { loadAuditData(); startNetworkAutoRefresh(); }
   if (tabName === 'quarantine') loadVaultEntries();
   if (tabName === 'task-manager') startProcessRefresh();
   if (tabName === 'system-clean') renderCleanerSections();
@@ -996,6 +1001,17 @@ function setupSettingsTab() {
     saveSettings({ processRefreshSeconds: parseInt(refresh.value, 10) })
   );
 
+  const networkRefresh = document.getElementById('set-network-refresh');
+  if (networkRefresh) {
+    networkRefresh.addEventListener('change', async () => {
+      await saveSettings({ networkRefreshSeconds: parseInt(networkRefresh.value, 10) });
+      // Take effect immediately if Health Advisor is the visible tab right
+      // now, rather than waiting for the next tab switch to notice the
+      // setting changed.
+      if (activeTab === 'audit') startNetworkAutoRefresh();
+    });
+  }
+
   document.getElementById('set-open-vault').addEventListener('click', () => window.api.openVaultFolder());
   document.getElementById('set-open-data').addEventListener('click', () => window.api.openDataFolder());
 
@@ -1032,6 +1048,8 @@ function syncSettingsPanel() {
   document.getElementById('set-retention-days').value = appSettings.autoPurgeRetentionDays;
   document.getElementById('set-scan-mode').value = appSettings.defaultScanMode || 'Moderate';
   document.getElementById('set-process-refresh').value = appSettings.processRefreshSeconds;
+  const networkRefreshInput = document.getElementById('set-network-refresh');
+  if (networkRefreshInput) networkRefreshInput.value = appSettings.networkRefreshSeconds || 0;
 
   const startsElevated = appSettings.startupMode === 'full';
   document.getElementById('set-startup-elevated').checked = startsElevated;
@@ -1906,8 +1924,18 @@ function renderNetworkActivity(net) {
 
   const v = verdicts[net.verdict] || verdicts.quiet;
 
+  // Operator report: "network activity doesnt show upload, download speeds."
+  // scanner.ps1 has always computed receiveBytesPerSecond/sendBytesPerSecond
+  // per adapter (they already drive the busy/quiet verdict) - only the split
+  // figures themselves were never displayed. No new engine capability, no
+  // new network I/O, just surfacing a number already in the response.
+  const speedLine = primary
+    ? `${rate(primary.receiveBytesPerSecond)} down / ${rate(primary.sendBytesPerSecond)} up`
+    : null;
+
   const examined = [
     primary ? `${esc(primary.name)} (${primary.isWireless ? 'Wi-Fi' : 'wired'})` : null,
+    speedLine ? esc(speedLine) : null,
     `${processes.length} program(s) with a connection open`,
     net.updateTransfers != null
       ? `Windows Update: ${net.updateTransfers === 0 ? 'not downloading' : `${net.updateTransfers} download(s) running`}`
@@ -1924,16 +1952,32 @@ function renderNetworkActivity(net) {
         ? 'Wi-Fi signal strength was not read: Windows only reports it to an administrator.'
         : null;
 
+  // Operator report: "are we able to enumerate the connections open and
+  // places connected to... would that help decide if risky." The IPs were
+  // always collected (scanner.ps1); this makes "places connected to" a real,
+  // checkable list instead of just a count, without a port (kept stripped -
+  // see the comment where scanner.ps1 collects it) or any DNS lookup (would
+  // be outbound network I/O, which this panel is tested to never do).
   const rows = top
-    .map(
-      (p) => `
-      <tr class="app-row">
+    .map((p, i) => {
+      const peers = Array.isArray(p.peers) ? p.peers : [];
+      const rowId = `net-peers-${i}`;
+      return `
+      <tr class="app-row${peers.length ? ' net-row-expandable' : ''}" ${peers.length ? `data-peers-toggle="${rowId}"` : ''}>
         <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
         <td style="font-size: 12px; color: var(--text-gray);">${esc(p.processId)}</td>
         <td style="font-size: 12px; color: var(--text-gray);">${esc(p.connectionCount)}</td>
-        <td style="font-size: 12px; color: var(--text-gray);">${esc(p.peerCount)}</td>
-      </tr>`
-    )
+        <td style="font-size: 12px; color: var(--text-gray);">
+          ${esc(p.peerCount)}${peers.length ? ' <i class="fa-solid fa-chevron-right net-peers-chevron"></i>' : ''}
+        </td>
+      </tr>
+      ${peers.length ? `
+      <tr class="net-peers-row" id="${rowId}" style="display: none;">
+        <td colspan="4">
+          <div class="net-peers-list">${peers.map((ip) => `<span class="net-peer-pill">${esc(ip)}</span>`).join('')}</div>
+        </td>
+      </tr>` : ''}`;
+    })
     .join('');
 
   body.innerHTML = `
@@ -1979,7 +2023,20 @@ function renderNetworkActivity(net) {
   }
 
   wireNetworkRefresh();
+  wireNetworkPeerToggles();
   renderNetworkHold();
+}
+
+function wireNetworkPeerToggles() {
+  document.querySelectorAll('[data-peers-toggle]').forEach((row) => {
+    row.addEventListener('click', () => {
+      const target = document.getElementById(row.getAttribute('data-peers-toggle'));
+      if (!target) return;
+      const showing = target.style.display !== 'none';
+      target.style.display = showing ? 'none' : 'table-row';
+      row.classList.toggle('is-expanded', !showing);
+    });
+  });
 }
 
 // bfh.2. A hold changes a machine-wide Windows policy and pauses other
@@ -1998,10 +2055,21 @@ async function renderNetworkHold() {
   }
 
   if (state && state.active) {
-    const heldJobs = ((state.record && state.record.bitsJobs) || []).length;
+    const heldJobsList = (state.record && state.record.bitsJobs) || [];
+    const heldJobs = heldJobsList.length;
     const since = state.record && state.record.startedAt
       ? new Date(state.record.startedAt).toLocaleTimeString()
       : null;
+
+    // Operator report: the hold worked, but nothing named what it actually
+    // held - "N background transfer(s)" is a number with nothing to check it
+    // against. Each captured job already carries a displayName (scanner.ps1
+    // network-hold-capture); a PID-level list isn't possible (BITS jobs
+    // aren't reliably tied to one live process), but naming the transfers
+    // themselves is the concrete, checkable version of the same idea.
+    const jobList = heldJobs > 0
+      ? `<ul class="net-hold-jobs">${heldJobsList.map((j) => `<li>${esc(j.displayName || j.jobId)}</li>`).join('')}</ul>`
+      : '';
 
     row.innerHTML = `
       <div class="net-hold is-on">
@@ -2012,6 +2080,7 @@ async function renderNetworkHold() {
             ${heldJobs === 0 ? 'no other transfer was running to pause' : `${heldJobs} background transfer(s) are paused`}${since ? `, since ${esc(since)}` : ''}.
             Releasing puts every setting back exactly as it was. Vanish also releases it by itself if it is closed or crashes.
           </div>
+          ${jobList}
         </div>
         <button class="btn-primary btn-compact" id="btn-network-release" data-destructive="true">
           <i class="fa-solid fa-play"></i> Release
@@ -2105,6 +2174,31 @@ function wireNetworkRefresh() {
     const net = await window.api.getNetworkActivity();
     renderNetworkActivity(net);
   });
+}
+
+// Operator-proposed throttle: "put that on a manual refresh only... or an
+// interval based refresh we could set in settings." Off (0) by default -
+// today's manual-only "Measure again" behaviour is unchanged unless a
+// person opts in from Settings. Only runs while the Health Advisor tab is
+// actually visible (switchTab starts/stops it), same lifecycle as the Task
+// Manager sampler.
+let networkRefreshTimer = null;
+
+function startNetworkAutoRefresh() {
+  stopNetworkAutoRefresh();
+  const seconds = appSettings.networkRefreshSeconds || 0;
+  if (seconds <= 0) return;
+  networkRefreshTimer = setInterval(async () => {
+    const net = await window.api.getNetworkActivity();
+    renderNetworkActivity(net);
+  }, seconds * 1000);
+}
+
+function stopNetworkAutoRefresh() {
+  if (networkRefreshTimer) {
+    clearInterval(networkRefreshTimer);
+    networkRefreshTimer = null;
+  }
 }
 
 function renderDiskBars(disks, error) {
@@ -2313,6 +2407,13 @@ async function runStartupAction(index) {
   await loadAuditData(true);
 }
 
+// Operator: "redundant software should offer a button that leads to a
+// decision making workflow... a waive-off button... it still shows up in
+// that section, but with the notice that the user overrode it, still
+// offering the decision making buttonflow." Example given: different
+// browsers for different needs is a deliberate choice, not an oversight -
+// waiving records that choice without hiding the suggestion or losing the
+// ability to act on it later.
 function renderRedundancyGroups(redundancy) {
   const list = document.getElementById('audit-redundancy-list');
   if (!list) return;
@@ -2329,21 +2430,83 @@ function renderRedundancyGroups(redundancy) {
     return;
   }
 
+  const waived = new Set(appSettings.redundancyWaivers || []);
+
   list.innerHTML = groups.map(g => {
-    const pills = (g.apps ?? []).map(a =>
-      `<span class="redundancy-pill">${esc(a.name)}</span>`
+    const isWaived = waived.has(g.category);
+    const rows = (g.apps ?? []).map(a => `
+      <div class="redundancy-app-row">
+        <span class="redundancy-pill">${esc(a.name)}</span>
+        <button class="btn-sec btn-compact redundancy-uninstall-btn" data-app-id="${esc(a.id)}">
+          <i class="fa-solid fa-magnifying-glass"></i> Review to uninstall
+        </button>
+      </div>`
     ).join('');
     return `
-      <div class="redundancy-group">
+      <div class="redundancy-group${isWaived ? ' is-waived' : ''}">
         <div class="redundancy-group-header">
           <span class="redundancy-category"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${esc(g.category)}</span>
           <span class="audit-badge danger">${esc(g.count)} installed</span>
         </div>
         <div class="redundancy-tip">${esc(g.tip)}</div>
-        <div class="redundancy-app-pills">${pills}</div>
+        ${isWaived
+          ? `<div class="redundancy-override-notice"><i class="fa-solid fa-circle-check"></i> You chose to keep all of these - Vanish will keep showing this group, but will not flag it as unusual.</div>`
+          : ''
+        }
+        <div class="redundancy-app-pills">${rows}</div>
+        <div class="redundancy-actions">
+          <button class="btn-sec btn-compact" data-waive-toggle="${esc(g.category)}">
+            <i class="fa-solid ${isWaived ? 'fa-rotate-left' : 'fa-circle-check'}"></i> ${isWaived ? 'Undo, flag this again' : 'Keep all of these'}
+          </button>
+        </div>
       </div>
     `;
   }).join('');
+
+  wireRedundancyActions();
+}
+
+function wireRedundancyActions() {
+  document.querySelectorAll('.redundancy-uninstall-btn').forEach((btn) => {
+    btn.addEventListener('click', () => jumpToUninstall(btn.getAttribute('data-app-id')));
+  });
+  document.querySelectorAll('[data-waive-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleRedundancyWaiver(btn.getAttribute('data-waive-toggle')));
+  });
+}
+
+// Jumps to the exact same entry point a person clicking the app in All
+// Programs would reach (selectApp -> the details sidebar's own Clean
+// Uninstall button) rather than opening a second, parallel uninstall path.
+// Stops short of opening the wizard directly - the redundancy group's app
+// object is a collapsed "family" summary (Get-SoftwareRedundancy), not
+// necessarily the exact live registry row, so the details panel is where
+// that gets confirmed before anything destructive is offered.
+function jumpToUninstall(appId) {
+  const app = allApps.find((a) => a.id === appId);
+  if (!app) {
+    toast('That program is no longer on the list - try re-scanning.', 'warn');
+    return;
+  }
+  switchTab('all-apps');
+  clearAppFilters();
+  selectApp(app, null);
+  filterAndRenderApps();
+  const row = elements.appsTbody.querySelector('tr.selected');
+  if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+async function toggleRedundancyWaiver(category) {
+  const current = new Set(appSettings.redundancyWaivers || []);
+  if (current.has(category)) current.delete(category);
+  else current.add(category);
+  await saveSettings({ redundancyWaivers: [...current] });
+  // Only the override state changed - re-running the whole Health Advisor
+  // load (system diagnostics, startup items, AND the network read with its
+  // built-in ~1s sample sleep) to redraw one section's badges would be pure
+  // waiting. Re-fetch just the redundancy groups and redraw only that list.
+  const redundancy = await window.api.getSoftwareRedundancy();
+  renderRedundancyGroups(redundancy);
 }
 
 // ==========================================
@@ -2731,10 +2894,22 @@ let processTimer = null;
 let processSampling = false;
 let processPaused = false;
 
+// GPU usage (operator request). Sampled on its own, much slower timer -
+// scanner.ps1's Get-GpuUsageByProcess measures 1.5-3s per call, so it cannot
+// run on the same cadence as the rest of the process list without undoing
+// the startup/latency work done the same session this was requested in.
+// Keyed by pid (string, since JSON object keys always are).
+let gpuUsageByPid = {};
+let gpuAdapterUsage = []; // [{ physIndex, percent }] - system-wide, not per-process
+let gpuSampleTimer = null;
+let gpuSampling = false;
+const GPU_SAMPLE_INTERVAL_MS = 15000;
+
 const PROCESS_SORTERS = {
   name: (a, b) => a.name.localeCompare(b.name),
   pid: (a, b) => a.pid - b.pid,
   cpu: (a, b) => a.cpuPercent - b.cpuPercent,
+  gpu: (a, b) => (gpuUsageByPid[a.pid] || 0) - (gpuUsageByPid[b.pid] || 0),
   memory: (a, b) => a.memoryBytes - b.memoryBytes,
   io: (a, b) => a.ioBytesPerSec - b.ioBytesPerSec
 };
@@ -2784,6 +2959,7 @@ function startProcessRefresh() {
   if (processPaused) return;
   sampleProcesses();
   processTimer = setInterval(sampleProcesses, appSettings.processRefreshSeconds * 1000);
+  startGpuSampling();
 }
 
 function stopProcessRefresh() {
@@ -2791,6 +2967,60 @@ function stopProcessRefresh() {
     clearInterval(processTimer);
     processTimer = null;
   }
+  stopGpuSampling();
+}
+
+// Separate, much slower cadence than sampleProcesses() - see the cost
+// comment on gpuUsageByPid above. Re-renders only the already-visible table
+// (cheap) rather than re-fetching the process list too.
+async function sampleGpuUsage() {
+  if (gpuSampling) return;
+  gpuSampling = true;
+  try {
+    const res = await window.api.getGpuUsage();
+    if (res && res.success === true) {
+      gpuUsageByPid = res.byPid || {};
+      gpuAdapterUsage = res.byAdapter || [];
+      renderGpuAdapterSummary();
+      renderProcessTable();
+    }
+  } finally {
+    gpuSampling = false;
+  }
+}
+
+function startGpuSampling() {
+  stopGpuSampling();
+  sampleGpuUsage();
+  gpuSampleTimer = setInterval(sampleGpuUsage, GPU_SAMPLE_INTERVAL_MS);
+}
+
+function stopGpuSampling() {
+  if (gpuSampleTimer) {
+    clearInterval(gpuSampleTimer);
+    gpuSampleTimer = null;
+  }
+}
+
+// "Active GPU icons, so we know which GPU is doing what" - a small,
+// system-wide (not per-process) summary. Adapters are labelled generically
+// by phys index (GPU 0 / GPU 1), matching Windows' own Task Manager - see
+// Get-GpuUsageByProcess for why a friendly vendor name is not reliable here.
+function renderGpuAdapterSummary() {
+  const el = document.getElementById('gpu-adapter-summary');
+  if (!el) return;
+  if (!gpuAdapterUsage.length) {
+    el.innerHTML = '<span class="gpu-adapter-pill idle"><i class="fa-solid fa-microchip"></i> No GPU activity detected</span>';
+    return;
+  }
+  el.innerHTML = gpuAdapterUsage
+    .map(
+      (a) =>
+        `<span class="gpu-adapter-pill${a.percent > 0 ? ' is-active' : ''}">
+           <i class="fa-solid fa-microchip"></i> GPU ${esc(a.physIndex)}: ${esc(a.percent.toFixed(0))}%
+         </span>`
+    )
+    .join('');
 }
 
 async function sampleProcesses() {
@@ -2801,7 +3031,7 @@ async function sampleProcesses() {
     const res = await window.api.listProcesses({ sampleMs: 400 });
     if (!res || res.success !== true) {
       document.getElementById('process-tbody').innerHTML = `
-        <tr><td colspan="6" class="table-state" style="color: var(--color-danger);">
+        <tr><td colspan="7" class="table-state" style="color: var(--color-danger);">
           <i class="fa-solid fa-circle-xmark"></i> ${esc((res && res.error) || 'Could not read the running programs.')}
         </td></tr>`;
       return;
@@ -2835,7 +3065,7 @@ function renderProcessTable() {
   });
 
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="6" class="table-state">Nothing running matches that filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="7" class="table-state">Nothing running matches that filter.</td></tr>`;
     return;
   }
 
@@ -2854,6 +3084,7 @@ function renderProcessTable() {
           <td style="font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
           <td style="color: var(--text-gray);">${esc(p.pid)}</td>
           <td style="color: var(--text-gray);">${esc(p.cpuPercent.toFixed(1))}%</td>
+          <td style="color: var(--text-gray);">${gpuUsageByPid[p.pid] != null ? esc(gpuUsageByPid[p.pid].toFixed(1)) + '%' : '-'}</td>
           <td style="color: var(--text-gray);">${esc(formatBytes(p.memoryBytes, 1))}</td>
           <td style="color: var(--text-gray);">${p.ioBytesPerSec > 0 ? esc(formatBytes(p.ioBytesPerSec, 1)) + '/s' : '-'}</td>
           <td>${chips}</td>

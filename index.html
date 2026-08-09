@@ -485,22 +485,25 @@
           </div>
         </div>
 
+        <div class="gpu-adapter-summary" id="gpu-adapter-summary"></div>
+
         <div class="process-workspace">
           <div class="process-list-container">
             <table class="apps-table process-table">
               <thead>
                 <tr>
-                  <th data-sort="name" style="width: 34%;">Process</th>
-                  <th data-sort="pid" style="width: 10%;">PID</th>
-                  <th data-sort="cpu" style="width: 12%;">CPU</th>
-                  <th data-sort="memory" style="width: 14%;">Memory</th>
-                  <th data-sort="io" style="width: 14%;">Disk I/O</th>
-                  <th style="width: 16%;">Indicators</th>
+                  <th data-sort="name" style="width: 30%;">Process</th>
+                  <th data-sort="pid" style="width: 8%;">PID</th>
+                  <th data-sort="cpu" style="width: 10%;">CPU</th>
+                  <th data-sort="gpu" style="width: 10%;">GPU</th>
+                  <th data-sort="memory" style="width: 12%;">Memory</th>
+                  <th data-sort="io" style="width: 12%;">Disk I/O</th>
+                  <th style="width: 18%;">Indicators</th>
                 </tr>
               </thead>
               <tbody id="process-tbody">
                 <tr>
-                  <td colspan="6" class="table-state">
+                  <td colspan="7" class="table-state">
                     <i class="fa-solid fa-spinner fa-spin"></i> Reading running programs...
                   </td>
                 </tr>
@@ -731,6 +734,24 @@
                 <span>Every</span>
                 <input type="number" id="set-process-refresh" min="1" max="60" value="2">
                 <span>s</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="settings-group-title">Health Advisor</div>
+          <div class="settings-row">
+            <div class="settings-row-main">
+              <div class="settings-row-title">Network Activity auto-refresh</div>
+              <div class="settings-row-desc">
+                0 means manual only - use "Measure again" on the Health Advisor tab. Above 0, it re-measures
+                on its own while that tab is open, and stops the moment you leave it.
+              </div>
+            </div>
+            <div class="settings-row-controls">
+              <label class="retention-field">
+                <span>Every</span>
+                <input type="number" id="set-network-refresh" min="0" max="300" value="0">
+                <span>s (0 = manual)</span>
               </label>
             </div>
           </div>

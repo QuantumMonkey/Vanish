@@ -653,6 +653,18 @@ ipcMain.handle('get-tier', async () => ({
 // exists, and the manual path is about to destroy the one that does.
 let splashWindow = null;
 
+// Operator report: a black, contentless window titled "Vanish" was seen
+// during elevation on a UAC-disabled machine, with no error and nothing to
+// close it. mainWindow has had a did-fail-load safety net since the earlier
+// portable-extraction race was found (dialog instead of a silent blank
+// window) - this window never had the equivalent, and being alwaysOnTop, a
+// stuck blank splash sits in front of everything indefinitely rather than
+// just being an inert background window. Root cause of that specific report
+// was not confirmed (concurrent manual process manipulation during the same
+// investigation makes the trace unreliable), but both gaps below are real
+// and worth closing regardless of what caused that one incident.
+const SPLASH_WATCHDOG_MS = 20000;
+
 function showElevationSplash() {
   if (headlessHarness || splashWindow) return;
   try {
@@ -670,7 +682,19 @@ function showElevationSplash() {
       title: 'Vanish',
       webPreferences: { nodeIntegration: false, contextIsolation: true }
     });
-    splashWindow.on('closed', () => { splashWindow = null; });
+    // Never leave an alwaysOnTop window with no content sitting in front of
+    // everything else: if whatever normally closes this (a resolved
+    // relaunch, success or failure) never fires, this is the fallback.
+    const watchdog = setTimeout(() => closeElevationSplash(), SPLASH_WATCHDOG_MS);
+    splashWindow.on('closed', () => {
+      clearTimeout(watchdog);
+      splashWindow = null;
+    });
+    splashWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription) => {
+      if (errorCode === -3) return; // ERR_ABORTED - a deliberate navigation, not a failure
+      console.error(`Elevation splash failed to load: ${errorDescription || errorCode}`);
+      closeElevationSplash();
+    });
     splashWindow.loadFile(path.join(__dirname, 'splash.html'));
   } catch {
     // Feedback failing must never block the elevation it describes.
@@ -863,6 +887,18 @@ ipcMain.handle('list-processes', async (event, params) => {
     return await runPowerShell('list-processes', params || {});
   } catch (error) {
     return { success: false, error: error.message, items: [] };
+  }
+});
+
+// Measured ~1.5-3s per call (Get-Counter '\GPU Engine(*)\Utilization
+// Percentage' plus the usual engine spawn cost) - deliberately its own
+// channel, sampled by the renderer on a slower cadence than list-processes,
+// never awaited inline with the fast per-tick refresh.
+ipcMain.handle('get-gpu-usage', async () => {
+  try {
+    return await runPowerShell('get-gpu-usage');
+  } catch (error) {
+    return { success: false, error: error.message, byPid: {}, byAdapter: [] };
   }
 });
 

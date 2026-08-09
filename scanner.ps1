@@ -1558,6 +1558,16 @@ function Get-NetworkActivity {
                 name            = if ($names.ContainsKey([int]$procId)) { [string]$names[[int]$procId] } else { "PID $procId" }
                 connectionCount = [int]$entry.connections
                 peerCount       = [int]$entry.peers.Count
+                # Operator report: "is that cumbersome, would it help decide
+                # if the behaviour is risky." The IP list was always collected
+                # (see the peers hashtable above) - only its Count was ever
+                # surfaced. Two deliberate limits carried over unchanged: no
+                # port (still stripped above, Rule 6 - do not drift this
+                # panel toward security/firewall framing), no reverse-DNS
+                # (would be outbound network I/O, banned outright by INV-4 -
+                # see test/network-verify.ps1, which greps this whole file for
+                # exactly that class of call).
+                peers           = @($entry.peers.Keys)
             })
         }
     }
@@ -3173,6 +3183,66 @@ function Get-ProcessIndicators {
     }
 
     return $indicators
+}
+
+# GPU per-process utilization (operator request, "show which GPU is doing
+# what"). Windows exposes no CIM/WMI per-process GPU counter - the
+# '\GPU Engine(*)\Utilization Percentage' perf counter is the same source
+# Windows' own Task Manager reads, keyed by instance names shaped like
+# pid_<pid>_luid_<hi>_<lo>_phys_<n>_eng_<m>_engtype_<type>.
+#
+# PERFORMANCE: measured ~1.5s for this single call on a real dual-GPU laptop
+# (374 instances even near-idle) - far more than the rest of a Task Manager
+# refresh costs combined. Deliberately a SEPARATE action from Get-ProcessList,
+# meant to be sampled by the caller on a slower cadence, never folded into the
+# fast per-tick process list (that would undo the startup/latency work done
+# the same session this was requested in).
+#
+# Per-process figure is a SUM across that process's engines (3D, copy, video
+# decode, etc), capped at 100 as a sanity bound - not a claim of exact parity
+# with Task Manager's own internal weighting, which is not published. Higher
+# still means busier; treat it as an indicator, not a certified percentage.
+#
+# Adapter naming: phys_N cannot be reliably mapped to a friendly adapter name
+# (RTX 3080 vs AMD Radeon) through cheap CIM queries, and an idle discrete GPU
+# under hybrid graphics reports NO instances at all - not a zero - until
+# something wakes it, so there is nothing to correlate a name against most of
+# the time anyway. Windows' own Task Manager has this exact limitation and
+# labels a dual-GPU system "GPU 0" / "GPU 1" for the same reason; this does
+# the same rather than guessing a vendor name.
+function Get-GpuUsageByProcess {
+    $byPid = @{}
+    $byAdapter = @{}
+
+    try {
+        $counters = Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop
+    } catch {
+        return @{ success = $false; error = $_.Exception.Message; byPid = @{}; byAdapter = @() }
+    }
+
+    foreach ($sample in $counters.CounterSamples) {
+        if ($sample.CookedValue -le 0) { continue }
+        if ($sample.InstanceName -notmatch 'pid_(\d+)_luid_.*_phys_(\d+)_eng_') { continue }
+        $procId  = [int]$Matches[1]
+        $physIdx = [int]$Matches[2]
+
+        if (-not $byPid.ContainsKey($procId)) { $byPid[$procId] = 0.0 }
+        $byPid[$procId] += $sample.CookedValue
+
+        if (-not $byAdapter.ContainsKey($physIdx)) { $byAdapter[$physIdx] = 0.0 }
+        $byAdapter[$physIdx] += $sample.CookedValue
+    }
+
+    $pidResult = @{}
+    foreach ($k in $byPid.Keys) {
+        $pidResult["$k"] = [Math]::Round([Math]::Min(100, $byPid[$k]), 1)
+    }
+
+    $adapterResult = @($byAdapter.Keys | Sort-Object | ForEach-Object {
+        @{ physIndex = $_; percent = [Math]::Round([Math]::Min(100, $byAdapter[$_]), 1) }
+    })
+
+    return @{ success = $true; byPid = $pidResult; byAdapter = $adapterResult }
 }
 
 # REQ-06: live process list with CPU / memory / disk, sampled over a short
@@ -4898,6 +4968,9 @@ if ($Action) {
         # ---- PHASE 2: TASK MANAGER & UNLOCKER ----
         "list-processes" {
             Get-ProcessList -p $Params | ConvertTo-Json -Depth 6 -Compress
+        }
+        "get-gpu-usage" {
+            Get-GpuUsageByProcess | ConvertTo-Json -Depth 4 -Compress
         }
         "kill-process" {
             Stop-VanishProcess -p $Params | ConvertTo-Json -Depth 4 -Compress

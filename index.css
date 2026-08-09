@@ -1576,6 +1576,51 @@ input:checked + .slider:before {
 
 .net-hold-detail { font-size: 11.5px; color: var(--text-gray); line-height: 1.55; }
 
+.net-hold-jobs {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 11.5px;
+  color: var(--text-gray);
+  line-height: 1.6;
+}
+
+.gpu-adapter-summary {
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 10px;
+  flex-wrap: wrap;
+}
+
+.gpu-adapter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-gray);
+  background: hsla(222, 40%, 15%, 0.5);
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+
+.gpu-adapter-pill.is-active { color: var(--color-primary); border-color: hsla(220, 90%, 60%, 0.35); }
+.gpu-adapter-pill.idle { color: var(--text-muted); }
+
+.net-row-expandable { cursor: pointer; }
+.net-peers-chevron { color: var(--text-muted); font-size: 10px; transition: transform 180ms ease-out; }
+.net-row-expandable.is-expanded .net-peers-chevron { transform: rotate(90deg); }
+.net-peers-row td { padding: 6px 12px 10px; background: hsla(222, 40%, 8%, 0.4); }
+.net-peers-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.net-peer-pill {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  color: var(--text-gray);
+  background: hsla(220, 40%, 60%, 0.12);
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  padding: 3px 8px;
+}
+
 /* Indeterminate wait bar. Used where the wait is Windows' and its length is
  * genuinely unknown, so a percentage would be an invention. */
 .wait-track {
@@ -1601,23 +1646,23 @@ input:checked + .slider:before {
 
 /* Info card grid
  *
- * auto-FILL keeps empty phantom tracks, so a row holding fewer cards than there
- * are columns sits jammed against the left with dead space beside it. auto-FIT
- * collapses those tracks, and a max track size stops two cards on their own row
- * from stretching to half the window each; justify-content then centres the
- * whole block. The result reads the same with four cards or ten.
+ * A first attempt used auto-fit with a tuned minmax() to GUESS how many
+ * columns would fit a typical maximized window - it still wrapped on the
+ * operator's actual laptop (Windows display scaling shrinks the effective
+ * CSS width well below raw screenshot pixels, so any width-based guess is
+ * unreliable), and auto-fit's justify-content: center left visible dead
+ * space on both sides whenever it landed on fewer/narrower columns than the
+ * container could hold - the "tabbed margin" look from the same report.
  *
- * The 6 System Overview cards need up to 6*260+5*10=1610px of track width to
- * share one row, more than the maximized content area on common laptop
- * screens actually has once the 240px sidebar and padding come out - so a
- * card would wrap to its own second row even maximized (operator report).
- * Narrower min/max bounds let auto-fit reach 6-across from ~950px of content
- * width instead of ~1610px, while still wrapping to 2+ rows below that on a
- * genuinely narrow or non-maximized window. */
+ * The System Overview count is fixed at exactly 6 cards (renderer.js), never
+ * variable, so there is no need to guess at all: repeat(6, minmax(0, 1fr))
+ * always renders exactly one row of 6 equal columns spanning the full
+ * container width - no wrap, no side margins, at any window size down to
+ * the app's own 800px minimum (cards get tight there, not broken - values
+ * already wrap via .card-value.wrap instead of overflowing). */
 .audit-cards-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 220px));
-  justify-content: center;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1879,8 +1924,16 @@ input:checked + .slider:before {
 
 .redundancy-app-pills {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
+}
+
+.redundancy-app-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .redundancy-pill {
@@ -1891,6 +1944,27 @@ input:checked + .slider:before {
   font-size: 12px;
   color: var(--text-white);
 }
+
+.redundancy-group.is-waived {
+  background: hsla(222, 40%, 15%, 0.35);
+  border-color: var(--border-glass);
+}
+
+.redundancy-group.is-waived .redundancy-category { color: var(--text-gray); }
+
+.redundancy-override-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--color-success);
+  background: hsla(150, 60%, 45%, 0.08);
+  border: 1px solid hsla(150, 60%, 45%, 0.2);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+.redundancy-actions { display: flex; justify-content: flex-end; margin-top: 2px; }
 
 /* No-redundancy success message */
 .audit-ok-box {

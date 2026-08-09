@@ -10,6 +10,63 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added / Fixed — GPU visibility, network telemetry, redundancy waivers, startup latency
+
+* **System Overview grid, real fix this time.** The prior width-guessed
+  auto-fit still wrapped on the operator's actual screen. Replaced with
+  `repeat(6, minmax(0,1fr))` - unconditionally one row, full width, no
+  guessing, since the card count is permanently 6.
+* **Task Manager: GPU column + which-GPU indicator.** New `get-gpu-usage`
+  engine action (`Get-Counter '\GPU Engine(*)\Utilization Percentage'`, the
+  same source Windows' own Task Manager reads) is deliberately its own IPC
+  channel - measured 1.5-3.2s per call on the operator's real dual-GPU
+  laptop, so it samples on its own 15s interval, not the fast process-list
+  tick, and merges into the table client-side by pid. System-wide "GPU 0 /
+  GPU 1" activity pills above the table use generic phys-index labels rather
+  than a guessed vendor name - matches real Task Manager's own precedent for
+  the identical limitation (an idle discrete GPU reports no instances at all
+  until something wakes it).
+* **Network Activity: upload/download speed.** `receiveBytesPerSecond` /
+  `sendBytesPerSecond` per adapter were always computed (they already drove
+  the busy/quiet verdict) and are now displayed - no new engine capability,
+  no new network I/O.
+* **Network Activity: peer IP list per process.** `Get-NetConnectionsByProcess`
+  always collected each process's distinct remote IPs; only the count ever
+  left the engine. Now expandable per row. Two existing, deliberate limits
+  were kept, not reversed: no port (avoids drifting this panel toward
+  security/firewall framing) and no reverse-DNS (would be outbound network
+  I/O, which `test/network-verify.ps1` asserts this engine never does).
+* **Network Activity: optional auto-refresh interval.** New Settings row,
+  default 0 (manual "Measure again" only, unchanged from before) - opt-in
+  per the operator's own proposed design.
+* **Network Hold: name what's actually held.** The hold detail used to say
+  only "N background transfer(s) are paused." Each held BITS job already
+  carried a `displayName`; now listed by name. True per-process attribution
+  isn't possible - `Get-BitsTransfer` exposes no owning-process field.
+* **Redundant software: waive workflow.** Redundancy groups
+  (`Get-SoftwareRedundancy`) were entirely static pills with no interactive
+  element. Each app now has a "Review to uninstall" shortcut that jumps to
+  the exact same entry point a manual click from All Programs would reach
+  (`selectApp`, details sidebar), and each group has a "Keep all of these"
+  waiver, persisted in settings. Waiving does not hide the group - it keeps
+  showing, with an override notice, and the same decision buttons.
+* **Startup latency, investigated with real measurements.** Confirmed the
+  historical 10-15s `Get-UwpApps` folder-size walk (already fixed in a prior
+  session) is gone - two stale comments still describing the old behaviour
+  were corrected. Measured the JS/PowerShell-controllable boot cost directly
+  (~1.2-2.5s) - real, but does not explain a reported 5-8s wait. Live-timed
+  the actual packaged portable exe once (with the operator's explicit
+  consent): roughly 10+ seconds just between the launcher starting and the
+  real app process appearing, far more than ~90MB of self-extraction should
+  cost - the leading suspect is antivirus real-time scanning of the freshly
+  extracted files on every launch, which is structural to the portable
+  format, not an app bug. The elevation-splash window gained a
+  `did-fail-load` safety net and a 20s watchdog (it had neither before,
+  unlike the main window) after a black, contentless splash was seen live
+  during this investigation - root cause unconfirmed (the investigation's
+  own concurrent process manipulation makes the trace unreliable), but both
+  gaps were real regardless of what caused that one incident.
+
 ### Fixed / Added — seven operator-reported issues from a live session
 
 * **UAC diagnostics (`ytv`).** The "Windows did not grant administrator
