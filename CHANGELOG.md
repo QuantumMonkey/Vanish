@@ -10,6 +10,24 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added — manual-tap ping (`kp0`)
+
+* Asked three times; accepted this session as one deliberate, tightly
+  scoped exception to "zero network I/O", not a reopening of it. A fourth
+  tile next to Download/Upload/Adapter sends a single ICMP echo — **only**
+  when tapped, never on a timer or automatically. Defaults to the current
+  adapter's own gateway address, shown and editable — never a hardcoded
+  third-party IP. First tap explains what is sent and where, and is
+  remembered after being *given*, not merely seen; declining asks again
+  next time. The About page's absolute privacy promise is now stated
+  separately from this one named exception, in both places that claim it.
+* `test/network-verify.ps1`'s zero-network-I/O invariant was **rewritten,
+  not weakened**: every other outbound call stays an absolute, grep-checked
+  ban, and the one permitted call is asserted to exist exactly once, inside
+  the function that *is* the ping action, comment text excluded from the
+  count. 39/0 in that suite, including a real round trip against loopback
+  and a guaranteed-unreachable test address.
+
 ### Fixed — the operator's punch list from the installed build
 
 Twelve issues reported after installing and using the sent executable, plus
@@ -84,7 +102,9 @@ was honesty: several screens stated more certainty than the data supported.
   project's own `test/icon-verify.js`, which exists for exactly that silent
   no-op. Added to the vendored set; 55 referenced, 55 defined.
 
-`npm test`: **395 passed, 0 failed** (was 371 before the new assertions).
+`npm test`: **395 passed, 0 failed** (was 371 before the new assertions; the
+`kp0` ping work above added further assertions on top of these, see that
+section — **404 passed, 0 failed** is the current total).
 
 ### Added — guided tour, ambient background, codebase cleanup
 
