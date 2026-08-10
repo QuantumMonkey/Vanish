@@ -5214,23 +5214,37 @@ if ($Action) {
             # mode." A plain child process launched from an elevated parent
             # INHERITS that elevation - Windows does not drop privilege on a
             # bare CreateProcess/Start-Process, only UAC's -Verb RunAs ADDS it.
-            # Routing through Shell.Application asks the desktop's own
-            # explorer.exe to start the process instead, which runs it at
-            # explorer's own (standard user) integrity - the standard,
-            # documented way to go from elevated to unelevated. No UAC prompt
-            # is expected or possible here: UAC governs REQUESTING more
-            # privilege, not giving it up, so there is nothing for Windows to
-            # ask permission for.
+            #
+            # v2, same day: the first attempt used Shell.Application's
+            # ShellExecute (the well-known "ask explorer.exe to launch it"
+            # trick) - a LIVE elevated test showed it does not reliably work,
+            # the relaunched instance came back still elevated. That trick
+            # depends on COM activation actually routing to the
+            # already-running explorer.exe process, which is not a documented
+            # contract, only an observed behaviour that can differ by Windows
+            # build or session state (and evidently did not hold in Windows
+            # Sandbox's WDAG session).
+            #
+            # runas.exe /trustlevel:0x20000 is the actual Windows-documented
+            # mechanism for this exact operation, dating to Vista's original
+            # UAC design: it starts a process at Medium integrity (0x20000 =
+            # standard user) from a High-integrity caller, no credentials and
+            # no prompt, because DROPPING privilege has never needed
+            # authorization - only REQUESTING more does. Does not depend on
+            # explorer.exe or any COM registration at all.
             try {
                 if (-not (Test-Path -LiteralPath $Params.exePath)) {
                     throw "The application file no longer exists at '$($Params.exePath)'."
                 }
                 $argString = ''
                 if ($Params.argList -and @($Params.argList).Count -gt 0) {
-                    $argString = (@($Params.argList) | ForEach-Object { '"' + $_ + '"' }) -join ' '
+                    $argString = ' ' + ((@($Params.argList) | ForEach-Object { '"' + $_ + '"' }) -join ' ')
                 }
-                $shell = New-Object -ComObject "Shell.Application"
-                $shell.ShellExecute($Params.exePath, $argString, (Split-Path -Parent $Params.exePath), "open", 1)
+                # The whole target (exe path + its own args) is ONE argument to
+                # runas - it is not runas's own args, so it gets its own quoting
+                # regardless of what is inside it.
+                $commandLine = '"' + $Params.exePath + '"' + $argString
+                $null = Start-Process -FilePath "runas.exe" -ArgumentList @('/trustlevel:0x20000', $commandLine) -ErrorAction Stop
                 @{ success = $true } | ConvertTo-Json -Compress
             } catch {
                 @{ success = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
