@@ -155,6 +155,7 @@ contextBridge.exposeInMainWorld('api', {
     processes: [], totalBytesPerSecond: 0, busyThresholdBytesPerSecond: 50000,
     signalPercent: null, signalNote: null, updateTransfers: 0, bitsJobs: 0, elevated: false
   }),
+  networkPing: stub('networkPing', { success: true, destination: '192.168.1.1', roundTripMs: 12 }),
   networkHoldState: stub('networkHoldState', { active: false, record: null }),
   networkHoldApply: stub('networkHoldApply', { success: true }),
   networkHoldRevert: stub('networkHoldRevert', { success: true }),

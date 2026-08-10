@@ -72,6 +72,11 @@ contextBridge.exposeInMainWorld('api', {
   // anything on this machine is at all. Read-only, no network I/O.
   getNetworkActivity: (params) => ipcRenderer.invoke('get-network-activity', params),
 
+  // kp0 - the one deliberate exception: a single ICMP echo, only on an
+  // explicit user tap. See main.js's handler for why this does not weaken
+  // the "no network I/O" claim into a lie.
+  networkPing: (params) => ipcRenderer.invoke('network-ping', params),
+
   // bfh.2 - hold background transfers, and put every setting back on release.
   networkHoldState: () => ipcRenderer.invoke('network-hold-state'),
   networkHoldApply: () => ipcRenderer.invoke('network-hold-apply'),

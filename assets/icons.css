@@ -177,6 +177,11 @@
 
 .fa-ethernet { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2.5' y='9' width='19' height='11' rx='1.5'/%3E%3Cpath d='M6.5 9V5.5a1.5 1.5 0 0 1 1.5-1.5h8a1.5 1.5 0 0 1 1.5 1.5V9'/%3E%3Cpath d='M7 13v3'/%3E%3Cpath d='M10 13v3'/%3E%3Cpath d='M14 13v3'/%3E%3Cpath d='M17 13v3'/%3E%3C/svg%3E"); }
 
+/* kp0: the manual-ping tile and its destination editor. */
+.fa-tower-broadcast { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21v-8'/%3E%3Ccircle cx='12' cy='10' r='2.3'/%3E%3Cpath d='M8.2 6.7a5.4 5.4 0 0 1 7.6 0'/%3E%3Cpath d='M5.6 4.1a9 9 0 0 1 12.8 0'/%3E%3C/svg%3E"); }
+
+.fa-pen { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19 3 20l1-4z'/%3E%3Cpath d='M14.5 5.5l4 4'/%3E%3C/svg%3E"); }
+
 .fa-clock { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9.2'/%3E%3Cpath d='M12 6.8V12l3.6 2.2'/%3E%3C/svg%3E"); }
 
 .fa-location-dot { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 21.5s7-6.2 7-11.4a7 7 0 1 0-14 0c0 5.2 7 11.4 7 11.4z'/%3E%3Ccircle cx='12' cy='10' r='2.6'/%3E%3C/svg%3E"); }

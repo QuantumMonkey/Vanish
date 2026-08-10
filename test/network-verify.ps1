@@ -37,25 +37,56 @@ Write-Host "======================================="
 Write-Host ("Elevation: {0}" -f $(if ($isAdmin) { "Full Mode" } else { "Audit Mode" }))
 
 # ======================================================================
-# INV-4: the panel that reads the network must not use it
+# INV-4: the panel that reads the network must not use it -
+# except the ONE scoped, deliberate exception (bd kp0, decided 2026-08-09)
 # ======================================================================
 Write-Host ""
-Write-Host "INV-4 zero runtime network I/O" -ForegroundColor Cyan
+Write-Host "INV-4 zero runtime network I/O (except the scoped ping exception)" -ForegroundColor Cyan
 
 $engineText = Get-Content $scanner -Raw
+
+# Test-Connection is deliberately NOT in this list any more - it is no
+# longer an outright ban, it is scoped below. Everything else stays a flat
+# ban with no exception.
 $netCalls = @(
     'Invoke-WebRequest', 'Invoke-RestMethod', 'System.Net.WebClient',
-    'Net.Sockets.TcpClient', 'Test-NetConnection', 'Test-Connection',
+    'Net.Sockets.TcpClient', 'Test-NetConnection',
     'System.Net.NetworkInformation.Ping'
 )
 $found = @($netCalls | Where-Object { $engineText -match [regex]::Escape($_) })
-Assert-True ($found.Count -eq 0) "the engine contains no outbound network call ($($found -join ', '))"
+Assert-True ($found.Count -eq 0) "the engine contains no outbound network call outside the scoped ping exception ($($found -join ', '))"
 
-# Test-NetConnection and Ping are the two an author reaches for FIRST when
-# adding 'is the internet up' to a network panel. Naming them individually
-# means the next person adding one has to delete an assertion to do it.
+# Test-NetConnection specifically stays fully banned - it is a different,
+# heavier reachability probe than the single ICMP echo kp0 approved, and
+# nothing in this engine should ever need it.
 Assert-True ($engineText -notmatch 'Test-NetConnection') "no Test-NetConnection reachability probe"
-Assert-True ($engineText -notmatch 'Test-Connection')    "no ICMP ping probe"
+
+# kp0: Test-Connection itself is no longer an outright ban - a single,
+# manual-tap ping is a deliberate, approved exception, gated in the renderer
+# behind an explicit user click (see renderer.js runPing/wirePingTile) with
+# no timer and no automatic caller anywhere. What THIS test still enforces:
+# it exists in exactly one place, and that place is the function that IS the
+# named ping action - so the next person adding a second, different outbound
+# call still has to change an assertion here to do it. A narrower invariant
+# that is still enforced beats one that was silently deleted.
+#
+# CODE only, not comments - scanner.ps1 uses '#' line comments exclusively
+# (no <# #> blocks, confirmed), and this file's own explanatory prose about
+# kp0 mentions the string "Test-Connection" several times. Counting raw text
+# would fail this assertion on its own comments, which is not what it means
+# to check.
+$codeLines = @(($engineText -split "`r?`n") | Where-Object { $_.Trim() -notmatch '^#' })
+$codeText = $codeLines -join "`n"
+$pingCallCount = ([regex]::Matches($codeText, [regex]::Escape('Test-Connection'))).Count
+Assert-True ($pingCallCount -eq 1) "Test-Connection appears exactly once in the engine's actual code ($pingCallCount found)"
+
+$functionChunks = [regex]::Split($codeText, '(?m)^function ')
+$pingChunks = @($functionChunks | Where-Object { $_ -match '^Invoke-NetworkPing\b' })
+Assert-True ($pingChunks.Count -eq 1) "Invoke-NetworkPing is defined exactly once"
+if ($pingChunks.Count -eq 1) {
+    $inPingFunction = ([regex]::Matches($pingChunks[0], [regex]::Escape('Test-Connection'))).Count
+    Assert-True ($inPingFunction -eq 1) "the one Test-Connection call lives inside Invoke-NetworkPing, not scattered elsewhere"
+}
 
 # ======================================================================
 # The read itself
@@ -196,6 +227,33 @@ if (-not $isAdmin) {
 } else {
     Write-Host "  SKIP  tier refusals (this shell is elevated; the round trip is vanish-uninstaller-bfh.2)" -ForegroundColor Yellow
 }
+
+# ======================================================================
+# kp0: the scoped ping exception itself
+# ======================================================================
+Write-Host ""
+Write-Host "kp0 manual-tap ping" -ForegroundColor Cyan
+
+# Loopback, never the real network - reliable on any machine or sandbox
+# regardless of real connectivity, and proves the success path end to end.
+$pingOk = Invoke-Engine "network-ping" @{ destination = "127.0.0.1" }
+Assert-True ($pingOk.success -eq $true) "pinging loopback succeeds"
+Assert-True ($pingOk.destination -eq "127.0.0.1") "the response echoes back the destination it actually used"
+Assert-True ($pingOk.roundTripMs -is [int] -or $pingOk.roundTripMs -is [long]) "round-trip time is reported as a number"
+Assert-True ($pingOk.roundTripMs -ge 0) "round-trip time is never negative"
+
+# A missing destination is refused before any probe is attempted, not sent
+# as an empty/garbage target.
+$pingNoDest = Invoke-Engine "network-ping" @{}
+Assert-True ($pingNoDest.success -eq $false) "no destination is refused, not silently pinged as empty"
+
+# An address nothing answers at is reported as a failure with a reason, never
+# as an invented 0ms or a success that did not happen. TEST-NET-1 (RFC 5737) -
+# reserved for documentation/testing, guaranteed unassigned, so this cannot
+# accidentally probe a real host.
+$pingFail = Invoke-Engine "network-ping" @{ destination = "192.0.2.1" }
+Assert-True ($pingFail.success -eq $false) "an unreachable destination reports failure, not a fabricated result"
+Assert-True (-not [string]::IsNullOrWhiteSpace($pingFail.error)) "the failure carries a reason, not a bare false"
 
 Write-Host ""
 Write-Host ("Result: {0} passed, {1} failed" -f $script:pass, $script:fail) -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })

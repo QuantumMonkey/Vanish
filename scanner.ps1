@@ -1508,23 +1508,34 @@ function Get-NetAdapterSnapshot {
         # must not vote on the verdict - a Hyper-V virtual switch busily talking
         # to a local VM is not the user's connection being consumed.
         $hasGateway = $false
+        $gatewayAddress = $null
         try {
             $props = $nic.GetIPProperties()
-            $hasGateway = @($props.GatewayAddresses | Where-Object {
+            $gateways = @($props.GatewayAddresses | Where-Object {
                 $_ -and $_.Address -and $_.Address.ToString() -ne '0.0.0.0' -and $_.Address.ToString() -ne '::'
-            }).Count -gt 0
+            })
+            $hasGateway = $gateways.Count -gt 0
+            # kp0: the default destination for a manual ping. Prefer IPv4 - it is
+            # what a user reads as "my router's address", and Test-Connection
+            # handles it without needing scope-id handling the way a link-local
+            # IPv6 gateway address would.
+            if ($hasGateway) {
+                $v4 = $gateways | Where-Object { $_.Address.AddressFamily -eq 'InterNetwork' } | Select-Object -First 1
+                $gatewayAddress = if ($v4) { $v4.Address.ToString() } else { $gateways[0].Address.ToString() }
+            }
         } catch {}
 
         $rows[$nic.Id] = @{
-            id          = [string]$nic.Id
-            name        = [string]$nic.Name
-            description = [string]$nic.Description
-            type        = $type
-            isWireless  = ($type -eq 'Wireless80211')
-            hasGateway  = $hasGateway
-            speedBps    = [long]$nic.Speed
-            rx          = [long]$stats.BytesReceived
-            tx          = [long]$stats.BytesSent
+            id             = [string]$nic.Id
+            name           = [string]$nic.Name
+            description    = [string]$nic.Description
+            type           = $type
+            isWireless     = ($type -eq 'Wireless80211')
+            hasGateway     = $hasGateway
+            gatewayAddress = $gatewayAddress
+            speedBps       = [long]$nic.Speed
+            rx             = [long]$stats.BytesReceived
+            tx             = [long]$stats.BytesSent
         }
     }
     return $rows
@@ -1623,6 +1634,7 @@ function Get-NetworkActivity {
             type              = $a.type
             isWireless        = $a.isWireless
             hasGateway        = $a.hasGateway
+            gatewayAddress    = $a.gatewayAddress
             linkSpeedBps      = $a.speedBps
             receiveBytesPerSecond  = [long][Math]::Round($rxDelta / $seconds)
             sendBytesPerSecond     = [long][Math]::Round($txDelta / $seconds)
@@ -1738,6 +1750,58 @@ function Get-NetworkActivity {
         updateTransfers        = $updateTransfers
         bitsJobs               = $bitsJobs
         elevated               = (Test-IsElevated)
+    }
+}
+
+# --- kp0: manual-tap ping ---------------------------------------------------
+#
+# The ONE deliberate, scoped exception to INV-4 (zero outbound network I/O),
+# and the only place in this entire engine that originates a network probe.
+# Everything else in scanner.ps1 reads state Windows already tracks; this
+# function is the sole call that puts a packet on the wire, and it only runs
+# when the renderer invokes it directly in response to an explicit user tap -
+# there is no timer, no interval and no automatic caller anywhere in this
+# file. test/network-verify.ps1 enforces that boundary by asserting
+# Test-Connection appears exactly once in this file, right here.
+#
+# What it does NOT do, on purpose: no default third-party destination (a
+# hardcoded 1.1.1.1/8.8.8.8 would silently tell Cloudflare/Google that this
+# tool is running on every tap), no retries, no continuous mode. The caller
+# supplies the destination; the renderer defaults it to the adapter's own
+# gatewayAddress (see Get-NetworkActivity above) and lets the user edit it.
+function Invoke-NetworkPing {
+    param([object]$p)
+
+    $destination = [string]$p.destination
+    if ([string]::IsNullOrWhiteSpace($destination)) {
+        return @{ success = $false; error = "No destination was given." }
+    }
+
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    try {
+        # Windows PowerShell 5.1's Test-Connection (not the PS7 rewrite) -
+        # this project always runs under powershell.exe. A single probe: this
+        # is a manual, on-demand check, not a monitoring loop.
+        $reply = Test-Connection -ComputerName $destination -Count 1 -ErrorAction Stop
+        $sw.Stop()
+        $first = if ($reply -is [array]) { $reply[0] } else { $reply }
+        $rtt = if ($null -ne $first.ResponseTime) { [int]$first.ResponseTime } else { [int]$sw.ElapsedMilliseconds }
+
+        return @{
+            success     = $true
+            destination = $destination
+            roundTripMs = $rtt
+        }
+    } catch {
+        $sw.Stop()
+        # Unreachable, no route, DNS failure, or the host silently drops ICMP
+        # (routine and common, not evidence anything is wrong) - reported as
+        # what was tried and what happened, never invented as a number.
+        return @{
+            success     = $false
+            destination = $destination
+            error       = $_.Exception.Message
+        }
     }
 }
 
@@ -5207,6 +5271,9 @@ if ($Action) {
         }
         "get-network-activity" {
             Get-NetworkActivity -p $Params | ConvertTo-Json -Depth 6 -Compress
+        }
+        "network-ping" {
+            Invoke-NetworkPing -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         "network-hold-capture" {
             Get-NetworkHoldCapture | ConvertTo-Json -Depth 6 -Compress

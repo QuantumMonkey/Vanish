@@ -2493,6 +2493,34 @@ input:checked + .slider:before {
    numbers that ARE measurements read first. */
 .net-rate-tile.is-meta .net-rate-value { font-size: 13px; font-weight: 600; color: var(--text-gray); }
 
+/* kp0: the ping tile is the one interactive, clickable tile in this row -
+   cursor and hover say so, matching how the rest of the app marks a
+   clickable card (.app-row:hover). */
+.net-ping-tile { cursor: pointer; transition: var(--transition-smooth); }
+.net-ping-tile:hover { background: var(--bg-dark-hover); }
+.net-ping-tile.is-weak { border-color: hsla(38, 92%, 60%, 0.35); }
+.net-ping-tile.is-weak .net-rate-icon { color: var(--color-warning); }
+.net-ping-edit-btn {
+  background: none;
+  border: none;
+  padding: 0 0 0 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 10px;
+  vertical-align: middle;
+}
+.net-ping-edit-btn:hover { color: var(--text-white); }
+.net-ping-dest-input {
+  background: var(--bg-dark-card);
+  border: 1px solid var(--border-glass-active);
+  border-radius: 6px;
+  color: var(--text-white);
+  font-size: 11px;
+  padding: 3px 6px;
+  width: 100%;
+  max-width: 160px;
+}
+
 /* hks: the "normal for a web browser" note beside a high connection count.
    Muted on purpose - it is reassurance, and reassurance that shouts reads
    as a warning. */

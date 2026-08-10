@@ -1209,6 +1209,20 @@ ipcMain.handle('get-network-activity', async (event, params) => {
   }
 });
 
+// kp0: the app's one deliberate exception to "zero network I/O" - a single
+// ICMP echo, only on an explicit user tap (enforced in the renderer: this
+// channel has no interval, no auto-call on tab open, nothing that reaches it
+// except a click). Available in Audit Mode like the rest of this panel - it
+// reads/probes, it does not remove or write anything on this PC.
+ipcMain.handle('network-ping', async (event, params) => {
+  try {
+    return await runPowerShell('network-ping', params || {});
+  } catch (error) {
+    console.error('Error pinging:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-software-redundancy', async () => {
   try {
     return await runPowerShell('get-software-redundancy');

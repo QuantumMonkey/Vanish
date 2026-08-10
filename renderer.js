@@ -1131,7 +1131,9 @@ async function loadAboutPanel() {
     ['Node', info.versions.node],
     ['Scanning engine', 'Windows PowerShell 5.1'],
     ['Data folder', info.dataDir],
-    ['Network use while running', 'None'],
+    // kp0: this table states hard facts, not marketing - it must stay
+    // accurate the moment the ping tile exists, not read as if it does not.
+    ['Network use while running', 'None automatic - one manual ping, only when you tap it'],
     ['Tracking', 'None']
   ];
 
@@ -2066,13 +2068,22 @@ function renderNetworkActivity(net) {
   // new network I/O, just surfacing a number already in the response.
   // anc: these two were a fragment of text inside the "Looked at:" line. They
   // are the two numbers most people come to this panel for, so they get their
-  // own tiles. Ping is deliberately absent - see bd kp0, still an open
-  // decision, and this was built so it does not depend on that outcome.
+  // own tiles.
   //
   // The tiles show the adapter carrying the default route. Deliberately NOT
   // expressed as a percentage of link speed: linkSpeedBps is the negotiated
   // rate to the router, not the speed of the internet connection behind it,
   // and "0.4% used" against the wrong denominator is a confident wrong answer.
+  //
+  // kp0: the fourth tile, ping - the app's one deliberate, scoped exception
+  // to zero outbound network I/O. netPrimaryAdapter is cached at module
+  // level so runPing() can rebuild just this tile after a tap without
+  // needing the whole `net` response again.
+  netPrimaryAdapter = primary;
+  if (pingDestination === null && primary && primary.gatewayAddress) {
+    pingDestination = primary.gatewayAddress;
+  }
+
   const rateTiles = primary
     ? `<div class="net-rate-tiles">
          <div class="net-rate-tile">
@@ -2098,6 +2109,7 @@ function renderNetworkActivity(net) {
              }</div>
            </div>
          </div>
+         <div id="net-ping-tile-container">${pingTileHtml()}</div>
        </div>`
     : '';
 
@@ -2203,6 +2215,7 @@ function renderNetworkActivity(net) {
 
   wireNetworkRefresh();
   wireNetworkPeerToggles();
+  wirePingTile();
   renderNetworkHold();
 }
 
@@ -2216,6 +2229,142 @@ function wireNetworkPeerToggles() {
       row.classList.toggle('is-expanded', !showing);
     });
   });
+}
+
+// --- kp0: manual-tap ping -----------------------------------------------
+//
+// The app's one deliberate, scoped exception to "no network I/O ever" -
+// enforced HERE, not just described in the About page: nothing calls
+// runPing() except the tile's own click handler wired in wirePingTile().
+// No timer, no auto-run on tab open or refresh, no retry loop.
+let netPrimaryAdapter = null;
+let pingDestination = null; // null until the first render picks up a gateway
+let pingEditing = false;
+let pingState = { status: 'idle' }; // idle | running | success | error
+
+function pingTileHtml() {
+  const dest = pingDestination || 'no gateway found';
+  const editRow = pingEditing
+    ? `<input type="text" class="net-ping-dest-input" id="net-ping-dest-input" value="${esc(pingDestination || '')}"
+         placeholder="IP address or hostname" spellcheck="false">`
+    : `<div class="net-rate-label">
+         to ${esc(dest)}
+         <button class="net-ping-edit-btn" id="net-ping-edit-btn" title="Change what Ping tests against">
+           <i class="fa-solid fa-pen"></i>
+         </button>
+       </div>`;
+
+  let icon = 'fa-tower-broadcast';
+  let value = 'Tap to test';
+  if (pingState.status === 'running') {
+    icon = 'fa-spinner fa-spin';
+    value = 'Pinging&hellip;';
+  } else if (pingState.status === 'success') {
+    value = `${esc(pingState.roundTripMs)} ms`;
+  } else if (pingState.status === 'error') {
+    icon = 'fa-triangle-exclamation';
+    value = 'No reply';
+  }
+
+  return `
+    <div class="net-rate-tile net-ping-tile${pingState.status === 'error' ? ' is-weak' : ''}" id="net-ping-tile"
+         title="Sends one ICMP echo to the address below and reports whether it replies and how fast. This is the only network traffic Vanish ever sends, and only when you tap this tile.">
+      <i class="fa-solid ${icon} net-rate-icon"></i>
+      <div class="net-rate-text">
+        <div class="net-rate-value" id="net-ping-value">${value}</div>
+        ${editRow}
+      </div>
+    </div>`;
+}
+
+function reRenderPingTile() {
+  const container = document.getElementById('net-ping-tile-container');
+  if (container) container.innerHTML = pingTileHtml();
+  wirePingTile();
+}
+
+function wirePingTile() {
+  const tile = document.getElementById('net-ping-tile');
+  if (tile) {
+    tile.addEventListener('click', (e) => {
+      if (e.target.closest('.net-ping-edit-btn') || e.target.closest('.net-ping-dest-input')) return;
+      runPing();
+    });
+  }
+
+  const editBtn = document.getElementById('net-ping-edit-btn');
+  if (editBtn) {
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pingEditing = true;
+      reRenderPingTile();
+      const input = document.getElementById('net-ping-dest-input');
+      if (input) { input.focus(); input.select(); }
+    });
+  }
+
+  const input = document.getElementById('net-ping-dest-input');
+  if (input) {
+    input.addEventListener('click', (e) => e.stopPropagation());
+    const commit = () => {
+      const value = input.value.trim();
+      if (value) {
+        pingDestination = value;
+        pingState = { status: 'idle' };
+      }
+      pingEditing = false;
+      reRenderPingTile();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') commit();
+      if (e.key === 'Escape') { pingEditing = false; reRenderPingTile(); }
+    });
+    input.addEventListener('blur', commit);
+  }
+}
+
+async function runPing() {
+  if (pingState.status === 'running') return;
+  if (!pingDestination) {
+    toast('No destination to ping - this PC has no default gateway right now.', 'warn');
+    return;
+  }
+
+  // Condition 4 (bd kp0): a one-time explanation before the FIRST tap ever,
+  // naming what is sent, where, and that it is the app's only outbound
+  // traffic - not a generic "are you sure". Declining does not set the
+  // remembered flag, so the next tap asks again rather than silently
+  // pinging without ever having been agreed to.
+  if (!appSettings.pingConsentGiven) {
+    const ok = await confirmDialog({
+      title: 'Send a network request?',
+      body:
+        `Vanish will send one ICMP ping to ${pingDestination} and read whether it replies and how fast. ` +
+        'This is the only network traffic Vanish ever sends - everything else in the app only reads ' +
+        'information already on this PC. You can change the destination with the pencil icon, and nothing ' +
+        'is ever sent unless you tap this tile.',
+      confirmLabel: 'Send it'
+    });
+    if (!ok) return;
+    // saveSettings() updates the module-level appSettings itself; it has no
+    // return value.
+    await saveSettings({ pingConsentGiven: true });
+  }
+
+  pingState = { status: 'running' };
+  reRenderPingTile();
+
+  let res;
+  try {
+    res = await window.api.networkPing({ destination: pingDestination });
+  } catch (err) {
+    res = { success: false, error: err.message };
+  }
+
+  pingState = res && res.success === true
+    ? { status: 'success', roundTripMs: res.roundTripMs }
+    : { status: 'error', error: (res && res.error) || 'No reply.' };
+  reRenderPingTile();
 }
 
 // bfh.2. A hold changes a machine-wide Windows policy and pauses other
