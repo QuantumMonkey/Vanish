@@ -81,6 +81,7 @@ contextBridge.exposeInMainWorld('api', {
     bannerText: 'Running in Audit Mode - elevate to enable cleaning and uninstallation.'
   }),
   relaunchElevated: async () => ({ success: false, declined: true }),
+  relaunchDeelevated: stub('relaunchDeelevated', { success: true }),
   dismissElevationOffer: async () => ({ success: true }),
   vaultList: stub('vaultList', { success: true, entries: vaultEntries, vaultRoot: 'C:\\vault' }),
   vaultRestore: stub('vaultRestore', { success: true, failed: 0, skipped: 0, files: [], registry: [] }),

@@ -704,11 +704,22 @@
               </div>
               <div class="settings-row-state" id="set-startup-elevated-state">-</div>
             </div>
-            <div class="settings-row-controls">
+            <div class="settings-row-controls" style="flex-direction: column; align-items: flex-end; gap: 8px;">
               <label class="toggle-switch">
                 <input type="checkbox" id="set-startup-elevated">
                 <span class="slider"></span>
               </label>
+              <!-- Operator report (live sandbox testing, 2026-08-10): "it starts
+                   in admin mode as expected, but there is no way to return to
+                   audit mode." Turning the toggle off only ever changed what the
+                   NEXT independent launch does - there was no in-app path back
+                   to Audit Mode from a session already running elevated except
+                   fully closing the app and finding the exe again. Hidden unless
+                   the toggle's new target actually disagrees with what is
+                   running right now (updateStartupRestartButton). -->
+              <button class="btn-sec btn-compact" id="set-startup-restart-btn" style="display: none;">
+                <i class="fa-solid fa-rotate-right"></i> Restart now
+              </button>
             </div>
           </div>
 
@@ -936,8 +947,13 @@
        empty desktop. -->
   <div class="modal-overlay" id="elevation-wait-overlay">
     <div class="small-modal">
-      <div class="small-modal-icon"><i class="fa-solid fa-shield-halved"></i></div>
-      <h3>Restarting with administrator rights</h3>
+      <div class="small-modal-icon" id="elevation-wait-icon"><i class="fa-solid fa-shield-halved"></i></div>
+      <!-- Title and body are rewritten by JS for the two directions this
+           overlay now covers (requestElevation / requestDeelevation) -
+           the markup here is just the elevate-direction default so the
+           overlay never briefly shows blank content before either function
+           sets it. -->
+      <h3 id="elevation-wait-title">Restarting with administrator rights</h3>
       <p id="elevation-wait-text">
         Windows is asking whether Vanish may run as administrator. Answer that prompt to continue.
       </p>

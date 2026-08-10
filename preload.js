@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('api', {
   // Elevation tiers (REQ-04, REQ-05)
   getTier: () => ipcRenderer.invoke('get-tier'),
   relaunchElevated: () => ipcRenderer.invoke('relaunch-elevated'),
+  relaunchDeelevated: () => ipcRenderer.invoke('relaunch-deelevated'),
   dismissElevationOffer: () => ipcRenderer.invoke('dismiss-elevation-offer'),
 
   // Quarantine Manager (REQ-03)

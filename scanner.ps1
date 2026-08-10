@@ -5208,6 +5208,34 @@ if ($Action) {
         "kill-process" {
             Stop-VanishProcess -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
+        "relaunch-deelevated" {
+            # Operator report (live sandbox testing, 2026-08-10): "it starts in
+            # admin mode as expected, but there is no way to return to audit
+            # mode." A plain child process launched from an elevated parent
+            # INHERITS that elevation - Windows does not drop privilege on a
+            # bare CreateProcess/Start-Process, only UAC's -Verb RunAs ADDS it.
+            # Routing through Shell.Application asks the desktop's own
+            # explorer.exe to start the process instead, which runs it at
+            # explorer's own (standard user) integrity - the standard,
+            # documented way to go from elevated to unelevated. No UAC prompt
+            # is expected or possible here: UAC governs REQUESTING more
+            # privilege, not giving it up, so there is nothing for Windows to
+            # ask permission for.
+            try {
+                if (-not (Test-Path -LiteralPath $Params.exePath)) {
+                    throw "The application file no longer exists at '$($Params.exePath)'."
+                }
+                $argString = ''
+                if ($Params.argList -and @($Params.argList).Count -gt 0) {
+                    $argString = (@($Params.argList) | ForEach-Object { '"' + $_ + '"' }) -join ' '
+                }
+                $shell = New-Object -ComObject "Shell.Application"
+                $shell.ShellExecute($Params.exePath, $argString, (Split-Path -Parent $Params.exePath), "open", 1)
+                @{ success = $true } | ConvertTo-Json -Compress
+            } catch {
+                @{ success = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
+            }
+        }
         "list-lockers" {
             Get-PathLockers -p $Params | ConvertTo-Json -Depth 6 -Compress
         }

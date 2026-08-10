@@ -665,7 +665,11 @@ let splashWindow = null;
 // and worth closing regardless of what caused that one incident.
 const SPLASH_WATCHDOG_MS = 20000;
 
-function showElevationSplash() {
+// direction: 'elevate' (default) or 'deelevate' - each has its own tiny
+// static HTML file with copy for that direction (splash.html never asks
+// permission to run as administrator when what is actually happening is
+// dropping it, and vice versa).
+function showElevationSplash(direction = 'elevate') {
   if (headlessHarness || splashWindow) return;
   try {
     splashWindow = new BrowserWindow({
@@ -695,7 +699,8 @@ function showElevationSplash() {
       console.error(`Elevation splash failed to load: ${errorDescription || errorCode}`);
       closeElevationSplash();
     });
-    splashWindow.loadFile(path.join(__dirname, 'splash.html'));
+    const file = direction === 'deelevate' ? 'splash-deelevate.html' : 'splash.html';
+    splashWindow.loadFile(path.join(__dirname, file));
   } catch {
     // Feedback failing must never block the elevation it describes.
     splashWindow = null;
@@ -777,7 +782,48 @@ ipcMain.handle('relaunch-elevated', async () => {
     // The splash outlives the main window on purpose: without it the app
     // disappears off the desktop for several seconds while the elevated
     // instance starts, which reads as a crash rather than a restart.
-    showElevationSplash();
+    showElevationSplash('elevate');
+    setTimeout(() => app.quit(), 400);
+  }
+  return res;
+});
+
+// Operator report (live sandbox testing, 2026-08-10): once the "Always start
+// with administrator rights" setting elevated a session, there was no way
+// back to Audit Mode short of fully closing the app and finding the exe
+// again - turning the toggle off only ever changed what the NEXT
+// independent launch does. A bare child process launched from an elevated
+// parent inherits that elevation, so this cannot reuse relaunch-elevated's
+// Start-Process path; see scanner.ps1's relaunch-deelevated case for the
+// actual mechanism (Shell.Application, not -Verb RunAs).
+async function attemptDeelevatedRelaunch(trigger) {
+  if (!isFullMode()) return { success: true, alreadyUnelevated: true };
+
+  const argList = app.isPackaged ? [] : [app.getAppPath()];
+  const exePath = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+
+  try {
+    const res = await runPowerShell('relaunch-deelevated', { exePath, argList });
+    store.appendOplog({
+      action: 'relaunch-deelevated',
+      tier: currentTier,
+      items: {},
+      outcome: res && res.success ? 'success' : 'error',
+      meta: { trigger, error: res && res.error }
+    });
+    if (res && res.success) return { success: true };
+    return { success: false, error: (res && res.error) || 'Could not restart without administrator rights.' };
+  } catch (error) {
+    // runPowerShell() itself threw - the engine couldn't be reached, not a
+    // failure of the de-elevated launch itself.
+    return { success: false, error: error.message };
+  }
+}
+
+ipcMain.handle('relaunch-deelevated', async () => {
+  const res = await attemptDeelevatedRelaunch('user-click');
+  if (res.success && !res.alreadyUnelevated) {
+    showElevationSplash('deelevate');
     setTimeout(() => app.quit(), 400);
   }
   return res;

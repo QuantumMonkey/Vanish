@@ -427,7 +427,13 @@ async function requestElevation(overlay) {
   // wait rather than after it.
   if (overlay) overlay.classList.remove('active');
   const wait = document.getElementById('elevation-wait-overlay');
+  const waitTitle = document.getElementById('elevation-wait-title');
   const waitText = document.getElementById('elevation-wait-text');
+  // The overlay is shared with requestDeelevation() below - reset it to this
+  // direction's copy every time, in case the other direction left its text
+  // behind from an earlier attempt.
+  if (waitTitle) waitTitle.textContent = 'Restarting with administrator rights';
+  if (waitText) waitText.textContent = 'Windows is asking whether Vanish may run as administrator. Answer that prompt to continue.';
   if (wait) wait.classList.add('active');
 
   const res = await window.api.relaunchElevated();
@@ -444,6 +450,29 @@ async function requestElevation(overlay) {
 
   if (wait) wait.classList.remove('active');
   toast(elevationFailureMessage(res && res.cause), 'warn', 9000);
+}
+
+// Symmetric with requestElevation() above, for the direction that did not
+// exist until now: dropping back to Audit Mode from a session already
+// running elevated. No UAC prompt is possible or expected here - UAC governs
+// REQUESTING more privilege, not giving it up - so there is no "declined"
+// case, only "the relaunch itself failed" (bad path, COM unavailable).
+async function requestDeelevation() {
+  const wait = document.getElementById('elevation-wait-overlay');
+  const waitTitle = document.getElementById('elevation-wait-title');
+  const waitText = document.getElementById('elevation-wait-text');
+  if (waitTitle) waitTitle.textContent = 'Restarting in Audit Mode';
+  if (waitText) waitText.textContent = 'Vanish is reopening without administrator rights - this takes a few seconds.';
+  if (wait) wait.classList.add('active');
+
+  const res = await window.api.relaunchDeelevated();
+
+  if (res && res.success) {
+    return; // this instance is being replaced, same as the elevate direction
+  }
+
+  if (wait) wait.classList.remove('active');
+  toast((res && res.error) || 'Could not restart without administrator rights.', 'warn', 9000);
 }
 
 // scanner.ps1 now tells apart WHY a relaunch-elevated attempt failed instead
@@ -983,6 +1012,17 @@ function setupSettingsTab() {
     saveSettings({ startupMode: startupElevated.checked ? 'full' : 'audit' });
   });
 
+  const startupRestartBtn = document.getElementById('set-startup-restart-btn');
+  if (startupRestartBtn) {
+    // Symmetric with the toggle: whichever direction it now disagrees with
+    // the running session, this button applies it to THIS session instead
+    // of only the next independent launch.
+    startupRestartBtn.addEventListener('click', () => {
+      if (startupElevated.checked && !isAdmin) requestElevation(null);
+      else if (!startupElevated.checked && isAdmin) requestDeelevation();
+    });
+  }
+
   autoPurge.addEventListener('change', async () => {
     if (autoPurge.checked) {
       const ok = await confirmDialog({
@@ -1050,6 +1090,21 @@ function applyStartupElevatedCopy(startsElevated) {
     ? '<i class="fa-solid fa-circle-check"></i> ON - Next start: Vanish asks Windows for administrator rights straight away, before any window shows.'
     : '<i class="fa-solid fa-circle-info"></i> OFF - Next start: Vanish opens read-only (Audit Mode). Turn this on, or click "Restart as administrator" any time, to switch.';
   startupState.style.color = startsElevated ? 'var(--color-success)' : 'var(--text-gray)';
+  updateStartupRestartButton(startsElevated);
+}
+
+// Operator report (live sandbox testing, 2026-08-10): "it starts in admin
+// mode as expected, but there is no way to return to audit mode." The toggle
+// only ever governed the NEXT independent launch - there was no in-app path
+// to apply a change to the session already running. Shown only when the
+// toggle's new target actually disagrees with what is running right now
+// (isAdmin, the CURRENT tier - not appSettings.startupMode, which is what
+// the toggle just set and may not match reality yet); once they agree there
+// is nothing to restart for.
+function updateStartupRestartButton(startsElevated) {
+  const btn = document.getElementById('set-startup-restart-btn');
+  if (!btn) return;
+  btn.style.display = startsElevated !== isAdmin ? '' : 'none';
 }
 
 function syncSettingsPanel() {
