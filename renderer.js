@@ -385,6 +385,26 @@ async function checkElevation() {
   }
 
   applyTierLocks();
+
+  // Operator report, live testing 2026-08-10: "Restart as administrator"
+  // could report success and the app would close and reopen, but land back
+  // in Audit Mode with nothing telling the user something was wrong - a
+  // silent loop. main.js now writes a one-shot marker before quitting on
+  // that success path and checks it on the very next boot; if this boot IS
+  // that next one and it did NOT come back elevated, say so explicitly
+  // instead of leaving it to look like the click did nothing.
+  if (tierState.elevationMismatch) {
+    const m = tierState.elevationMismatch;
+    const uacNote = m.uac && m.uac.enableLua === false
+      ? ' User Account Control appears to be turned off on this machine, which may be why.'
+      : '';
+    toast(
+      'Vanish tried to restart with administrator rights a moment ago and reported success, but this session ' +
+      `started in Audit Mode anyway.${uacNote} This has been logged - if you see it again, that is worth reporting.`,
+      'warn',
+      12000
+    );
+  }
 }
 
 // Every control marked data-destructive is inert in Audit Mode and says why.

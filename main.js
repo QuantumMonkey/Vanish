@@ -47,6 +47,10 @@ let elevationOfferPending = false;
 // (boot-time check-admin, or a later relaunch-elevated attempt). Null until
 // the first check-admin call resolves.
 let lastUacDiagnostics = null;
+// Set once, at most, per boot - see the elevation-attempt marker check in
+// bootstrapped below. Consumed (read then cleared) by get-tier so it
+// surfaces to the renderer exactly once, not on every poll.
+let elevationMismatchDiagnostic = null;
 
 function isFullMode() {
   return currentTier === TIER_FULL;
@@ -139,6 +143,42 @@ const bootstrapped = app.whenReady().then(async () => {
     lastUacDiagnostics = (admin && admin.uac) || null;
   } catch {
     currentTier = TIER_AUDIT;
+  }
+
+  // Operator report, live testing 2026-08-10: a relaunch-elevated attempt
+  // could report success and still come back in Audit Mode - read the
+  // one-shot marker attemptElevatedRelaunch writes just before quitting on
+  // its success path, and ALWAYS delete it here regardless of outcome, so a
+  // stale marker (crash before cleanup, machine slept mid-relaunch) can
+  // never misfire on a later, unrelated launch.
+  try {
+    const markerPath = store.elevationAttemptPath();
+    const marker = store.readJson(markerPath, null);
+    if (marker) {
+      try { fs.unlinkSync(markerPath); } catch { /* best-effort */ }
+      if (typeof marker.attemptedAt === 'string') {
+        const msSinceAttempt = Date.now() - Date.parse(marker.attemptedAt);
+        // A marker only counts as evidence of THIS boot if it is recent and
+        // not from the future (clock skew, or a malformed timestamp).
+        if (msSinceAttempt >= 0 && msSinceAttempt < 5 * 60 * 1000 && !isFullMode()) {
+          elevationMismatchDiagnostic = {
+            attemptedAt: marker.attemptedAt,
+            trigger: marker.trigger,
+            msSinceAttempt,
+            uac: lastUacDiagnostics
+          };
+          store.appendOplog({
+            action: 'relaunch-elevated-mismatch',
+            tier: currentTier,
+            items: {},
+            outcome: 'error',
+            meta: elevationMismatchDiagnostic
+          });
+        }
+      }
+    }
+  } catch {
+    // Diagnostic-only path; never let it affect real startup.
   }
 
   // Settings > "Start Vanish as administrator" (operator request 2026-08-03).
@@ -652,12 +692,19 @@ async function removeAppxPackage(req) {
 ipcMain.handle('check-admin', async () => isFullMode());
 
 // SCR-01: the renderer renders banner + disabled states from this one flag.
-ipcMain.handle('get-tier', async () => ({
-  tier: currentTier,
-  isFullMode: isFullMode(),
-  offerElevation: elevationOfferPending,
-  bannerText: 'Running in Audit Mode - elevate to enable cleaning and uninstallation.'
-}));
+ipcMain.handle('get-tier', async () => {
+  // One-shot: read and clear together, so a mismatch found at boot is shown
+  // to the user once, not on every later getTier() poll this session makes.
+  const elevationMismatch = elevationMismatchDiagnostic;
+  elevationMismatchDiagnostic = null;
+  return {
+    tier: currentTier,
+    isFullMode: isFullMode(),
+    offerElevation: elevationOfferPending,
+    bannerText: 'Running in Audit Mode - elevate to enable cleaning and uninstallation.',
+    elevationMismatch
+  };
+});
 
 // Shared by the FLOW-01 manual offer/banner AND the automatic startup
 // elevation setting. Never throws; always resolves to {success, declined?,
@@ -766,7 +813,21 @@ async function attemptElevatedRelaunch(trigger) {
       outcome: res && res.success ? 'success' : 'declined',
       meta: { trigger, cause: res && res.cause }
     });
-    if (res && res.success) return { success: true };
+    if (res && res.success) {
+      // Diagnostic marker (see store.js's elevationAttemptPath comment) -
+      // written here, on every path that reports a successful launch
+      // attempt, not only right before the caller decides to quit. Read and
+      // always deleted on the NEXT boot's bootstrap check below.
+      try {
+        store.writeJsonAtomic(store.elevationAttemptPath(), {
+          attemptedAt: new Date().toISOString(),
+          trigger
+        });
+      } catch {
+        // Diagnostic-only; never let this block a real elevation attempt.
+      }
+      return { success: true };
+    }
     if (res && res.uac) lastUacDiagnostics = res.uac;
     // scanner.ps1 now tells apart a real UAC decline (cause: 'declined') from
     // the account not being an administrator at all ('not-admin') or UAC
