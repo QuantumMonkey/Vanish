@@ -229,6 +229,7 @@ let wizState = {
     'step5-progress'  // Purge Remnants
   ],
   createRestorePoint: true,
+  runSilently: true,
   scanMode: 'Moderate',
   leftovers: { files: [], registry: [] },
   selectedFiles: [],
@@ -284,6 +285,7 @@ const elements = {
   
   // Screen 1 (Config)
   chkCreateRestore: document.getElementById('chk-create-restore'),
+  chkRunSilently: document.getElementById('chk-run-silently'),
   modeCards: document.querySelectorAll('.mode-card'),
   
   // Screen 3 (Native Run)
@@ -1229,6 +1231,11 @@ function setupDetailsPanel() {
 function openUninstallWizard(app) {
   wizState.currentScreenIndex = 0;
   wizState.createRestorePoint = true;
+  // d6y: per-uninstall, but starts from whatever was picked last time -
+  // appSettings.preferSilentUninstall is only ever written by this
+  // checkbox's own change handler below, never assumed true on a settings
+  // read that predates the field (store.js migrates it in either way).
+  wizState.runSilently = appSettings.preferSilentUninstall !== false;
   wizState.scanMode = appSettings.defaultScanMode || 'Moderate';
   wizState.leftovers = { files: [], registry: [] };
   wizState.selectedFiles = [];
@@ -1237,6 +1244,10 @@ function openUninstallWizard(app) {
 
   // Set checkbox state in Config screen
   elements.chkCreateRestore.checked = true;
+  // chk-run-silently lives on scr-native-run (screen 3), not this screen -
+  // still safe to set its checked state now, before it is ever shown.
+  elements.chkRunSilently.checked = wizState.runSilently;
+  updateNativeUninstPromptText();
   document.querySelectorAll('.mode-card').forEach(card => {
     card.classList.remove('selected');
     if (card.getAttribute('data-mode') === wizState.scanMode) {
@@ -1344,11 +1355,21 @@ function manageStepIndicators(screenId) {
 // If the engine reports the entry as untrusted - registered under HKCU, or with
 // its binary somewhere a standard user could have planted it - it refuses until
 // the operator types RUN, the same gate the bulk queue uses.
-async function runNativeUninstaller(app) {
+// d6y: `interactive` is a parameter, not read from wizState internally - this
+// is called from two places (the full wizard, which has the screen-1
+// checkbox to source it from, and Force Uninstall's "run its uninstaller"
+// quick path, which has no wizard UI at all). Reading wizState.runSilently
+// here would have let the quick path silently inherit whatever the wizard
+// was last left at, unrelated to anything the user chose for THIS uninstall.
+async function runNativeUninstaller(app, { interactive = false } = {}) {
   const request =
     app.type === 'UWP'
       ? { type: 'UWP', packageFullName: app.packageFullName }
-      : { type: 'Desktop', registryPath: app.registryPath };
+      // interactive means "use baseArgs alone, skip the resolved silent
+      // switch" - see main.js's uninstall-native handler. UWP has no
+      // equivalent concept (Remove-AppxPackage is always silent), so the
+      // field is only meaningful on this branch.
+      : { type: 'Desktop', registryPath: app.registryPath, interactive };
 
   let res = await window.api.uninstallNative(request);
 
@@ -1372,9 +1393,30 @@ async function runNativeUninstaller(app) {
   return res;
 }
 
+// d6y: what this text says has to track the toggle that lives on the SAME
+// screen (see setupWizardControls' chk-run-silently listener) - "follow the
+// steps on screen" is actively wrong advice when silent was chosen, and
+// "no window will appear" is wrong when it was not.
+function updateNativeUninstPromptText() {
+  const el = document.getElementById('native-uninst-prompt-text');
+  if (!el) return;
+  el.textContent = wizState.runSilently
+    ? "Vanish will run this program's own uninstaller silently. No window should appear - click below to start it."
+    : "Vanish will open the uninstaller that came with this program. Click below, then follow the steps on screen.";
+}
+
 function setupWizardControls() {
   // Close / Cancel click
   elements.wizCloseX.addEventListener('click', confirmCancel);
+
+  // d6y: remembered across uninstalls (store.js preferSilentUninstall),
+  // updated live so screen 3's prompt text is never one click stale even
+  // before the wizard actually advances past this screen.
+  elements.chkRunSilently.addEventListener('change', () => {
+    wizState.runSilently = elements.chkRunSilently.checked;
+    updateNativeUninstPromptText();
+    saveSettings({ preferSilentUninstall: wizState.runSilently });
+  });
   elements.btnWizCancel.addEventListener('click', confirmCancel);
   
   // Back Click
@@ -1390,8 +1432,11 @@ function setupWizardControls() {
     
     if (currentScreen === 'scr-config') {
       // Transition from Config to Safety (Restore Point)
+      // d6y: chk-run-silently lives on scr-native-run now, not this screen -
+      // wizState.runSilently is set at wizard-open and kept live by that
+      // checkbox's own 'change' listener, nothing to re-read here.
       wizState.createRestorePoint = elements.chkCreateRestore.checked;
-      
+
       if (wizState.createRestorePoint && isAdmin) {
         showScreen(1); // Show safety loader
         const res = await window.api.createRestorePoint();
@@ -1439,7 +1484,7 @@ function setupWizardControls() {
       elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>The uninstaller is running...</span>';
     }
 
-    const res = await runNativeUninstaller(selectedApp);
+    const res = await runNativeUninstaller(selectedApp, { interactive: wizState.runSilently !== true });
 
     elements.btnLaunchNative.disabled = false;
     elements.btnLaunchNative.innerHTML = '<i class="fa-solid fa-circle-play"></i> <span>Run the program\'s uninstaller</span>';
@@ -1454,10 +1499,26 @@ function setupWizardControls() {
     } else if (res.success) {
       // The engine now waits for the uninstaller and traps its exit code, so
       // this is a result rather than a "we launched something" guess.
+      //
+      // d6y: res.method ('corrections' vs 'heuristic') and res.interactive
+      // were already returned by main.js's uninstall-native handler and
+      // already logged to the oplog - just never shown here, which is the
+      // exact "presents both identically" problem the recommendation named.
+      // A verified corrections.json switch and a guessed heuristic one are
+      // different claims about how sure Vanish is, same honesty principle as
+      // xw2/h8j; surfacing the distinction rather than only the risky half
+      // keeps the confident case visibly confident too.
+      const methodNote = res.method === 'corrections'
+        ? ' (a switch verified for this program)'
+        : res.method === 'heuristic'
+          ? ' (a general switch, not verified for this specific program - worth confirming it fully uninstalled)'
+          : '';
+      const interactiveNote = wizState.runSilently === true && res.interactive === true
+        ? ' It opened its own window anyway - some uninstallers do this regardless of the switch used.'
+        : '';
       toast(
-        res.rebootRequired
-          ? 'The uninstaller finished. Windows needs a restart to complete it. Click Scan Leftovers.'
-          : 'The uninstaller finished. Click Scan Leftovers.',
+        `${res.rebootRequired ? 'The uninstaller finished. Windows needs a restart to complete it.' : 'The uninstaller finished.'}` +
+        `${methodNote}${interactiveNote} Click Scan Leftovers.`,
         'success',
         7000
       );
@@ -4597,14 +4658,20 @@ async function scanBrokenEntry(index) {
     });
     if (runIt) {
       if (!guardFullMode()) return;
-      const res = await runNativeUninstaller({
-        type: 'Desktop',
-        name: entry.displayName,
-        registryPath: entry.registryPath
-      });
+      // No wizard screen here to offer a per-uninstall choice - respect the
+      // remembered preference (store.js preferSilentUninstall) as the
+      // sensible default for this quick path instead.
+      const res = await runNativeUninstaller(
+        { type: 'Desktop', name: entry.displayName, registryPath: entry.registryPath },
+        { interactive: appSettings.preferSilentUninstall === false }
+      );
+      // d6y: same method honesty as the main wizard's completion toast.
+      const methodNote = res.success && res.method === 'heuristic'
+        ? ' (a general switch, not verified for this specific program)'
+        : '';
       toast(
         res.success
-          ? 'The uninstaller finished. Scan again to check for leftovers.'
+          ? `The uninstaller finished.${methodNote} Scan again to check for leftovers.`
           : `The uninstaller did not finish: ${res.error}`,
         res.success ? 'success' : 'warn',
         7000

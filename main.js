@@ -549,10 +549,19 @@ fullModeOnly('uninstall-native', async (event, params) => {
     }
 
     // Step 4: Start-Process -FilePath/-ArgumentList. No shell, no re-parsing.
+    //
+    // d6y: req.interactive means run the program's OWN uninstaller UI - some
+    // vendor uninstallers offer a keep-my-settings choice, or a
+    // reason-for-leaving step that unlocks a refund/licence release, that
+    // the resolved silent switch would skip past entirely. baseArgs alone
+    // (the registry UninstallString's own arguments, unmodified) is exactly
+    // what running it "normally" means - resolved.arguments is what
+    // corrections.json/the Rule 15 heuristic added ON TOP to make it silent,
+    // so dropping just that one field is the whole change.
     const run = await runPowerShell('run-uninstaller', {
       executable: resolved.executable,
       baseArgs: resolved.baseArgs,
-      arguments: resolved.arguments,
+      arguments: req.interactive === true ? '' : resolved.arguments,
       registryPath: req.registryPath,
       timeoutSeconds: 600,
       acknowledged
@@ -587,6 +596,13 @@ fullModeOnly('uninstall-native', async (event, params) => {
         method: resolved.method,
         exitCode: run.exitCode ?? null,
         timedOut: run.timedOut === true,
+        // Two different facts sharing similar names, kept distinct here:
+        // requestedInteractive is what the caller asked for (d6y - baseArgs
+        // alone vs the resolved silent switch); interactive is what
+        // MainWindowHandle polling actually DETECTED happened, independent
+        // of what was asked for (an uninstaller can ignore a silent switch
+        // it does not recognise and show its UI anyway).
+        requestedInteractive: req.interactive === true,
         interactive: run.interactive === true,
         trust
       }

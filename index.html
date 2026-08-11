@@ -1073,7 +1073,7 @@
         <div class="wizard-screen active" id="scr-config">
           <div class="options-layout">
             <h3 style="font-family: var(--font-title); font-weight: 700; margin-bottom: 12px; text-align: left;">Uninstall options</h3>
-            
+
             <div class="option-toggle-row">
               <div>
                 <div style="font-family: var(--font-title); font-weight: 600; font-size: 14px; margin-bottom: 2px;">Create a system restore point first</div>
@@ -1121,6 +1121,24 @@
             <p style="font-size: 12px; color: var(--text-gray); line-height: 1.5;" id="native-uninst-prompt-text">
               Vanish will open the uninstaller that came with this program. Click below, then follow the steps on screen.
             </p>
+            <!-- d6y: placed right before the button it affects, not a screen
+                 earlier - putting it on scr-config alongside the restore-point
+                 toggle grew that screen past the wizard modal's fixed height
+                 (test/ui-interaction-full-verify.js caught the scan-mode cards
+                 becoming unreachable). This screen has room, and the choice
+                 reads more naturally right next to the action it changes.
+                 Lighter weight than .option-toggle-row on purpose - it lives
+                 inside an already-bordered box, a second full card border
+                 here would look like two stacked panels. -->
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-glass); text-align: left;">
+              <div style="font-size: 12px; color: var(--text-gray);">
+                Run silently, no window from the uninstaller itself
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="chk-run-silently" checked>
+                <span class="slider"></span>
+              </label>
+            </div>
           </div>
           <button class="btn-primary" id="btn-launch-native">
             <i class="fa-solid fa-circle-play"></i>
