@@ -10,6 +10,81 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added — multi-select and bulk "Add N to queue" in All Programs (`5rz`)
+
+* Building a bulk queue used to be N × (click a row → wait for the details
+  sidebar → click Add), for a feature whose name is "Bulk uninstall queue".
+  All Programs now has a checkbox column, shift-click range selection, a
+  select-all header box, and a persistent **Add N to queue** action stating
+  on the button itself how many programs it will act on.
+* **Checking a box and opening a row stay separate gestures.** Ticking a
+  checkbox does not swap the details sidebar out from under a selection
+  being built, and opening a row does not tick its box.
+* **Select-all means the rows you can see.** It covers the currently
+  rendered — filtered and sorted — list, never the full one, and any row a
+  filter later hides is dropped from the selection rather than queued
+  unseen. Filter to a publisher or a type, select all, queue.
+* **Refusals are named, not silent.** The protected/Windows-feature check is
+  now one shared classifier used by both the single-item and the bulk path,
+  so the two cannot drift onto different wording. A bulk add reports one
+  summary naming what was refused and why; guarded entries never reach the
+  queue at all.
+* A re-sort keeps the same programs selected. The shift-click anchor is
+  deliberately dropped by a re-sort, because it is a *position* and the rows
+  have moved.
+
+### Fixed — three defects surfaced by the column above
+
+* **Date and Size could wrap again** (`ri6` regression). That fix pinned
+  them by column position; a new leading checkbox column shifted every later
+  column by one, so it had silently started pinning Type and Date instead.
+  Positional CSS selectors do not error when a column is inserted — they
+  just start describing different columns.
+* **An active filter went quiet while rows were selected.** The selection
+  caption and the filter caption share one slot, so a live selection hid
+  "Showing 5 of 163 programs" entirely — the exact 2026-08-05 bug where a
+  filter said nothing about itself. The selection caption now carries that
+  sentence for as long as it holds the slot.
+* **A selected Windows optional feature could vanish from the report.** The
+  bulk add resolved selections against the applications list only, so a
+  feature row would have been dropped from *both* the added count and the
+  skipped list. It is now resolved against everything the table can render.
+
+### Added — restart back to Audit Mode, without closing the app (`dtd`)
+
+* Turning the startup-elevation setting off used to mean quitting and
+  relaunching the exe by hand to actually leave Full Mode. There is now a
+  **Restart now** button beside the toggle.
+* Shipped on the second implementation. The first used the
+  `Shell.Application` "ask explorer to launch it" trick, which looked
+  correct and passed every check available without real elevation, then
+  **failed a live elevated test** — it relaunched and came back still
+  elevated. The shipped version uses `runas.exe /trustlevel:0x20000`, the
+  documented Windows mechanism for dropping privilege, and was confirmed
+  live: a real, UAC-free de-elevation round trip.
+
+### Added — silent or interactive uninstall, and which switch was used (`d6y`)
+
+* The wizard's native-uninstaller screen has a **Run the uninstaller
+  silently** toggle, remembered between runs. The completion toast now names
+  whether the silent switch was a *verified* one (from `corrections.json`)
+  or a *guessed* one (the Rule 15 heuristic), and says so when the
+  uninstaller opened its own window regardless.
+* The bulk queue is deliberately untouched: running unattended is its entire
+  point, so it keeps its always-silent-with-fallback behaviour rather than
+  gaining a per-item prompt that would defeat walking away from it.
+
+### Added — evidence for the elevation-relaunch loop (`6lg`)
+
+* Not a fix. "Restart as administrator" has intermittently closed and
+  reopened the app in Audit Mode with no prompt, no crash and nothing to
+  explain it, and one inconclusive PowerShell test was not proof of where
+  the fault lies. A relaunch that reports success but comes back
+  unelevated now raises an explicit toast on the very next launch and logs a
+  `relaunch-elevated-mismatch` oplog entry with a full UAC diagnostics
+  snapshot — so the next occurrence produces evidence instead of another
+  guess.
+
 ### Added — manual-tap ping (`kp0`)
 
 * Asked three times; accepted this session as one deliberate, tightly
