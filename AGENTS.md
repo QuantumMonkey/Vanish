@@ -133,3 +133,41 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+## Scope: one source of truth
+
+**[docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) decides what gets built.** It lists
+what is in 1.0, what is permanently cut and why, which release gates were
+waived and at what cost, and what is queued after. If any other document
+disagrees with it, PRE-RELEASE.md wins.
+
+Specifically superseded, and kept only as historical reasoning:
+`docs/roadmap.md` (stage/tier model), `docs/architecture.md` (pre-code target
+design), and everything in `docs/history/` (five archived session handoffs —
+**not** to-do lists, despite each one saying "start here").
+
+The standard every proposed feature must pass before it earns a bd issue:
+
+> Solve problems that are not solved. Use existing tools where possible,
+> integrate existing FOSS where necessary. Do not build redundant nonsense.
+
+Vanish exists because this category is gatekept and commodified. A feature
+that duplicates something the user already has is not neutral — it is us
+becoming the thing we objected to. Before proposing work, name what already
+solves it (Windows built-ins, WinDirStat/WizTree, BleachBit, PatchCleaner,
+Task Manager) and what Vanish adds that they cannot. If the honest answer is
+"nothing", that is the finding — say so instead of building it.
+
+The three assets nothing else in this category has, and which any worthwhile
+feature is leverage on: the installed-program map (`scanner.ps1` +
+`corrections.json`), the quarantine vault with a real restore path (INV-1),
+and the tier/consent model that refuses by name with a reason.
+
+Licence boundary, verified 2026-08-12: this repo is **MIT and public**.
+WinDirStat is GPL-2.0; BleachBit and its CleanerML definitions are GPL-3.0+.
+Do not vendor GPL code or definition files into this repository. Query tools
+the user already has, reimplement documented *techniques* (e.g. MFT
+enumeration via `FSCTL_ENUM_USN_DATA`, which carries no licence), and ship
+parsers rather than other people's data.
+
+Do not write a new handoff file. Checkpoint to the bd issue.

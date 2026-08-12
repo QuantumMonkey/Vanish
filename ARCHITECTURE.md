@@ -1,6 +1,6 @@
 # Vanish — As-Built Architecture
 
-*This document describes what the code does **today** (v0.3.x). The target-state design, including stages not yet implemented, lives in [docs/architecture.md](docs/architecture.md) and [docs/roadmap.md](docs/roadmap.md). Every box and arrow below maps to a real file and function.*
+*This document describes what the code does **today** (v0.3.x). What is still to be built lives in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md), which is the single source of truth for scope. [docs/architecture.md](docs/architecture.md) and [docs/roadmap.md](docs/roadmap.md) are historical design records, superseded for scope on 2026-08-12. Every box and arrow below maps to a real file and function.*
 
 ---
 

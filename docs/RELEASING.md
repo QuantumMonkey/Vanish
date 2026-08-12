@@ -13,11 +13,20 @@ the lowest one that fits.
 Bumps from `0` to `1` exactly once — when Vanish is ready for public distribution.
 
 **Bump when ALL of the following are true:**
-- All Core tier stages (1, 2, 3, 6, 9) are marked Complete in `docs/handoff.md`
-  per Promptgate Rule 10 (tested on clean Windows 10 and Windows 11 VMs).
-- A signed binary exists (EV or OV certificate — see Code Signing below).
-- `README.md` has a real screenshot, not a placeholder.
+- Everything in the Ship list of `docs/PRE-RELEASE.md` is done or explicitly
+  waived there. That file, not this list, enumerates the 1.0 gates.
 - `BENCHMARKS.md` has at least one validated run with full test conditions.
+- Any gate waived rather than met is stated plainly in README's **Known
+  limitations** section, with its cost.
+
+**Amended 2026-08-12.** This list previously required Core stages marked
+Complete in `docs/handoff.md` (now archived under `docs/history/`), a clean
+Win10 + Win11 VM pass, a signed binary, and a real screenshot. The VM pass and
+the signed binary were waived by explicit decision for 1.0 (bd `0xt` closed,
+`1w0` deferred). They are not quietly dropped: both are named in README's
+Known limitations, and both reverse the moment a certificate or a VM run
+exists. Do not re-add them here as blockers without also reopening those
+issues.
 
 **After `1.0.0`:** bump RELEASE again only for a complete architectural overhaul
 that breaks backward compatibility with the IPC protocol or scanner.ps1 interface

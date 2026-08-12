@@ -4,7 +4,7 @@
 
 Vanish maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts down the leftovers that uninstallers leave behind, quarantines everything it removes so it can be put back, and audits system health — startup bloat, orphaned autostart entries, redundant software, locked files, a bulk uninstall queue. Everything runs locally. Nothing leaves your machine.
 
-> Working version 0.3.0, Core tier feature-complete. Passes 371/371 assertions **unelevated** (`npm test`); 2 of 16 suites need Full Mode and have not run this session. Not yet **Complete** by this project's own bar — see [Status](#status) below before you rely on it.
+> Working version 0.3.0. Passes **442/442** assertions locally (`npm test`). Heading for a 1.0 release whose scope, cuts and knowingly-accepted limitations are all written down in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) — read [Status](#status) before you rely on this.
 
 <!-- DEMO GIF PLACEHOLDER
 Record with ScreenToGif: 30–60s showing scan → app select → wizard →
@@ -80,7 +80,7 @@ Discovery depth and deletion are independent: you can scan Advanced and still de
 
 ## Status
 
-Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. Nothing in this repository is Complete until a clean Windows 10 (1607+) and Windows 11 VM pass happens — that gate has not run yet. Treat everything below as "works on the machine it was built on," not "shipped."
+Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. For 1.0 the clean-VM gate was **waived deliberately** rather than met — see [Known limitations](#known-limitations) — so treat everything below as "works on the machines it was built and used on," not "certified everywhere."
 
 **Implemented and locally verified (working version 0.3.0):**
 - Quarantine-first removal for every destructive path — files move into a versioned vault, registry keys export to a `.reg` restore manifest, *before* anything is removed ([lib/vault.js](lib/vault.js))
@@ -95,12 +95,29 @@ Status vocabulary follows this project's own **promptgate Rule 10**: *Implemente
 - A `/cso` security audit found and fixed four issues in the destructive paths (command injection, a restore-destination guard bypassable by a directory junction, an ACL fix that didn't survive the app's own normal startup order, and an untracked lockfile) — see the **Security** section of [CHANGELOG.md](CHANGELOG.md)
 
 **Not yet done, honestly:**
-- The Windows 10 / Windows 11 clean-VM acceptance pass (`TASK-17`) — the gate everything above is waiting on
-- The UAC accept/decline/cancel branches of both the startup elevation offer and the new auto-elevate setting — these need a human at the actual consent prompt, which cannot be automated
-- Code signing and Microsoft Store submission
-- Driver Store package *removal* (listing works today)
+- The UAC accept/decline/cancel branches of both the startup elevation offer and the auto-elevate setting — these need a human at the actual consent prompt, which cannot be automated
+- Six elevated confirmations of already-built features (startup actions, Store-leftover purge/restore, network hold revert, Force Uninstall acceptance) — see `bd list` for the current set
+- Driver Store package *removal*. This one is not "not yet" — it is **cut**, deliberately: `pnputil /delete-driver` destroys the copy a restore would need, so Vanish cannot promise reversibility there, and `pnputil` and Disk Cleanup already do the job. Listing works today and stays.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) §5 for the full implemented-vs-designed table.
+
+## Known limitations
+
+Three release gates were waived for 1.0 by deliberate decision, not oversight.
+Each has a real cost and it belongs here rather than in a commit message —
+an app whose whole argument is "we tell you what we actually know" does not
+get to be vague about its own shipping standard.
+
+| Waived | What it means for you |
+| --- | --- |
+| **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate for this release. |
+| **No clean-VM acceptance pass** | Vanish has not been tested on a fresh Windows 10 or Windows 11 install. Breakage specific to clean machines — missing runtimes, different UAC defaults, no developer tooling present — would not have been caught. |
+| **Single-user acceptance** | One person has used this end to end: the person who wrote it. Every "works" claim carries that caveat. |
+
+The first two reverse the moment there is a certificate and a VM run; the
+third reverses the moment someone else uses it. Reopen `1w0` and `442` in the
+issue tracker if you are that someone.
+
 
 ## Quickstart
 
@@ -154,8 +171,8 @@ removes it again; everything else is read-only.
 ## Documentation
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — **as-built** components, IPC surface, and the approval-loop sequence (start here)
-- [docs/architecture.md](docs/architecture.md) — target architecture specification (design goals, includes unimplemented stages)
-- [docs/roadmap.md](docs/roadmap.md) — staged feature roadmap · [docs/handoff.md](docs/handoff.md) — development state
+- [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) — **the single source of truth for scope**: what is in 1.0, what is cut and why, what comes after
+- [docs/roadmap.md](docs/roadmap.md) · [docs/architecture.md](docs/architecture.md) — historical design records, superseded for scope 2026-08-12 · [docs/history/](docs/history/) — archived session handoffs, not to-do lists
 - [docs/promptgate.md](docs/promptgate.md) — the development rulebook every change must pass
 - [CHANGELOG.md](CHANGELOG.md) · [docs/RELEASING.md](docs/RELEASING.md) · [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 

@@ -1,5 +1,19 @@
 # Vanish: Architecture Specification
 
+> ## HISTORICAL TARGET-STATE DESIGN -- superseded 2026-08-12
+>
+> This was the *intended* design, written 2026-06-26 before the code existed.
+> It is not what the app is, and it is no longer what the app is aiming at.
+>
+> - What the code actually does today: [`ARCHITECTURE.md`](../ARCHITECTURE.md)
+>   at the repo root (as-built, every box maps to a real file and function).
+> - What is still to be built: [`docs/PRE-RELEASE.md`](PRE-RELEASE.md).
+>
+> Kept for the original technical reasoning -- the base64 stdin marshalling
+> decision and the one-way privilege model below both survived contact with
+> the implementation and are still the shape of the app.
+
+
 Vanish is a modern, lightweight Windows application manager and deep-cleaning uninstaller. It utilizes an Electron-based host executing a high-performance, non-blocking asynchronous PowerShell backend.
 
 ---

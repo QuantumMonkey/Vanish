@@ -1,5 +1,41 @@
 # Vanish: Roadmap & Future Development Plan
 
+> ## SUPERSEDED FOR SCOPE -- 2026-08-12
+>
+> **This document no longer decides what gets built.**
+> [`docs/PRE-RELEASE.md`](PRE-RELEASE.md) does. Where the two disagree,
+> PRE-RELEASE.md wins: it was written later, against a standard this document
+> predates.
+>
+> That standard: *solve problems that are not solved, use existing tools where
+> possible, integrate existing FOSS where necessary, do not build redundant
+> nonsense.* Several stages below fail it -- not because they were badly
+> specified, but because they duplicate software the user already has. This
+> file is kept because the measurements and reasoning in it are real and were
+> expensive to obtain; the stage numbering and the tier table are history.
+>
+> ### Disposition of every remaining stage
+>
+> | Stage | 2026-08-12 disposition |
+> | --- | --- |
+> | 8 (reduced) -- install snapshot diff | **In 1.0.** Genuinely unserved; InstallWatch and ZSoft are dead. bd `zrw`. |
+> | *(new)* -- size attribution | **In 1.0.** Not a stage in this document at all. The unsolved half of disk usage: whose bytes are these, and is that program still installed. bd `bu2`. |
+> | 11 -- MSI/MSP installer cache | **Post-1.0**, as a finding type on the existing scan surface rather than its own panel. bd `7v3`. |
+> | 11 -- Driver Store sweeper | **CUT.** `pnputil` and Disk Cleanup already do it, and INV-1 cannot be honoured because `pnputil` destroys the FileRepository copy. bd `0ng` closed. |
+> | 11 -- SharedDLLs + ghost PnP | **Post-1.0**, cheap finding types. Frees zero bytes. bd `ztl`. |
+> | 13 (info-only slice) | **Post-1.0**, quality-of-life. bd `ht8`. |
+> | 14 -- cache cleaning engine | **RESCOPED.** We do not write cleaner definitions; BleachBit maintains hundreds in CleanerML. We ship an MIT parser and bring the vault, which is the part nobody offers. bd `7sl`. |
+> | 15 -- bandwidth panel | **CUT** (Task Manager, Resource Monitor and our own `bfh.1` already cover it). Only the **hold** survives, and it is already built. bd `bfh` / `bfh.2`. |
+> | 16 -- firewall rule sweep | **Post-1.0**, cheap finding type. Frees zero bytes. bd `be8`. |
+> | 17 -- Windows Update rollback | **RESCOPED.** Windows already performs the removal; its interface is the actual problem. We build a legible list and hand off to `wusa`/Settings. No removal engine. bd `ag0`. |
+> | 10 (Extended) | **CUT.** bd `dfe` closed. |
+>
+> The tier table below is also obsolete in one specific way worth naming: it
+> gates all Standard work behind a clean Win10/Win11 VM pass. That gate was
+> waived by operator decision on 2026-08-12 (bd `0xt` closed), with the cost
+> written down in PRE-RELEASE.md.
+
+
 This document details the multi-stage roadmap for Vanish, outlining upcoming milestones, technical implementations, and research paths.
 
 ---

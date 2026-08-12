@@ -111,6 +111,26 @@ Never present unvalidated numbers as measured facts.
 ---
 
 ### Rule 10 — "Complete" means tested, not coded
+A feature is only marked Complete in `CHANGELOG.md` when it has been manually
+verified beyond "the local suite passes." Coded and passing local tests is
+"In Progress."
+
+**Amended 2026-08-12.** This rule originally required a clean Windows 10
+(1607+) and Windows 11 VM pass, and pointed at `docs/handoff.md` — a file now
+archived under `docs/history/`. Both parts are superseded:
+
+- **The verification bar for 1.0** is Windows Sandbox plus real operator use.
+  The clean-VM gate was waived by explicit decision (bd `0xt` closed), with
+  the cost recorded in `docs/PRE-RELEASE.md` and stated publicly in README's
+  Known limitations. The rule is not deleted — it is met by a *named, weaker
+  standard whose weakness is written down*, which is the honest version of
+  waiving it.
+- **Status lives in bd and `CHANGELOG.md`**, never in a handoff file.
+
+The part of this rule that has not changed and must not: passing `npm test` is
+not evidence that a destructive path works. Anything that elevates, deletes,
+or restores still needs a real run against a real machine before it is called
+Complete.
 A feature or stage is only marked Complete in `docs/handoff.md` or `CHANGELOG.md` when it has been manually verified on a clean Windows 10 VM (build 1607+) and a clean Windows 11 VM. Coded and passing local tests is "In Progress."
 
 ---
@@ -227,10 +247,25 @@ Local paths (e.g. `d:\path\to\vanish`) expose developer environment structure in
 
 ---
 
-### Rule 19 — the current dated handoff must have per-file status indicators
-`docs/handoff.md` is a frozen, pre-2026-08-03 snapshot — its own header says so and points to `CHANGELOG.md`'s `[Unreleased]` section as the source of truth instead. It is kept for its still-valid reasoning, not maintained further. Live status now lives in the newest `docs/HANDOFF-YYYY-MM-DD.md` file (each one names the file it supersedes); THAT file's File Structure Map, where present, is what must carry a status field per source file:
-- `*(Status: Complete)*`
-- `*(Status: In Progress — [what remains])*`
+### Rule 19 — status lives in bd, not in a handoff file
+**Rewritten 2026-08-12.** This rule used to require the newest
+`docs/HANDOFF-YYYY-MM-DD.md` to carry per-file status indicators. That
+practice produced five files that each said "start here", and a session
+resuming work had to determine which future it was living in before it could
+do anything. All five are archived under `docs/history/` and are explicitly
+not to-do lists.
+
+Replaces it:
+- **Work status** is `bd` — `bd list --status=open`, `bd show <id>`. One issue
+  per unit of work, closed with the verification detail in the close reason.
+- **Scope** is `docs/PRE-RELEASE.md`, the single source of truth for what is
+  in, what is cut, and why.
+- **What shipped** is `CHANGELOG.md`.
+- **What the code is** is `ARCHITECTURE.md` (as-built).
+
+Do not create a new handoff file. If a narrative record of a session is
+genuinely warranted, it goes in `docs/history/` with a row added to that
+folder's README, and it still does not carry status — bd does.
 - `*(Status: Stub)*`
 
 Without status indicators an LLM resuming work has no signal about what is implemented vs placeholder.
