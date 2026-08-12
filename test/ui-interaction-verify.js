@@ -59,6 +59,30 @@ async function assertClickable(win, selector, label) {
   assert(r.hit, `${label}${r.hit ? '' : ` (blocked by ${r.blockedBy})`}`);
 }
 
+async function wait(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function click(win, selector) {
+  await win.webContents.executeJavaScript(
+    `(() => { const el = document.querySelector(${JSON.stringify(selector)}); if (el) el.click(); return !!el; })()`
+  );
+}
+
+// A panel that renders from an async IPC response has no fixed timing, so
+// poll for what should appear rather than betting on one sleep length.
+async function waitForSelector(win, selector, timeoutMs = 3000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const found = await win.webContents.executeJavaScript(
+      `!!document.querySelector(${JSON.stringify(selector)})`
+    );
+    if (found) return true;
+    await wait(100);
+  }
+  return false;
+}
+
 app.whenReady().then(async () => {
   const win = new BrowserWindow({
     width: 1280, height: 860, show: false, frame: false, backgroundColor: '#0b0f19',
@@ -457,6 +481,73 @@ app.whenReady().then(async () => {
       `${tab}: panel rendered with no error state${state.errors.length ? ` (${state.errors[0]})` : ''}`
     );
     assert(!state.notAFunction, `${tab}: no "is not a function" text reached the panel`);
+  }
+
+  // ==========================================================================
+  // The ping tile names its destination (bd vanish-uninstaller-kct)
+  //
+  // kp0's one permitted outbound packet goes to the machine's own default
+  // gateway, which is the entire basis on which it was allowed to exist. The
+  // tile used to render that as a bare "10.128.67.147" - correct, and useless:
+  // the operator looked it up in an external tool and was told it is a private
+  // address with no location or owner. What the tile must never do is claim to
+  // know what an address is AFTER the user has replaced it with their own.
+  // ==========================================================================
+  console.log('');
+  console.log('Ping tile names its destination');
+
+  await click(win, '.nav-item[data-tab="audit"]');
+  const tileUp = await waitForSelector(win, '#net-ping-tile', 5000);
+  assert(tileUp === true, 'the ping tile rendered on the Health Advisor tab');
+
+  if (tileUp) {
+    const detected = await win.webContents.executeJavaScript(
+      `document.querySelector('#net-ping-tile .net-rate-label').textContent.replace(/\\s+/g, ' ').trim()`
+    );
+    assert(
+      detected.includes('your router') && detected.includes('192.168.1.1'),
+      `the auto-detected destination is named as the user's router, with the address (got: "${detected}")`
+    );
+
+    // Replace it with something Vanish cannot vouch for.
+    await win.webContents.executeJavaScript(`
+      (() => {
+        document.getElementById('net-ping-edit-btn').click();
+        const i = document.getElementById('net-ping-dest-input');
+        i.value = '8.8.8.8';
+        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      })();
+      true;
+    `);
+    await wait(300);
+    const edited = await win.webContents.executeJavaScript(
+      `document.querySelector('#net-ping-tile .net-rate-label').textContent.replace(/\\s+/g, ' ').trim()`
+    );
+    assert(edited.includes('8.8.8.8'), 'an edited destination is shown');
+    assert(
+      !edited.includes('your router'),
+      `a user-supplied address is NOT described as their router (got: "${edited}")`
+    );
+
+    // Typing the detected gateway back in earns the label back - the flag is
+    // compared against the real gateway, not latched off on first edit.
+    await win.webContents.executeJavaScript(`
+      (() => {
+        document.getElementById('net-ping-edit-btn').click();
+        const i = document.getElementById('net-ping-dest-input');
+        i.value = '192.168.1.1';
+        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+      })();
+      true;
+    `);
+    await wait(300);
+    const restored = await win.webContents.executeJavaScript(
+      `document.querySelector('#net-ping-tile .net-rate-label').textContent.replace(/\\s+/g, ' ').trim()`
+    );
+    assert(
+      restored.includes('your router'),
+      `retyping the detected gateway is recognised as the router again (got: "${restored}")`
+    );
   }
 
   console.log('');

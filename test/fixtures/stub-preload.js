@@ -150,7 +150,7 @@ contextBridge.exposeInMainWorld('api', {
     success: true, verdict: 'quiet', sampleMs: 1000,
     adapters: [{
       name: 'Test Adapter', description: 'Test', type: 'Ethernet', isWireless: false,
-      hasGateway: true, linkSpeedBps: 1000000000,
+      hasGateway: true, gatewayAddress: '192.168.1.1', linkSpeedBps: 1000000000,
       receiveBytesPerSecond: 0, sendBytesPerSecond: 0, totalBytesPerSecond: 0
     }],
     processes: [], totalBytesPerSecond: 0, busyThresholdBytesPerSecond: 50000,

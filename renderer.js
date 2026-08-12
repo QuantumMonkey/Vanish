@@ -2310,6 +2310,7 @@ function renderNetworkActivity(net) {
   netPrimaryAdapter = primary;
   if (pingDestination === null && primary && primary.gatewayAddress) {
     pingDestination = primary.gatewayAddress;
+    pingDestinationIsGateway = true; // kct
   }
 
   const rateTiles = primary
@@ -2467,16 +2468,35 @@ function wireNetworkPeerToggles() {
 // No timer, no auto-run on tab open or refresh, no retry loop.
 let netPrimaryAdapter = null;
 let pingDestination = null; // null until the first render picks up a gateway
+// kct: is pingDestination still the gateway Vanish detected, or something the
+// user typed? Only the former may be described on screen as "your router".
+let pingDestinationIsGateway = false;
 let pingEditing = false;
 let pingState = { status: 'idle' }; // idle | running | success | error
 
 function pingTileHtml() {
-  const dest = pingDestination || 'no gateway found';
+  // kct: name the destination, do not just print it. The auto-detected value
+  // is the machine's own default gateway - i.e. the user's router - and the
+  // whole reason kp0 was allowed to exist is that the one packet it sends
+  // stays on the local network. Printing a bare "10.128.67.147" hid exactly
+  // that: the operator saw an unexplained private IP in the one feature that
+  // admits to sending traffic, looked it up in an external tool, and was told
+  // it has no location or owner. Correct data, no confidence.
+  //
+  // Only claimed while the destination IS the detected gateway. Once the user
+  // edits it, Vanish no longer knows what the address is and must not say it
+  // does - "your router" pointing at 8.8.8.8 would be a confident wrong answer
+  // of exactly the kind this app refuses everywhere else.
+  const label = !pingDestination
+    ? 'no gateway found'
+    : pingDestinationIsGateway
+      ? `your router (${esc(pingDestination)})`
+      : esc(pingDestination);
   const editRow = pingEditing
     ? `<input type="text" class="net-ping-dest-input" id="net-ping-dest-input" value="${esc(pingDestination || '')}"
          placeholder="IP address or hostname" spellcheck="false">`
     : `<div class="net-rate-label">
-         to ${esc(dest)}
+         to ${label}
          <button class="net-ping-edit-btn" id="net-ping-edit-btn" title="Change what Ping tests against">
            <i class="fa-solid fa-pen"></i>
          </button>
@@ -2537,6 +2557,11 @@ function wirePingTile() {
     const commit = () => {
       const value = input.value.trim();
       if (value) {
+        // kct: an edited destination is only still "your router" if the user
+        // typed the detected gateway back in. Compared rather than assumed,
+        // so retyping the same address does not silently downgrade the label.
+        pingDestinationIsGateway =
+          !!(netPrimaryAdapter && netPrimaryAdapter.gatewayAddress === value);
         pingDestination = value;
         pingState = { status: 'idle' };
       }
@@ -2567,7 +2592,15 @@ async function runPing() {
     const ok = await confirmDialog({
       title: 'Send a network request?',
       body:
-        `Vanish will send one ICMP ping to ${pingDestination} and read whether it replies and how fast. ` +
+        `Vanish will send one ICMP ping to ${pingDestination}` +
+        // kct: the consent dialog is the one place a person decides whether to
+        // allow the app's only outbound packet. "10.128.67.147" means nothing
+        // to most people; "your own router, on this network" is the fact that
+        // actually informs the decision - and it is only stated when true.
+        (pingDestinationIsGateway
+          ? ' - your own router, on this network, not anywhere on the internet - '
+          : ' ') +
+        'and read whether it replies and how fast. ' +
         'This is the only network traffic Vanish ever sends - everything else in the app only reads ' +
         'information already on this PC. You can change the destination with the pencil icon, and nothing ' +
         'is ever sent unless you tap this tile.',
