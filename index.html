@@ -603,6 +603,43 @@
             reads - it changes nothing, and works in Audit Mode. Anything you remove is moved to
             quarantine, where you can put it back.
           </p>
+
+          <!-- zrw: install snapshot diff. Placed here rather than in its own
+               tab because it answers the same shape of question this panel
+               already answers - "what is on this machine that should not be" -
+               only forwards in time instead of backwards. Read-only, so it
+               works in Audit Mode like the rest of this panel.
+
+               Its own class rather than .cleaner-section: that one is a
+               COLLAPSIBLE with overflow:hidden and a body that only displays
+               under .expanded, so reusing it clipped this card to its header
+               height and hid the result. Same visual language, always open. -->
+          <div class="snapshot-card" id="snapshot-section">
+            <div class="snapshot-card-head">
+              <div class="snapshot-card-title">
+                <i class="fa-solid fa-clone"></i>
+                Watch an install
+              </div>
+              <div class="snapshot-card-actions">
+                <button class="btn-sec btn-compact" id="btn-snapshot-begin">
+                  <i class="fa-solid fa-play"></i> Start watching
+                </button>
+                <button class="btn-sec btn-compact" id="btn-snapshot-finish" style="display: none;">
+                  <i class="fa-solid fa-circle-check"></i> I'm done installing
+                </button>
+                <button class="btn-sec btn-compact" id="btn-snapshot-cancel" style="display: none;">
+                  Cancel
+                </button>
+              </div>
+            </div>
+            <p class="snapshot-card-lede">
+              Take a reading, run an installer yourself, then take a second reading. Vanish reports
+              the difference: new folders, startup entries, services and uninstall entries. It reads
+              only - it installs nothing and changes nothing.
+            </p>
+            <div id="snapshot-result"></div>
+          </div>
+
           <div id="cleaner-sections"></div>
         </div>
       </div><!-- /clean-panel -->

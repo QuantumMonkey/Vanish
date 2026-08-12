@@ -7,6 +7,7 @@ const { spawn } = require('node:child_process');
 const store = require('./lib/store');
 const vault = require('./lib/vault');
 const queue = require('./lib/queue');
+const snapshot = require('./lib/snapshot'); // zrw: install snapshot diff
 
 let mainWindow;
 
@@ -1440,6 +1441,81 @@ fullModeOnly('startup-action', async (event, params) => {
 // ==========================================
 
 // Scanning is read-only and allowed in Audit Mode.
+
+// zrw: install snapshot. Two readings and a diff, all read-only, so this is
+// reachable in Audit Mode on purpose - "what did that installer change" is an
+// audit question, and gating it behind elevation would make the honest answer
+// available only to users who had already granted the app more power.
+//
+// The "before" snapshot is held in the main process rather than the renderer
+// so a renderer reload mid-install cannot silently lose it and leave the user
+// diffing against nothing.
+let pendingInstallSnapshot = null;
+
+ipcMain.handle('snapshot-begin', async () => {
+  try {
+    const res = await runPowerShell('install-snapshot', {});
+    if (!res || res.success !== true) {
+      return { success: false, error: (res && res.error) || 'The snapshot could not be taken.' };
+    }
+    pendingInstallSnapshot = res;
+    store.appendOplog({
+      action: 'install-snapshot-begin',
+      tier: currentTier,
+      items: {},
+      outcome: 'success',
+      meta: {
+        run: (res.run || []).length,
+        dirs: (res.dirs || []).length,
+        uninstall: (res.uninstall || []).length
+      }
+    });
+    return { success: true, takenAt: res.takenAt };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('snapshot-finish', async () => {
+  if (!pendingInstallSnapshot) {
+    return { success: false, error: 'No "before" snapshot is waiting. Start watching first.' };
+  }
+  try {
+    const after = await runPowerShell('install-snapshot', {});
+    if (!after || after.success !== true) {
+      return { success: false, error: (after && after.error) || 'The second snapshot could not be taken.' };
+    }
+    const diff = snapshot.diffSnapshots(pendingInstallSnapshot, after);
+    const summary = snapshot.summarise(diff);
+    // Cleared only on success: a failed second reading must leave the "before"
+    // in place so the user can retry rather than lose the whole session.
+    pendingInstallSnapshot = null;
+
+    // Recorded because this is ground truth for bu2's size attribution - a
+    // path in here belongs to what was installed, as fact, not heuristic.
+    store.appendOplog({
+      action: 'install-snapshot-diff',
+      tier: currentTier,
+      items: { paths: snapshot.attributionPaths(diff) },
+      outcome: diff.changed ? 'success' : 'no-change',
+      meta: { summary, totalAdded: diff.totalAdded, totalRemoved: diff.totalRemoved }
+    });
+    return { success: true, diff, summary };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle('snapshot-state', async () => ({
+  watching: pendingInstallSnapshot !== null,
+  takenAt: pendingInstallSnapshot ? pendingInstallSnapshot.takenAt : null
+}));
+
+ipcMain.handle('snapshot-cancel', async () => {
+  pendingInstallSnapshot = null;
+  return { success: true };
+});
+
 ipcMain.handle('cleaner-scan', async (event, params) => {
   const cleaner = (params && params.cleaner) || 'unknown';
   try {

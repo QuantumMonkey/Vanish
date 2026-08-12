@@ -89,6 +89,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // Stage 9 - System Clean cleaners (REQ-11, REQ-14..REQ-17)
   cleanerScan: (params) => ipcRenderer.invoke('cleaner-scan', params),
+
+  // zrw: install snapshot. Read-only both ends, so no tier gate.
+  snapshotBegin: () => ipcRenderer.invoke('snapshot-begin'),
+  snapshotFinish: () => ipcRenderer.invoke('snapshot-finish'),
+  snapshotState: () => ipcRenderer.invoke('snapshot-state'),
+  snapshotCancel: () => ipcRenderer.invoke('snapshot-cancel'),
   cleanerPurge: (params) => ipcRenderer.invoke('cleaner-purge', params),
 
   // 6g2 - interim state while a long scan runs. Before this, queue-update was

@@ -4924,6 +4924,100 @@ function ConvertTo-FindingList {
     return ,$list
 }
 
+# ---------------------------------------------------------------------------
+# zrw: install snapshot.
+#
+# The question this answers is one Windows itself does not: "what did that
+# installer actually change?" The tools that used to answer it (InstallWatch,
+# ZSoft Uninstaller) are dead and nothing replaced them.
+#
+# Deliberately NOT a filesystem monitor. A live hooking engine was the biggest
+# lift on the old roadmap and was cut; this takes two cheap snapshots and
+# subtracts them. It therefore cannot see a file that was created and deleted
+# between them, and does not claim to - it reports what is DIFFERENT, which is
+# what the user actually needs to know afterwards.
+#
+# Scope is the four places an installer's footprint is visible without walking
+# the whole disk: the Run hives, the top level of the Program Files trees, the
+# top level of the per-user and machine app-data trees, and the uninstall
+# entries themselves. Top level only, on purpose - depth here would cost
+# seconds per snapshot and add nothing, because a program that installs into
+# an existing folder is identified by its uninstall entry, not by its files.
+#
+# The output is also the ground truth bu2's size attribution needs: a recorded
+# delta says "this path belongs to this program" as fact rather than heuristic.
+function Get-InstallSnapshot {
+    $runHives = @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Run",
+        "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Run",
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\RunOnce"
+    )
+
+    $runEntries = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in $runHives) {
+        if (-not (Test-Path $path)) { continue }
+        try {
+            $props = Get-ItemProperty -Path $path -ErrorAction SilentlyContinue
+            if ($props) {
+                $props.PSObject.Properties | Where-Object { $_.Name -notlike 'PS*' } | ForEach-Object {
+                    $runEntries.Add("$path\$($_.Name)")
+                }
+            }
+        } catch { }
+    }
+
+    # Top-level directory names only. Enumerating a whole Program Files tree
+    # would turn a snapshot into a scan, and the delta would be no more useful.
+    $dirRoots = @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:ProgramData,
+        $env:LOCALAPPDATA,
+        $env:APPDATA
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    foreach ($root in $dirRoots) {
+        try {
+            Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue |
+                ForEach-Object { $dirs.Add($_.FullName) }
+        } catch { }
+    }
+
+    # Uninstall entries by their registry key path, not by display name: a name
+    # can change between snapshots (an installer rewriting its own entry mid
+    # upgrade) and would then read as one removal plus one addition.
+    $uninstallRoots = @(
+        "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+    $uninstall = [System.Collections.Generic.List[string]]::new()
+    foreach ($root in $uninstallRoots) {
+        if (-not (Test-Path $root)) { continue }
+        try {
+            Get-ChildItem -Path $root -ErrorAction SilentlyContinue |
+                ForEach-Object { $uninstall.Add($_.Name) }
+        } catch { }
+    }
+
+    $services = [System.Collections.Generic.List[string]]::new()
+    try {
+        Get-Service -ErrorAction SilentlyContinue | ForEach-Object { $services.Add($_.Name) }
+    } catch { }
+
+    [PSCustomObject]@{
+        success   = $true
+        takenAt   = (Get-Date).ToString('o')
+        run       = @($runEntries)
+        dirs      = @($dirs)
+        uninstall = @($uninstall)
+        services  = @($services)
+    }
+}
+
 function Invoke-CleanerScan {
     param([object]$p)
 
@@ -5142,6 +5236,12 @@ if ($Action) {
             Test-VanishDataDirAcl -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         # ---- PHASE 4: SYSTEM CLEAN ----
+        "install-snapshot" {
+            # zrw: read-only, no elevation required - it is two Get-ChildItem
+            # passes and a registry read. Deliberately callable in Audit Mode,
+            # because "what did that installer change" is an audit question.
+            Get-InstallSnapshot | ConvertTo-Json -Depth 5 -Compress
+        }
         "cleaner-scan" {
             Invoke-CleanerScan -p $Params | ConvertTo-Json -Depth 7 -Compress
         }

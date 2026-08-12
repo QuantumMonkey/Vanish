@@ -4358,6 +4358,12 @@ function setupCleanTab() {
     };
   });
 
+
+  // zrw: install snapshot. Wired alongside the cleaner buttons because it
+  // lives in the same panel; kept in its own function so the cleaner setup
+  // above stays about cleaners.
+  wireInstallSnapshot();
+
   document.getElementById('btn-scan-all-cleaners').addEventListener('click', async () => {
     for (const c of CLEANERS) {
       if (c.needsKeyword) continue; // needs a search term from the user
@@ -5277,4 +5283,129 @@ function positionTourSpotlight(selector) {
   }
   tooltip.style.top = `${top}px`;
   tooltip.style.left = `${left}px`;
+}
+
+// ---------------------------------------------------------------------------
+// zrw: install snapshot diff.
+//
+// The whole feature is: read, let the user do something, read again, subtract.
+// The interesting decisions are all about honesty rather than mechanism -
+// never implying Vanish performed the install, never implying the watch is
+// complete when a category could not be read, and never leaving the user in a
+// state where they have taken a "before" and cannot remember it.
+// ---------------------------------------------------------------------------
+let snapshotWatching = false;
+
+function snapshotButtons() {
+  return {
+    begin: document.getElementById('btn-snapshot-begin'),
+    finish: document.getElementById('btn-snapshot-finish'),
+    cancel: document.getElementById('btn-snapshot-cancel'),
+    result: document.getElementById('snapshot-result')
+  };
+}
+
+function renderSnapshotState() {
+  const el = snapshotButtons();
+  if (!el.begin) return;
+  el.begin.style.display = snapshotWatching ? 'none' : '';
+  el.finish.style.display = snapshotWatching ? '' : 'none';
+  el.cancel.style.display = snapshotWatching ? '' : 'none';
+}
+
+function renderSnapshotResult(diff, summary) {
+  const el = snapshotButtons();
+  if (!el.result) return;
+
+  const rows = [];
+  const LABELS = {
+    uninstall: 'Uninstall entries',
+    dirs: 'Folders',
+    run: 'Startup entries',
+    services: 'Services'
+  };
+  for (const key of ['uninstall', 'dirs', 'run', 'services']) {
+    const c = diff.categories[key];
+    if (!c) continue;
+    if (!c.readable) {
+      rows.push(`<div class="finding-row"><span class="risk-pill moderate">unreadable</span>
+        <span>${esc(LABELS[key])} could not be read on this machine, so they are not counted.</span></div>`);
+      continue;
+    }
+    for (const item of c.added) {
+      rows.push(`<div class="finding-row"><span class="risk-pill safe">added</span>
+        <span title="${esc(item)}">${esc(item)}</span></div>`);
+    }
+    for (const item of c.removed) {
+      rows.push(`<div class="finding-row"><span class="risk-pill moderate">removed</span>
+        <span title="${esc(item)}">${esc(item)}</span></div>`);
+    }
+  }
+
+  el.result.innerHTML = `
+    <div class="summary-line" style="margin-bottom: 10px;">
+      <strong>${esc(summary)}</strong>
+    </div>
+    ${rows.length ? rows.join('') : ''}
+    <p class="panel-lede" style="margin-top: 10px;">
+      This is a comparison of two readings, not a recording. Anything an installer created and
+      removed again in between is invisible to it, and it only watches the top level of the
+      Program Files and app-data folders.
+    </p>`;
+}
+
+function wireInstallSnapshot() {
+  const el = snapshotButtons();
+  if (!el.begin) return;
+
+  el.begin.addEventListener('click', async () => {
+    el.begin.disabled = true;
+    try {
+      const res = await window.api.snapshotBegin();
+      if (!res || res.success !== true) {
+        toast((res && res.error) || 'The first reading could not be taken.', 'error', 7000);
+        return;
+      }
+      snapshotWatching = true;
+      renderSnapshotState();
+      if (el.result) el.result.innerHTML = '';
+      toast('First reading taken. Run the installer yourself, then press "I\'m done installing".', 'info', 8000);
+    } finally {
+      el.begin.disabled = false;
+    }
+  });
+
+  el.finish.addEventListener('click', async () => {
+    el.finish.disabled = true;
+    try {
+      const res = await window.api.snapshotFinish();
+      if (!res || res.success !== true) {
+        // The "before" reading deliberately survives a failed second reading,
+        // so this is a retry rather than a lost session - say so.
+        toast(`${(res && res.error) || 'The second reading could not be taken.'} Your first reading is still held, so you can try again.`, 'error', 8000);
+        return;
+      }
+      snapshotWatching = false;
+      renderSnapshotState();
+      renderSnapshotResult(res.diff, res.summary);
+      toast(res.summary, res.diff.changed ? 'success' : 'info', 8000);
+    } finally {
+      el.finish.disabled = false;
+    }
+  });
+
+  el.cancel.addEventListener('click', async () => {
+    await window.api.snapshotCancel();
+    snapshotWatching = false;
+    renderSnapshotState();
+    if (el.result) el.result.innerHTML = '';
+    toast('Stopped watching. The first reading was discarded.', 'info');
+  });
+
+  // The "before" reading lives in the main process, so a renderer reload does
+  // not lose it - but the button state would go stale without this.
+  window.api.snapshotState().then((s) => {
+    snapshotWatching = !!(s && s.watching);
+    renderSnapshotState();
+  }).catch(() => {});
 }

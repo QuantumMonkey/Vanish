@@ -165,6 +165,22 @@ contextBridge.exposeInMainWorld('api', {
   listLockers: stub('listLockers', { success: true, holders: [] }),
   unlockPath: stub('unlockPath', { success: true, closedTargets: 0, totalTargets: 0, notes: [] }),
   browseForPath: stub('browseForPath', { canceled: true }),
+  snapshotBegin: stub('snapshotBegin', { success: true, takenAt: '2026-08-12T00:00:00.000Z' }),
+  snapshotFinish: stub('snapshotFinish', {
+    success: true,
+    summary: '1 folder added',
+    diff: {
+      categories: {
+        uninstall: { added: [], removed: [], readable: true },
+        dirs: { added: ['C:\Program Files\Test'], removed: [], readable: true },
+        run: { added: [], removed: [], readable: true },
+        services: { added: [], removed: [], readable: true }
+      },
+      unreadable: [], totalAdded: 1, totalRemoved: 0, changed: true
+    }
+  }),
+  snapshotState: stub('snapshotState', { watching: false, takenAt: null }),
+  snapshotCancel: stub('snapshotCancel', { success: true }),
   queueGet: stub('queueGet', { items: [], running: false, paused: false, counts: {} }),
   queueAdd: stub('queueAdd', { success: true }),
   queueRemove: stub('queueRemove', { success: true }),
