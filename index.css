@@ -573,12 +573,47 @@ body::before {
    "01-01") under compression, reading as broken. table-layout:auto already
    reserves a nowrap column's min-content width and lets other columns
    absorb the squeeze instead, so pinning just these two is enough - Name
-   and Publisher already wrap cleanly onto extra lines when space is short. */
-#all-apps-table th:nth-child(3),
+   and Publisher already wrap cleanly onto extra lines when space is short.
+
+   5rz moved these from 3/4 to 4/5: the select-all checkbox is now column 1,
+   which shifts every later column by one. A positional selector like this is
+   exactly what a new leading column breaks silently - it does not error, it
+   just starts pinning Type and Date instead, and Size wraps again. */
 #all-apps-table th:nth-child(4),
-#all-apps-table td:nth-child(3),
-#all-apps-table td:nth-child(4) {
+#all-apps-table th:nth-child(5),
+#all-apps-table td:nth-child(4),
+#all-apps-table td:nth-child(5) {
   white-space: nowrap;
+}
+
+/* 5rz: the checkbox column. Narrow, centred, and tight against the row's
+   rounded left edge - the default .app-row td padding (14px 16px) would wrap
+   a 15px box in a 47px cell and shove every app name right of where it has
+   always sat. */
+#all-apps-table th:first-child,
+#all-apps-table td:first-child {
+  width: 34px;
+  padding-left: 12px;
+  padding-right: 0;
+  text-align: center;
+}
+
+/* The bulk row reuses .btn-clear-filters-inline so it cannot change the height
+   of an absolutely-positioned caption. Weight, not size, is what separates the
+   action that queues programs from the one that just drops a selection. */
+#btn-bulk-add-queue {
+  font-weight: 700;
+  text-decoration: none;
+}
+
+#chk-select-all-apps,
+.app-row-checkbox {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  accent-color: var(--color-primary);
 }
 
 .apps-table th {

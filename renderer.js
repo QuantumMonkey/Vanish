@@ -3,6 +3,20 @@
 
 let allApps = [];
 let selectedApp = null;
+// 5rz: bulk multi-select for "Add N to queue", separate from selectedApp
+// (which is the single-row details-sidebar selection and stays that way -
+// checking a row's box does not open its sidebar, and opening a row's
+// sidebar does not check its box, same distinction file managers make
+// between "focused" and "selected"). Keyed by app.id so it survives a
+// re-sort or a re-render of the same underlying data.
+let bulkSelectedAppIds = new Set();
+let lastCheckedRowIndex = null; // for shift-click range selection
+// The exact array renderTable() last rendered - i.e. the list AS FILTERED AND
+// SORTED, which is what select-all and clear-selection have to act on. The
+// header checkbox lives outside the table and has no other honest way to know
+// which rows are on screen; reading the DOM back would give it the checkboxes
+// but not the app ids behind them.
+let lastRenderedApps = [];
 let activeTab = 'all-apps';
 let filterText = '';
 let filterType = 'all';
@@ -525,25 +539,14 @@ function elevationFailureMessage(cause) {
 // refuses by name and with the reason, never as a silently inert button.
 function guardProtected() {
   if (!selectedApp) return true;
-
   // 7oo.7: optional features are listed so the user can SEE them. Turning one
   // on or off is a reboot-adjacent OS change and is Windows' own dialog's job,
   // so the refusal names where to go rather than pretending to be able.
-  if (selectedApp.classification === 'feature') {
-    toast(
-      `${selectedApp.name} is part of Windows. Turn it on or off in Windows' own "Turn Windows features on or off" window (optionalfeatures.exe).`,
-      'info',
-      9000
-    );
-    return false;
-  }
-
-  if (selectedApp.protected !== true) return true;
-  toast(
-    `Vanish will not remove ${selectedApp.name}: ${selectedApp.protectionReason || 'Windows needs it to keep this PC updated.'}`,
-    'warn',
-    8000
-  );
+  // Shared with 5rz's bulk add (appProtectionBlock, defined near queueAddSelected)
+  // so the two paths can never drift onto different wording for the same check.
+  const block = appProtectionBlock(selectedApp);
+  if (!block) return true;
+  toast(block.message, block.toastType, block.toastDuration);
   return false;
 }
 
@@ -598,7 +601,7 @@ async function loadApplications() {
     console.error('Failed to load apps:', error);
     elements.appsTbody.innerHTML = `
       <tr>
-        <td colspan="4" style="text-align: center; padding: 48px; color: var(--color-danger);">
+        <td colspan="5" style="text-align: center; padding: 48px; color: var(--color-danger);">
           <i class="fa-solid fa-circle-xmark" style="font-size: 28px; margin-bottom: 12px;"></i>
           <div>Could not read your installed programs: ${error.message}</div>
         </td>
@@ -610,7 +613,7 @@ async function loadApplications() {
 function showLoadingState() {
   elements.appsTbody.innerHTML = `
     <tr id="initial-loading-row">
-      <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
+      <td colspan="5" style="text-align: center; padding: 48px; color: var(--text-gray);">
         <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px; color: var(--color-primary);"></i>
         <div>Finding installed programs...</div>
       </td>
@@ -751,38 +754,67 @@ function updateFilterStatus(shownCount) {
   } else {
     text.textContent = `Showing ${shownCount} of ${pool} programs${suffix}`;
   }
+
+  // 5rz: this row and the bulk-selection row share one slot, so while a
+  // selection is live this caption is hidden - and hiding it is precisely the
+  // 2026-08-05 bug (a filter that says nothing about itself). The bulk caption
+  // carries this sentence for the duration instead, so re-run it here, after
+  // the text above is current rather than one render stale.
+  updateBulkSelectUI();
 }
 
 // Render dynamic rows in table
 function renderTable(apps) {
+  // 5rz: rows that were checked before this re-render (a sort, a filter
+  // keystroke, a background refresh) stay checked if they are still in the
+  // new list - only an id that has genuinely disappeared (the app was
+  // removed, or a filter now excludes it) gets dropped. Re-rendering the
+  // table must never silently clear a selection the user is mid-building.
+  const stillPresent = new Set(apps.map((a) => a.id));
+  for (const id of bulkSelectedAppIds) {
+    if (!stillPresent.has(id)) bulkSelectedAppIds.delete(id);
+  }
+
+  // 5rz: a shift-click anchor is an INDEX into the list as it was rendered.
+  // The ids survive a re-sort but their positions do not, so an anchor carried
+  // across one would range-select a stretch of rows the user never pointed at.
+  // Same list in the same order (the shift handler's own re-render) keeps it.
+  const sameOrder =
+    lastRenderedApps.length === apps.length && lastRenderedApps.every((a, i) => a.id === apps[i].id);
+  if (!sameOrder) lastCheckedRowIndex = null;
+  lastRenderedApps = apps;
+
   if (apps.length === 0) {
     elements.appsTbody.innerHTML = `
       <tr>
-        <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
+        <td colspan="5" style="text-align: center; padding: 48px; color: var(--text-gray);">
           <i class="fa-solid fa-folder-open" style="font-size: 24px; margin-bottom: 12px;"></i>
           <div>No programs match your search.</div>
         </td>
       </tr>
     `;
+    updateBulkSelectUI();
     return;
   }
-  
+
   elements.appsTbody.innerHTML = '';
-  
-  apps.forEach(app => {
+
+  apps.forEach((app, index) => {
     const row = document.createElement('tr');
     row.className = 'app-row';
     if (selectedApp && selectedApp.id === app.id) {
       row.className += ' selected';
     }
-    
+
     // Fallback icon generation: first letter of name
     const initial = app.name.trim().charAt(0).toUpperCase();
-    
+
     const sizeStr = app.sizeBytes ? formatBytes(app.sizeBytes, 1) : 'Unknown';
     const dateStr = app.installDate ? app.installDate : 'Unknown';
-    
+    const checked = bulkSelectedAppIds.has(app.id);
+
     row.innerHTML = `
+      <td><input type="checkbox" class="app-row-checkbox" data-app-index="${index}"${checked ? ' checked' : ''}></td>
       <td>
         <div class="app-info-cell">
           <div class="app-icon-placeholder">${esc(initial)}</div>
@@ -800,10 +832,39 @@ function renderTable(apps) {
       <td style="color: var(--text-gray); font-size: 13px;">${esc(dateStr)}</td>
       <td style="color: var(--text-gray); font-size: 13px; font-weight: 500;">${esc(sizeStr)}</td>
     `;
-    
-    row.addEventListener('click', () => selectApp(app, row));
+
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.app-row-checkbox')) return; // handled below, not a row-select
+      selectApp(app, row);
+    });
+
+    const checkbox = row.querySelector('.app-row-checkbox');
+    checkbox.addEventListener('click', (e) => {
+      // 5rz: shift-click range selection, same convention as file managers
+      // and every other checkbox-list UI - extends from the last box the
+      // user actually clicked, not from wherever the mouse happens to be.
+      if (e.shiftKey && lastCheckedRowIndex !== null) {
+        const [start, end] = [lastCheckedRowIndex, index].sort((a, b) => a - b);
+        const targetState = checkbox.checked;
+        for (let i = start; i <= end; i++) {
+          const targetApp = apps[i];
+          if (!targetApp) continue;
+          if (targetState) bulkSelectedAppIds.add(targetApp.id);
+          else bulkSelectedAppIds.delete(targetApp.id);
+        }
+        renderTable(apps); // re-render to reflect the whole range's new checked state
+        return;
+      }
+      if (checkbox.checked) bulkSelectedAppIds.add(app.id);
+      else bulkSelectedAppIds.delete(app.id);
+      lastCheckedRowIndex = index;
+      updateBulkSelectUI();
+    });
+
     elements.appsTbody.appendChild(row);
   });
+
+  updateBulkSelectUI();
 }
 
 // Select App handler
@@ -909,6 +970,37 @@ function setupFilters() {
   });
 
   document.getElementById('btn-clear-filters').addEventListener('click', () => clearAppFilters());
+
+  // 5rz: the three bulk-select controls live with the other list controls on
+  // purpose - select-all and clear-selection both act on the list AS CURRENTLY
+  // FILTERED AND SORTED, which is exactly what the rest of this function is
+  // about, and the per-row checkboxes are wired in renderTable() because they
+  // are recreated on every render.
+  const selectAllBox = document.getElementById('chk-select-all-apps');
+  if (selectAllBox) {
+    selectAllBox.addEventListener('change', (e) => {
+      // Only the rows on screen right now. Ticking this with a filter active
+      // must never quietly select the programs the filter is hiding - the
+      // whole point of pairing this with the filters is "narrow, then take
+      // what you can see".
+      if (e.target.checked) lastRenderedApps.forEach((a) => bulkSelectedAppIds.add(a.id));
+      else lastRenderedApps.forEach((a) => bulkSelectedAppIds.delete(a.id));
+      lastCheckedRowIndex = null;
+      renderTable(lastRenderedApps);
+    });
+  }
+
+  const bulkAddBtn = document.getElementById('btn-bulk-add-queue');
+  if (bulkAddBtn) bulkAddBtn.addEventListener('click', () => queueAddSelected());
+
+  const bulkClearBtn = document.getElementById('btn-bulk-clear-selection');
+  if (bulkClearBtn) {
+    bulkClearBtn.addEventListener('click', () => {
+      bulkSelectedAppIds.clear();
+      lastCheckedRowIndex = null;
+      renderTable(lastRenderedApps);
+    });
+  }
 }
 
 function clearAppFilters() {
@@ -3900,6 +3992,119 @@ async function refreshQueue() {
 // header is the better feedback channel for adds 2..N, and it is always
 // visible even when collapsed.
 let queueHasAnnounced = false;
+
+// 5rz: reflects bulkSelectedAppIds into the header select-all checkbox
+// (checked/indeterminate/unchecked against the CURRENTLY RENDERED rows only -
+// a filtered-out row's selection state does not count toward "all shown are
+// checked") and the selection-count caption row.
+function updateBulkSelectUI() {
+  const rows = Array.from(document.querySelectorAll('#apps-tbody .app-row-checkbox'));
+  const selectAllBox = document.getElementById('chk-select-all-apps');
+  if (selectAllBox) {
+    const checkedCount = rows.filter((r) => r.checked).length;
+    selectAllBox.checked = rows.length > 0 && checkedCount === rows.length;
+    selectAllBox.indeterminate = checkedCount > 0 && checkedCount < rows.length;
+  }
+
+  const bar = document.getElementById('bulk-select-row');
+  const filterBar = document.getElementById('filter-status-row');
+  const text = document.getElementById('bulk-select-text');
+  const addBtn = document.getElementById('btn-bulk-add-queue');
+  const count = bulkSelectedAppIds.size;
+  if (bar) bar.style.display = count > 0 ? '' : 'none';
+  if (filterBar) filterBar.style.display = count > 0 ? 'none' : '';
+  // While a filter is active the hidden caption's sentence rides along here -
+  // a selection must not be the reason a user stops being told that 158 of
+  // their programs are currently out of view.
+  const isFiltered = filterText.trim() !== '' || filterType !== 'all';
+  const filterNote = isFiltered ? (document.getElementById('filter-status-text')?.textContent || '') : '';
+  if (text) text.textContent = filterNote ? `${count} selected - ${filterNote}` : `${count} selected`;
+  // The button says how many it will act on, so a bulk action can never be
+  // taken without its size on the button being pressed.
+  if (addBtn) addBtn.textContent = `Add ${count} to queue`;
+}
+
+// Shared by the single-item "Add to bulk queue" button (guardProtected,
+// toast-on-refusal) and bulk add below (which reports one aggregate summary
+// instead of a toast per item - toasting once per item would drown a
+// multi-item action in noise). Same two conditions, same wording either way.
+function appProtectionBlock(app) {
+  if (!app) return null;
+  if (app.classification === 'feature') {
+    return {
+      message: `${app.name} is part of Windows. Turn it on or off in Windows' own "Turn Windows features on or off" window (optionalfeatures.exe).`,
+      toastType: 'info',
+      toastDuration: 9000,
+      shortReason: 'part of Windows'
+    };
+  }
+  if (app.protected === true) {
+    return {
+      message: `Vanish will not remove ${app.name}: ${app.protectionReason || 'Windows needs it to keep this PC updated.'}`,
+      toastType: 'warn',
+      toastDuration: 8000,
+      shortReason: app.protectionReason || 'protected by Windows'
+    };
+  }
+  return null;
+}
+
+// 5rz: the bulk counterpart to the single-item "Add to bulk queue" button.
+// Applies the SAME guards (guardFullMode, the protected/feature check) but
+// per item rather than assuming one selectedApp, and reports what happened
+// as one summary instead of N toasts.
+async function queueAddSelected() {
+  if (!guardFullMode()) return;
+
+  const ids = new Set(bulkSelectedAppIds);
+  if (ids.size === 0) {
+    toast('Nothing is selected to add.', 'info');
+    return;
+  }
+  // Resolve against everything the table can render, not just allApps: with
+  // the Windows-features toggle on, feature rows are selectable too, and
+  // resolving only against allApps would drop them from BOTH the added count
+  // and the skipped list - a silent disappearance, which is the one outcome a
+  // bulk action must never have.
+  const apps = allApps.concat(windowsFeatures).filter((a) => ids.has(a.id));
+
+  let added = 0;
+  const skippedProtected = [];
+  const skippedOther = [];
+
+  for (const app of apps) {
+    const block = appProtectionBlock(app);
+    if (block) {
+      skippedProtected.push(`${app.name} (${block.shortReason})`);
+      continue;
+    }
+    const res = await window.api.queueAdd(app);
+    if (res && res.success === true) {
+      added += 1;
+    } else {
+      skippedOther.push(`${app.name} (${(res && res.error) || 'unknown error'})`);
+    }
+  }
+
+  if (added > 0) {
+    queueHasAnnounced = true; // matches queueAddApp's own one-time-open behaviour
+    document.getElementById('queue-panel').classList.remove('collapsed');
+  }
+  await refreshQueue();
+
+  bulkSelectedAppIds.clear();
+  filterAndRenderApps();
+
+  const parts = [`${added} added to the queue`];
+  if (skippedProtected.length) parts.push(`${skippedProtected.length} skipped (protected)`);
+  if (skippedOther.length) parts.push(`${skippedOther.length} skipped (already queued or an error)`);
+  const detail = [...skippedProtected, ...skippedOther].slice(0, 4).join('; ');
+  toast(
+    parts.join(', ') + (detail ? ` - ${detail}${skippedProtected.length + skippedOther.length > 4 ? '...' : ''}` : ''),
+    added > 0 ? 'success' : 'warn',
+    9000
+  );
+}
 
 async function queueAddApp(app) {
   const res = await window.api.queueAdd(app);

@@ -621,6 +621,213 @@ app.whenReady().then(async () => {
     'and it does that without re-running the scan'
   );
 
+  // ==========================================================================
+  // All Programs: multi-select + "Add N to queue" (bd vanish-uninstaller-5rz)
+  //
+  // The single-item path was already covered above. What is new here is a
+  // second selection concept living on the same rows, and every assertion
+  // below exists because the two can quietly interfere: checking a box must
+  // not open the details sidebar, a filter must not leave selected-but-hidden
+  // rows queued behind the user's back, and a protected entry must be refused
+  // by NAME in the summary rather than silently dropped from the count.
+  // ==========================================================================
+  console.log('');
+  console.log('All Programs: multi-select and bulk Add to queue');
+
+  await click(win, '.nav-item[data-tab="all-apps"]');
+  await wait(400);
+
+  // Five scripted rows in a known A-Z order (the default sort): three plain
+  // applications, one protected, one Windows optional feature. The feature is
+  // only visible with the Components toggle on, so turn it on first.
+  await win.webContents.executeJavaScript(`
+    if (!document.getElementById('chk-show-components').checked) {
+      document.getElementById('chk-show-components').click();
+    }
+    window.__test.queueResponse('getDesktopApps', [
+      { id: 'b1', name: 'Bulk Alpha', publisher: 'P', version: '1', installDate: '2026-01-01',
+        sizeBytes: 1024, registryPath: 'HKLM:\\\\Software\\\\B1', type: 'Desktop', classification: 'application' },
+      { id: 'b2', name: 'Bulk Bravo', publisher: 'P', version: '1', installDate: '2026-01-01',
+        sizeBytes: 1024, registryPath: 'HKLM:\\\\Software\\\\B2', type: 'Desktop', classification: 'application' },
+      { id: 'b3', name: 'Bulk Charlie', publisher: 'P', version: '1', installDate: '2026-01-01',
+        sizeBytes: 1024, registryPath: 'HKLM:\\\\Software\\\\B3', type: 'Desktop', classification: 'application' },
+      { id: 'b4', name: 'Bulk Delta Guarded', publisher: 'P', version: '1', installDate: '2026-01-01',
+        sizeBytes: 1024, registryPath: 'HKLM:\\\\Software\\\\B4', type: 'Desktop', classification: 'application',
+        protected: true, protectionReason: 'Windows needs it to keep this PC updated.' },
+      { id: 'b5', name: 'Bulk Echo Feature', publisher: 'P', version: '1', installDate: '2026-01-01',
+        sizeBytes: 1024, registryPath: 'HKLM:\\\\Software\\\\B5', type: 'Desktop', classification: 'feature' }
+    ]);
+    loadApplications();
+    true;
+  `);
+  await wait(600);
+
+  const gridReady = await win.webContents.executeJavaScript(`(() => ({
+    rows: document.querySelectorAll('#apps-tbody .app-row').length,
+    boxes: document.querySelectorAll('#apps-tbody .app-row-checkbox').length,
+    names: Array.from(document.querySelectorAll('#apps-tbody .app-title-name')).map((n) => n.textContent)
+  }))()`);
+  assert(gridReady.rows === 5, 'the five scripted rows rendered');
+  assert(gridReady.boxes === 5, 'every rendered row carries a checkbox');
+  assert(gridReady.names[0] === 'Bulk Alpha', 'rows are in the expected A-Z order the range test depends on');
+  await assertClickable(win, '#chk-select-all-apps', 'the select-all header checkbox is clickable, not buried under the sticky header');
+  await assertClickable(win, '#apps-tbody .app-row .app-row-checkbox', 'a row checkbox is clickable, not covered by its own row');
+
+  // Checking a box is NOT the same gesture as opening a row. If it were, every
+  // box ticked while building a bulk queue would also swap the details sidebar
+  // out from under the user.
+  await win.webContents.executeJavaScript(`
+    document.getElementById('details-sidebar').classList.remove('active');
+    document.querySelectorAll('#apps-tbody .app-row-checkbox')[0].click();
+    true;
+  `);
+  await wait(200);
+  const afterFirstCheck = await win.webContents.executeJavaScript(`(() => ({
+    selected: bulkSelectedAppIds.size,
+    sidebarOpen: document.getElementById('details-sidebar').classList.contains('active'),
+    barShown: document.getElementById('bulk-select-row').style.display !== 'none',
+    filterRowHidden: document.getElementById('filter-status-row').style.display === 'none',
+    caption: document.getElementById('bulk-select-text').textContent,
+    addLabel: document.getElementById('btn-bulk-add-queue').textContent,
+    headerIndeterminate: document.getElementById('chk-select-all-apps').indeterminate
+  }))()`);
+  assert(afterFirstCheck.selected === 1, 'ticking one box selects exactly one row');
+  assert(afterFirstCheck.sidebarOpen === false, 'ticking a box does NOT also open that row\'s details sidebar');
+  assert(afterFirstCheck.barShown === true, 'the selection bar appears as soon as something is selected');
+  assert(afterFirstCheck.filterRowHidden === true, 'the filter caption yields its slot rather than stacking');
+  assert(afterFirstCheck.caption === '1 selected', 'the selection bar counts what is selected');
+  assert(afterFirstCheck.addLabel === 'Add 1 to queue', 'the add button states how many it will act on');
+  assert(afterFirstCheck.headerIndeterminate === true, 'a partial selection shows the header checkbox as indeterminate');
+  await assertClickable(win, '#btn-bulk-add-queue', 'the bulk Add button is reachable, not behind the caption row');
+  await assertClickable(win, '#btn-bulk-clear-selection', 'the Clear selection button is reachable');
+
+  // Shift-click extends from the last box actually clicked.
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const boxes = document.querySelectorAll('#apps-tbody .app-row-checkbox');
+      boxes[3].dispatchEvent(new MouseEvent('click', { bubbles: true, shiftKey: true }));
+    })();
+    true;
+  `);
+  await wait(200);
+  const afterShift = await win.webContents.executeJavaScript(`(() => ({
+    selected: bulkSelectedAppIds.size,
+    ids: Array.from(bulkSelectedAppIds).sort(),
+    checkedBoxes: Array.from(document.querySelectorAll('#apps-tbody .app-row-checkbox')).filter((b) => b.checked).length
+  }))()`);
+  assert(afterShift.selected === 4, 'shift-clicking the fourth row range-selects rows 1 through 4');
+  assert(afterShift.ids.join(',') === 'b1,b2,b3,b4', 'the range covers exactly the rows between the anchor and the shift-click');
+  assert(afterShift.checkedBoxes === 4, 'the re-rendered checkboxes reflect the whole range, not just the clicked one');
+
+  // A re-sort moves rows; it must not lose the selection riding on them.
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const sel = document.getElementById('sort-selector');
+      sel.value = 'name-desc';
+      sel.dispatchEvent(new Event('change'));
+    })();
+    true;
+  `);
+  await wait(300);
+  const afterSort = await win.webContents.executeJavaScript(`(() => ({
+    selected: bulkSelectedAppIds.size,
+    ids: Array.from(bulkSelectedAppIds).sort(),
+    firstName: document.querySelector('#apps-tbody .app-title-name').textContent
+  }))()`);
+  assert(afterSort.firstName === 'Bulk Echo Feature', 'the re-sort actually reordered the table');
+  assert(afterSort.selected === 4 && afterSort.ids.join(',') === 'b1,b2,b3,b4', 'a re-sort keeps the same rows selected');
+
+  // Select-all covers the rows on screen.
+  await win.webContents.executeJavaScript(`document.getElementById('chk-select-all-apps').click(); true;`);
+  await wait(250);
+  const afterSelectAllRows = await win.webContents.executeJavaScript(`(() => ({
+    selected: bulkSelectedAppIds.size,
+    headerChecked: document.getElementById('chk-select-all-apps').checked,
+    headerIndeterminate: document.getElementById('chk-select-all-apps').indeterminate
+  }))()`);
+  assert(afterSelectAllRows.selected === 5, 'select-all selects every rendered row');
+  assert(afterSelectAllRows.headerChecked === true && afterSelectAllRows.headerIndeterminate === false,
+    'a complete selection shows the header checkbox as checked, not indeterminate');
+
+  // Filtering to one row must DROP the four it hides. A selection the user can
+  // no longer see is a selection they cannot review before pressing Add.
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const bar = document.getElementById('search-bar');
+      bar.value = 'Alpha';
+      bar.dispatchEvent(new Event('input'));
+    })();
+    true;
+  `);
+  await wait(300);
+  const afterFilter = await win.webContents.executeJavaScript(`(() => ({
+    rows: document.querySelectorAll('#apps-tbody .app-row').length,
+    selected: bulkSelectedAppIds.size,
+    ids: Array.from(bulkSelectedAppIds),
+    caption: document.getElementById('bulk-select-text').textContent
+  }))()`);
+  assert(afterFilter.rows === 1, 'the search filtered the table down to one row');
+  assert(afterFilter.selected === 1 && afterFilter.ids[0] === 'b1',
+    'rows a filter hides are dropped from the selection, never queued unseen');
+  assert(
+    /showing 1 of 5/i.test(afterFilter.caption),
+    'the active filter still announces itself while a selection occupies that slot (2026-08-05 regression guard)'
+  );
+
+  // Clear the filter, then Clear selection.
+  await win.webContents.executeJavaScript(`
+    (() => {
+      const bar = document.getElementById('search-bar');
+      bar.value = '';
+      bar.dispatchEvent(new Event('input'));
+    })();
+    true;
+  `);
+  await wait(300);
+  await click(win, '#btn-bulk-clear-selection');
+  await wait(250);
+  const afterClear = await win.webContents.executeJavaScript(`(() => ({
+    selected: bulkSelectedAppIds.size,
+    barHidden: document.getElementById('bulk-select-row').style.display === 'none',
+    filterRowShown: document.getElementById('filter-status-row').style.display !== 'none',
+    checkedBoxes: Array.from(document.querySelectorAll('#apps-tbody .app-row-checkbox')).filter((b) => b.checked).length
+  }))()`);
+  assert(afterClear.selected === 0, 'Clear selection empties the selection');
+  assert(afterClear.checkedBoxes === 0, 'and the boxes on screen actually uncheck');
+  assert(afterClear.barHidden === true && afterClear.filterRowShown === true,
+    'the filter caption gets its slot back once nothing is selected');
+
+  // Bulk add: three addable, one protected, one Windows feature.
+  await win.webContents.executeJavaScript(`
+    document.getElementById('toast-stack').innerHTML = '';
+    document.getElementById('chk-select-all-apps').click();
+    true;
+  `);
+  await wait(250);
+  const addsBefore = await win.webContents.executeJavaScript(`window.__test.callCount('queueAdd')`);
+  await click(win, '#btn-bulk-add-queue');
+  await wait(800);
+
+  const afterBulkAdd = await win.webContents.executeJavaScript(`(() => ({
+    adds: window.__test.callCount('queueAdd') - ${addsBefore},
+    selected: bulkSelectedAppIds.size,
+    barHidden: document.getElementById('bulk-select-row').style.display === 'none',
+    toast: document.getElementById('toast-stack').textContent || ''
+  }))()`);
+  assert(afterBulkAdd.adds === 3, 'only the three addable programs crossed the bridge - the guarded ones never reached queueAdd');
+  assert(/3 added to the queue/.test(afterBulkAdd.toast), 'the summary reports how many were added');
+  assert(/2 skipped \(protected\)/.test(afterBulkAdd.toast), 'the summary reports how many were refused');
+  assert(
+    afterBulkAdd.toast.includes('Bulk Delta Guarded') && afterBulkAdd.toast.includes('Bulk Echo Feature'),
+    'the summary names the refused programs rather than dropping them silently'
+  );
+  assert(
+    afterBulkAdd.toast.split('Bulk Alpha').length === 1,
+    'the summary is ONE toast about the batch, not one toast per item'
+  );
+  assert(afterBulkAdd.selected === 0 && afterBulkAdd.barHidden === true,
+    'a completed bulk add clears the selection rather than leaving it armed for a second press');
+
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
   app.exit(fail > 0 ? 1 : 0);

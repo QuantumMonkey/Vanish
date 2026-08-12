@@ -127,6 +127,17 @@
               <span id="filter-status-text">Showing all programs</span>
               <button class="btn-clear-filters-inline" id="btn-clear-filters" style="display: none;">Clear</button>
             </div>
+            <!-- 5rz: same slot, same absolutely-positioned idiom as filter-status-row
+                 above (out of document flow on purpose - a fixed-position sidebar
+                 button lower on this page clipped off-window the first time a status
+                 line here was tried as a normal flow row). Mutually exclusive with it:
+                 whichever is relevant shows, the other stays hidden, so they never
+                 stack or fight for the same line. -->
+            <div class="filter-status-caption" id="bulk-select-row" style="display: none;">
+              <span id="bulk-select-text">0 selected</span>
+              <button class="btn-clear-filters-inline" id="btn-bulk-add-queue">Add to queue</button>
+              <button class="btn-clear-filters-inline" id="btn-bulk-clear-selection">Clear selection</button>
+            </div>
           </div>
 
           <div class="header-controls">
@@ -220,6 +231,13 @@
             <table class="apps-table" id="all-apps-table">
               <thead>
                 <tr>
+                  <!-- 5rz: select-all operates on the currently RENDERED (filtered)
+                       rows only, never the full unfiltered app list - renderTable()
+                       already receives just the filtered array, so wiring this
+                       checkbox to "every row currently in the DOM" is correct by
+                       construction, not something that needs its own filter-aware
+                       logic. -->
+                  <th><input type="checkbox" id="chk-select-all-apps" title="Select all shown"></th>
                   <th style="width: 45%;">Name</th>
                   <th style="width: 25%;">Type</th>
                   <th style="width: 15%;">Date</th>
@@ -229,7 +247,7 @@
               <tbody id="apps-tbody">
                 <!-- App Rows generated dynamically by renderer.js -->
                 <tr id="initial-loading-row">
-                  <td colspan="4" style="text-align: center; padding: 48px; color: var(--text-gray);">
+                  <td colspan="5" style="text-align: center; padding: 48px; color: var(--text-gray);">
                     <i class="fa-solid fa-spinner fa-spin" style="font-size: 24px; margin-bottom: 12px; color: var(--color-primary);"></i>
                     <div>Finding installed programs...</div>
                   </td>
