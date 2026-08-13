@@ -13,6 +13,25 @@ we objected to.
 
 ---
 
+## Status — 2026-08-13
+
+**Released 0.4.0.** A MAJOR bump, not the 1.0 bump, and deliberately so: this
+document's own ship list still has Phase 3 outstanding, and `docs/RELEASING.md`
+gates 1.0 on that list being done or explicitly waived. A major feature
+completing is a MAJOR bump. Bumping RELEASE here would have meant breaking the
+release rule on the same day it was written.
+
+| Phase | State |
+| --- | --- |
+| 0 — unblock (`9rv`) | **Outstanding.** ~30 seconds of operator time; blocks nothing else. |
+| 1 — build (`zrw`, `bu2`) | **Done.** |
+| 2 — safety and honesty gates (`1td`, `vhm`, `8ns`, `k2o`) | **Done**, except the demo GIF, which needs a human. |
+| 3 — live verification, six elevated confirmations | **Outstanding.** Every one needs a human at a real UAC prompt; none can be automated. |
+| 4 — cut the release (`sy2`) | **Done for 0.4.0**: 544/544, both artifacts built and content-verified against source, packaged app booted from `app.asar` with no console errors, tagged. |
+
+What stands between 0.4.0 and 1.0 is therefore **not code**. It is Phase 0 and
+Phase 3, both of which require a person at a consent dialog.
+
 ## Cut permanently
 
 Not deferred. Decided against, with the reason, so no future session
@@ -53,7 +72,7 @@ for, with the cost recorded.
 
 ### Phase 1 -- build (the two that carry the product story)
 
-- [ ] **`zrw`** Install snapshot diff. Snapshot Run-key hives and top-level
+- [x] **`zrw`** Install snapshot diff. **Done 2026-08-12.** Snapshot Run-key hives and top-level
       Program Files / AppData before and after a monitored install, report the
       delta as real numbers. Reuses Stage 1's existing restore-point trigger.
       **First on purpose**: small, genuinely unserved (InstallWatch and ZSoft
@@ -61,25 +80,33 @@ for, with the cost recorded.
       about which paths belong to which program -- the input the next item
       otherwise has to guess at.
 
-- [ ] **`bu2`** Size attribution. Enumerate via the NTFS MFT
-      (`FSCTL_ENUM_USN_DATA`, documented API; standard directory walk as the
-      fallback for non-NTFS, network, and Audit Mode), then join against the
-      installed-programs map, `corrections.json`, and `zrw`'s recorded deltas.
-      Output is not a treemap: it is "12.4 GB, last written March, belongs to
-      a program that is no longer installed", quarantine-able through the
-      existing vault. No auto-proposed deletions, no one-click clean.
+- [x] **`bu2`** Size attribution. **Done 2026-08-13.** Joins the program
+      folders against the installed-programs map, `corrections.json` and
+      `zrw`'s recorded deltas. Output is not a treemap: it is "12.4 GB,
+      belongs to a program that is no longer installed", quarantine-able
+      through the existing vault. No auto-proposed deletions, no one-click
+      clean.
+
+      **Built differently from this plan, on purpose.** The plan called for MFT
+      enumeration via `FSCTL_ENUM_USN_DATA` for WizTree-class speed. USN records
+      carry names and parents but **not sizes**, so sizing that way means
+      parsing raw `$MFT` records off the volume. The design was inverted
+      instead: attribution is milliseconds and measurement is the expensive
+      part, so classify first and measure only what classification could not
+      explain, under a 20-second budget. The fast path stopped being necessary
+      rather than being reimplemented. Full reasoning is in the header of
+      `lib/attribution.js`.
 
 ### Phase 2 -- safety and honesty gates (must not ship without)
 
-- [ ] **`1td`** Security review, high, on the destructive surfaces.
-- [ ] **`vhm`** Full `/cso` audit pass.
-- [ ] **`8ns`** Platform-wrapped games (Steam, Epic) need their own "needs
+- [x] **`1td`** Security review on the destructive surfaces. **Done 2026-08-13** — no defects; all 17 mutating IPC channels gated, 14 new regressions on the read-only surfaces.
+- [x] **`vhm`** Security audit. **Done 2026-08-13**, scoped to the destructive surfaces and everything added this cycle rather than a full-codebase sweep — the scope is stated in the issue.
+- [x] **`8ns`** **Done 2026-08-13.** Six storefronts recognised; Retry withheld where it cannot work. Platform-wrapped games (Steam, Epic) needed their own "needs
       attention" message in the bulk queue. The current generic "retry the
       silent switch" text can never work against `steam.exe`, so today the app
       tells the user to do something that cannot succeed. Design is already
       written up in the issue.
-- [ ] **`k2o`** Docs pass: README, CHANGELOG, ARCHITECTURE. The demo GIF needs
-      a human to record it.
+- [x] **`k2o`** Docs pass **done 2026-08-13** (README, CHANGELOG, ARCHITECTURE, including the renderer decomposition). The demo GIF still needs a human to record it.
 
 ### Phase 3 -- live verification (operator, Windows Sandbox)
 
@@ -96,12 +123,15 @@ Phase 0 settles what that flakiness actually was.
 
 ### Phase 4 -- cut the release
 
-- [ ] `npm test` green; build both artifacts; verify the packaged output the
-      way every build this cycle was verified -- extract `app.asar` and diff
-      the renderer/main sources against source, sha256 `scanner.ps1` and
-      `corrections.json`.
-- [ ] Version bump, CHANGELOG release section, tag, push.
-- [ ] Known-limitations note in the README covering the three waived gates:
+- [x] **Done for 0.4.0.** `npm test` 544/544. Both artifacts built. `app.asar`
+      extracted and diffed against source (main, preload, index.html/css, the
+      renderer modules and every `lib/` module all identical); `scanner.ps1`
+      and `corrections.json` sha256-identical. The packaged app was then
+      **booted from `app.asar`** and asserted to resolve its cross-module
+      functions with a clean console -- the check that would have caught the
+      `package.json` omission the renderer split introduced.
+- [x] Version bumped to 0.4.0, CHANGELOG dated, tagged, pushed.
+- [x] Known-limitations note in the README covering the three waived gates:
       unsigned binary, no clean-VM pass, single-user acceptance.
 
 ---

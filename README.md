@@ -4,7 +4,7 @@
 
 Vanish maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts down the leftovers that uninstallers leave behind, quarantines everything it removes so it can be put back, and audits system health — startup bloat, orphaned autostart entries, redundant software, locked files, a bulk uninstall queue. Everything runs locally. Nothing leaves your machine.
 
-> Working version 0.3.0. Passes **442/442** assertions locally (`npm test`). Heading for a 1.0 release whose scope, cuts and knowingly-accepted limitations are all written down in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) — read [Status](#status) before you rely on this.
+> Working version 0.3.0. Passes **544/544** assertions locally (`npm test`). Heading for a 1.0 release whose scope, cuts and knowingly-accepted limitations are all written down in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) — read [Status](#status) before you rely on this.
 
 <!-- DEMO GIF PLACEHOLDER
 Record with ScreenToGif: 30–60s showing scan → app select → wizard →
@@ -59,6 +59,25 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services — with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
 | Software redundancy detection: 14 category clusters (browsers, PDF readers, AV tools…) flagging duplicate installs | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
 | Search, type filter, and sort (name/size/date) over the full app inventory | [renderer.js](renderer.js) `filterAndRenderApps` |
+
+### Watch an install, and see what it left behind
+
+Two features that only make sense together, both in **System Clean**:
+
+- **Watch an install** takes a reading of your Run keys, program folders,
+  services and uninstall entries, waits while *you* run an installer, then takes
+  a second reading and reports the difference in real numbers. It is a
+  comparison, not a recording — it says so — and it installs nothing itself.
+- **Where your disk space went** matches every top-level program folder against
+  the programs actually installed. Folders a watched install created whose
+  program is now gone are named as **left behind**. Everything else Vanish
+  cannot explain is listed as **unexplained**, separately, and never presented
+  as rubbish.
+
+That distinction is the whole point. Every disk-usage tool can tell you a folder
+is 12 GB; none of them can tell you whose it was, because none of them has an
+uninstall database. And a tool that guesses would eventually put a delete button
+next to something you needed.
 
 ## Scan modes
 

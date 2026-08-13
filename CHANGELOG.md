@@ -8,7 +8,98 @@ full decision rules.
 
 ---
 
-## [Unreleased]
+## [0.4.0] - 2026-08-13
+
+### Added — watch an install, and see what it left behind (`zrw`, `bu2`)
+
+Two features that only make sense together, both in **System Clean**.
+
+* **Watch an install** takes a reading of the Run hives, the top level of the
+  program and app-data folders, services and uninstall entries; you run the
+  installer yourself; a second reading reports the difference in real numbers.
+  Windows does not answer "what did that installer actually change", and the
+  tools that used to (InstallWatch, ZSoft Uninstaller) are dead with nothing in
+  their place. It is a **comparison, not a recording** — anything created and
+  deleted in between is invisible to it, and the panel says so rather than
+  implying completeness.
+* **Where your disk space went** matches every top-level program folder against
+  the programs actually installed. Every disk-usage tool can tell you a folder
+  is 12 GB; none can tell you *whose* it was, because none has an uninstall
+  database. Vanish has one.
+* The distinction the second feature is built around: **"left behind" and
+  "unexplained" are different claims and are never merged.** Left behind is
+  positive — Vanish watched the install and the program is gone — and is only
+  ever said on recorded evidence. A folder that was watched but whose owner was
+  never resolved stays *unexplained*, because calling it orphaned would invent
+  the fact that makes the word mean anything. A tool that guessed here would
+  eventually put a delete button next to something you needed.
+* Nothing is auto-proposed for deletion, there is no one-click clean, and
+  removal still goes through the same ticked-checkbox quarantine path as
+  everything else.
+
+**Two defects found by running it against a real machine rather than by testing
+it.** 134 of 233 folders came back unexplained, because a program registered
+*beneath* a publisher folder (Brave lives in
+`BraveSoftware\Brave-Browser\Application`) made the scanned folder an ancestor
+of the registered location, and concatenated folder names never split into
+tokens — both now matched, unexplained fell to 107 and matched rose to 93. And
+measurement took 62 seconds against a 12 GB WSL tree and an npm cache of
+hundreds of thousands of files, so it now runs under a 20-second budget:
+anything past it is reported **unmeasured, with the reason**, never truncated or
+shown as small. A false zero is a number you would act on.
+
+### Fixed — the bulk queue no longer blames an uninstaller that never ran (`8ns`)
+
+* A Steam game came back "needs attention — the uninstaller did not finish on
+  its own", with a Retry button. Both were wrong in the worst way this app can
+  be wrong: they told you to do something that cannot work. A Steam game's
+  uninstall string is `steam.exe`, not a per-app uninstaller, so there is no
+  silent switch to find and retrying produces the identical non-result.
+* Six storefronts are now recognised (Steam, Epic, GOG Galaxy, Battle.net,
+  Ubisoft Connect, EA app). On a match Vanish names the platform, says why it
+  stopped rather than implying it failed, gives the route that actually works,
+  and **withholds Retry** instead of leaving it there to disappoint.
+* Detection is deliberately conservative: a program merely *named* "Steamy
+  Software" is not a Steam game. Suppressing Retry on something that could have
+  retried is its own kind of wrong answer.
+
+### Changed — the renderer is seven modules instead of one 5,500-line file
+
+* `renderer.js` had grown to 5,518 lines and 148 functions covering every
+  screen. Split by feature into `renderer/`: core, settings-about, wizard,
+  audit, quarantine-tasks, queue-clean, force-tour.
+* A **pure file split**, not a rewrite: the old file had exactly two top-level
+  executable statements, both `DOMContentLoaded` listeners that run after every
+  script has loaded. Classic scripts share one global lexical environment, so
+  cross-file references resolve exactly as before. No bundler, no imports, no
+  behaviour change — and the suite total is identical either side of it.
+* Three references to the vanished filename would each have failed differently:
+  `package.json` would have shipped a build whose `index.html` loads seven
+  scripts that were never packaged (a blank window, visible only in a packaged
+  run); a PowerShell suite crashed loudly, which is the correct failure and how
+  it was caught; and the icon checker would have gone on reporting PASS over a
+  fraction of the UI. All three fixed, and the two checkers now *discover*
+  renderer files rather than naming them.
+
+### Security — the new read-only surfaces are regressed, not just asserted
+
+* `measure-paths` is the first engine command to take a caller-supplied path
+  **list** rather than one validated target, so the base64-JSON parameter
+  boundary was re-proven for it with a canary rather than assumed to carry over.
+* 14 new assertions covering: nothing is written or executed, a missing path
+  reports a null size rather than 0 bytes, an empty list does not throw, and
+  `Measure-Paths` statically contains no `Invoke-Expression`/`Start-Process`/
+  `cmd.exe` and no write cmdlet at all.
+* Placed **above** the elevation gate on purpose: they had been written inside
+  the elevated-only section, which would have meant the Audit Mode read-only
+  promise was regressed exactly never — Audit Mode being the tier the promise is
+  about.
+* Review finding, recorded because a negative result is still a result: all 17
+  mutating IPC channels are gated through `fullModeOnly`, and every ungated
+  channel is a read. `set-settings` is ungated and correctly so — it can ask for
+  elevation at the next launch but grants none, and the channel that creates the
+  scheduled task is gated.
+
 
 ### Added — multi-select and bulk "Add N to queue" in All Programs (`5rz`)
 

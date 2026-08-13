@@ -11,7 +11,7 @@ Four layers, strict one-way privilege escalation: the sandboxed renderer can onl
 ```mermaid
 graph LR
     subgraph Renderer["Electron Renderer — sandboxed"]
-        UI["renderer.js<br/>UI state, wizard state machine,<br/>Health Advisor panel"]
+        UI["renderer/*.js<br/>seven feature modules<br/>UI state, wizard, panels"]
     end
     subgraph Bridge["Preload"]
         API["preload.js<br/>contextBridge: window.api"]
@@ -42,6 +42,41 @@ graph LR
 
 **Security boundaries as configured** ([main.js](main.js) `createWindow`): `contextIsolation: true`, `nodeIntegration: false` — the renderer has no Node access; every OS capability is an explicit, named function on `window.api` ([preload.js](preload.js)). Parameters cross the Node→PowerShell boundary as Base64-encoded JSON to defeat shell-escaping issues ([main.js](main.js) `runPowerShell`, [scanner.ps1](scanner.ps1) param block). Elevation is detected via the `WindowsPrincipal` API, never `net session` ([scanner.ps1](scanner.ps1) `Check-AdminStatus`). `node:child_process`'s `exec` (a shell) is not imported anywhere in `main.js`; every process launch goes through `spawn` (the PowerShell bridge) or, inside `scanner.ps1`, `Start-Process -FilePath/-ArgumentList` with no shell attached (SEC-1, `test/security-verify.ps1` asserts this statically on every run).
 
+## 1b. Renderer modules and the pure core
+
+The renderer is seven **classic scripts**, not ES modules and not a bundle.
+Top-level `let`/`const`/`function` in classic scripts share one global lexical
+environment, so these files reference each other directly; the order in
+`index.html` is for reading order, not resolution.
+
+| File | Owns |
+| --- | --- |
+| [renderer/core.js](renderer/core.js) | Module state, `esc`/`toast`, the tier guards (`guardFullMode`, `guardProtected`), the All Programs table with filters and multi-select, tab routing |
+| [renderer/settings-about.js](renderer/settings-about.js) | Settings and About panels |
+| [renderer/wizard.js](renderer/wizard.js) | The uninstall wizard state machine |
+| [renderer/audit.js](renderer/audit.js) | Health Advisor: startup, storage, network activity, GPU, the manual-tap ping |
+| [renderer/quarantine-tasks.js](renderer/quarantine-tasks.js) | Quarantine manager, Task Manager, unlocker |
+| [renderer/queue-clean.js](renderer/queue-clean.js) | Bulk queue, System Clean, install snapshot, size attribution |
+| [renderer/force-tour.js](renderer/force-tour.js) | Force Uninstall, guided tour |
+
+Logic worth testing without a browser lives in `lib/` as pure CommonJS, which
+is why the suite can drive it directly:
+
+| Module | Responsibility | Suite |
+| --- | --- | --- |
+| [lib/vault.js](lib/vault.js) | Quarantine and restore (INV-1) | `vault-verify.ps1` |
+| [lib/store.js](lib/store.js) | Settings, oplog, recorded install deltas | `settings-verify.js`, `store-migration-verify.js` |
+| [lib/queue.js](lib/queue.js) | Bulk uninstall state machine | `queue-verify.js` |
+| [lib/snapshot.js](lib/snapshot.js) | Install snapshot diff, and what a reading *means* | `snapshot-verify.js` |
+| [lib/attribution.js](lib/attribution.js) | Directory ownership: owned / orphaned / unattributed / system | `attribution-verify.js` |
+| [lib/platforms.js](lib/platforms.js) | Storefront-managed uninstalls (dual-mode: also loaded by the page) | `platforms-verify.js` |
+
+The split exists so decisions are testable apart from rendering. `lib/attribution.js`
+never touches the disk — it is handed directory names, an installed-program map
+and recorded install deltas, and returns classifications. The expensive part
+(measuring directories) is a separate engine call made only against what
+classification could not explain.
+
 ## 2. The approval-gated uninstall loop
 
 The core pattern: **the tool proposes, the human disposes.** Two explicit human gates (marked ⛔) stand between "scan" and any deletion.
@@ -49,7 +84,7 @@ The core pattern: **the tool proposes, the human disposes.** Two explicit human 
 ```mermaid
 sequenceDiagram
     actor User
-    participant R as renderer.js wizard
+    participant R as renderer/wizard.js
     participant M as main.js
     participant P as scanner.ps1
 
@@ -76,7 +111,7 @@ sequenceDiagram
     R-->>User: summary + space reclaimed
 ```
 
-Wizard screens and step indicators are a declared state machine in [renderer.js](renderer.js) (`wizState.screens`: config → restore-loading → native-run → scan-loading → leftovers-tree → purge-loading → complete).
+Wizard screens and step indicators are a declared state machine in [renderer/wizard.js](renderer/wizard.js) (`wizState.screens`: config → restore-loading → native-run → scan-loading → leftovers-tree → purge-loading → complete).
 
 ## 3. IPC surface (complete)
 
@@ -110,6 +145,8 @@ Every destructive channel below is wrapped in `fullModeOnly()` ([main.js](main.j
 | `unlockPath(params)` | `unlock-path` | ✅ | `runPowerShell(…)`, oplogged | `Unlock-Path` (suspend-then-close via `ProcessFreezer`) |
 | `queueGet()` | `queue-get` | | `queue.getState()` | — |
 | `queueAdd(app)` / `queueRemove` / `queueClear` / `queueRetry` | `queue-*` | ✅ | `lib/queue.js` | — |
+| `snapshotBegin()` / `snapshotFinish()` / `snapshotState` / `snapshotCancel` | `snapshot-*` | | `install-snapshot` engine action, diffed by `lib/snapshot.js` | — |
+| `attributionScan()` | `attribution-scan` | | `install-snapshot` + `list-desktop` + `measure-paths`, classified by `lib/attribution.js` | — |
 | `queueStart({acknowledgedIds})` | `queue-start` | ✅ | `queue.start(...)` — per-item live re-read + trust gate before each uninstall | `read-uninstall-entry`, `run-uninstaller` per item |
 | `queuePause()` | `queue-pause` | ✅ | `queue.pause()` | — |
 | `onQueueUpdate(cb)` | `queue-update` (main→renderer push) | | every state transition, not polled | — |
@@ -158,10 +195,10 @@ Complete until the clean Windows 10 (1607+) and Windows 11 VM pass in TASK-17.
 
 | Area | Status |
 |---|---|
-| Stage 1 — inventory, wizard, 3-mode scan, review-gated purge | ✅ Implemented ([scanner.ps1](scanner.ps1), [renderer.js](renderer.js)) |
+| Stage 1 — inventory, wizard, 3-mode scan, review-gated purge | ✅ Implemented ([scanner.ps1](scanner.ps1), [renderer/wizard.js](renderer/wizard.js)) |
 | Stage 2 — Health Advisor (diagnostics, startup audit, redundancy) | ✅ Implemented (CHANGELOG 0.2.0) |
 | Quarantine-first deletion vault | ✅ Implemented — `Invoke-QuarantineItems` / [lib/vault.js](lib/vault.js) / [lib/store.js](lib/store.js); the direct-delete purge is gone |
-| Quarantine Manager tab (restore, Delete Forever, retention) | ✅ Implemented ([renderer.js](renderer.js) SCR-02) |
+| Quarantine Manager tab (restore, Delete Forever, retention) | ✅ Implemented ([renderer/quarantine-tasks.js](renderer/quarantine-tasks.js) SCR-02) |
 | Audit Mode enforced read-only tier + banner | ✅ Implemented — `fullModeOnly()` in [main.js](main.js) rejects every destructive channel; engine re-checks WindowsPrincipal |
 | Startup elevation offer / relaunch, plus an opt-in "start elevated automatically" setting | ⚠️ Implemented, UAC branches unverified — needs a human at the prompt (`vanish-uninstaller-69a`) |
 | Stage 3 — process monitor, unlocker, passive indicators, watchdog suspension | ✅ Implemented ([scanner.ps1](scanner.ps1) phase 2 block, SCR-03) |
@@ -170,7 +207,7 @@ Complete until the clean Windows 10 (1607+) and Windows 11 VM pass in TASK-17.
 | Driver Store package removal | 📐 Audit only — packages are listed but not removable; the sweeper is Stage 11 (Standard tier, Rule 16) |
 | REQ-19 ownership elevator | ⚠️ Engine + UI done — per-item offer on the purge summary; acceptance test (TrustedInstaller-owned fixture) deferred to the VM pass |
 | REQ-20 Force Uninstall for broken entries | ✅ Implemented — `Find-BrokenUninstallEntries` detects entries that cannot uninstall themselves; removal (including the uninstall key) routes through the vault |
-| Settings / About tabs | ✅ Implemented — real panels ([index.html](index.html), [renderer.js](renderer.js)) |
+| Settings / About tabs | ✅ Implemented — real panels ([index.html](index.html), [renderer/settings-about.js](renderer/settings-about.js)) |
 | Zero runtime network I/O | ✅ Enforced — CSP names no external origin (`default-src 'self'`, `connect-src 'none'`); icons are first-party ([assets/icons.css](assets/icons.css)) and type is the OS stack |
 | Data directory moved out of the shared Electron/Chromium profile | ✅ Implemented — state lives in a `vanish-state` subdirectory nothing but Vanish writes, migrated once from any earlier layout ([lib/store.js](lib/store.js); the shared-profile ACL conflict this fixes is `vanish-uninstaller-z2a`) |
 | `/cso` security audit — command injection, restore-destination guard, data-dir ACL, dependency pinning | ✅ Fixed — see the **Security** section of [CHANGELOG.md](CHANGELOG.md); `vanish-uninstaller-lwz`/`2xt`/`z2a`/`703` |
