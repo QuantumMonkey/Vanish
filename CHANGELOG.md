@@ -8,6 +8,121 @@ full decision rules.
 
 ---
 
+## [0.5.0] - 2026-08-13
+
+### Added -- UAC that is off, and UAC you are not allowed to turn on (`qyt`)
+
+Vanish could already see that User Account Control was disabled. It treated
+every disabled machine the same, and told all of them to turn it back on.
+
+* On a domain-joined machine managed by Group Policy, `EnableLUA` is very
+  often force-set, and a local admin who changes it by hand watches it revert
+  at the next policy refresh. "Turn UAC back on" is useful advice on a
+  personal machine and sends a corporate user in a circle.
+* Vanish now reports these as two separate causes and words them differently.
+  The managed one says the setting is **likely** enforced by your
+  organisation's policy, and points at whoever administers the PC.
+
+**"Likely" is the whole design, not hedging.** Windows does not record
+policy-origin on these registry values, so there is no flag that says "Group
+Policy did this". What Vanish actually knows is narrower than the conclusion:
+the machine is domain-joined, and an administrator token could not write the
+policy key. That is strong evidence and it is not proof, and the wording is
+not permitted to promote one to the other.
+
+Two changes from how this was specified, both about not overclaiming:
+
+* **The writability probe only runs when Vanish is already elevated.** An
+  unelevated process cannot write `HKLM` under any circumstances, so probing
+  from Audit Mode would have reported "locked by policy" on every ordinary
+  home machine in the world. Unelevated, the answer is `null` -- unknown, not
+  false. Checked live on this machine: not domain-joined, unelevated, and it
+  correctly claims nothing.
+* **It writes a scratch value and removes it, rather than toggling `EnableLUA`
+  and reverting.** Same key, same ACL, same answer -- but a failure halfway
+  through leaves a stray registry value instead of a machine with UAC off.
+
+### Fixed -- the Task Manager pane no longer sits on the Indicators column (`5z5`)
+
+The reported symptom was the details pane painting over the process table. It
+was not. Measured at the reported 1110x741 with a row selected: the container
+correctly shrank to 544px and **the table stayed at its 602px min-content**,
+overflowing into a horizontal scroller nobody notices, with Indicators clipped
+mid-word exactly where the pane begins. `min-width: 0` had already been tried,
+and the container was never what was at fault.
+
+* Both tables are `table-layout: fixed` now, so a table is exactly as wide as
+  its container at any window size and cannot overflow. The Process column
+  ellipsises and carries the full name in its tooltip -- it is the one column
+  whose content has no natural bound.
+* Column widths were rebalanced against the narrow state, and headers may wrap
+  rather than truncate, so no column name renders cut in half.
+* A selected pane got its padding back. Its base rule set `padding: 0` and the
+  `.active` rule never restored it, so the labels sat flush against the glass
+  edge -- plain in a screenshot, invisible to every width measurement.
+
+**This bug was reported twice because it was fixed once.** An earlier fix
+carried a comment saying it was scoped to the All Programs sidebar "since that
+is what was reported", explicitly leaving Task Manager alone. A fix whose
+comment names the sibling it skipped is a bug filed in prose instead of in the
+tracker. The collapse behaviour now belongs to the shared `.details-panel`
+class, the process pane declares nothing about its own width, and
+`test/details-panel-layout-verify.js` holds **both** panels to the rule at four
+window widths.
+
+That test earned its keep immediately. It found the same overflow in All
+Programs, which had never shown up by hand because its Name and Publisher
+columns are usually prose and wrap; seed it with an app whose name has no
+spaces and it overflowed at three of the four widths. It also found that
+`.apps-list-container` was missing the `min-width: 0` its sibling had carried
+for months -- the same omission, a third time, in the same file.
+
+### Fixed -- a guessed install date no longer looks like a recorded one (`c0y`)
+
+Found by auditing our own code for a mistake made in conversation: an install
+date read off an adjacent registry row and stated as fact, for a program whose
+`InstallDate` value is empty.
+
+Vanish had a guarded version of the same move in **two** places and labelled
+neither. A program that records no install date falls back to its uninstall key
+name when that name is eight digits; a Store app, which never records one,
+falls back to its install folder's creation time. Both are good estimates.
+Neither is a date the program recorded, and both used to render in the same
+text and the same styling as one that was -- so anyone sorting by age was
+mixing measurements with guesses and was not told which was which.
+
+* Dates now travel with their provenance. An inferred one is marked in the list
+  and spelled out as `(approx.)` in the details pane, with a tooltip naming
+  where it actually came from.
+* **The fallback stays.** A probable date beats "Unknown". It just has to admit
+  what it is -- the same rule the owned/orphaned/unattributed sizes already
+  follow.
+* A date arriving with no provenance at all is treated as inferred, never
+  silently promoted to recorded.
+* Sorting is unchanged, and sorts on the value rather than the marker.
+
+### Changed -- the GPU column leads with the card, not the number
+
+The adapter icon moved in front of the percentage. Which card is doing the work
+is what qualifies the figure, so it belongs in front of it the way a currency
+symbol does, rather than trailing it like a footnote. It stays an icon rather
+than a spelled-out vendor name: "NVIDIA" in a column that narrow wraps to a
+second line and makes every row taller for a word the icon colour already
+carries. The column was widened so the icon and the figure always share one
+line.
+
+### Still unproven, and stated plainly
+
+`1dq` shipped **detection**, not a proven mechanism fix. Vanish can no longer
+claim a tier switch happened when it did not -- it waits for `runas`, reads its
+exit code, records the direction it intended, and compares where it landed on
+the next boot. Whether `runas /trustlevel:0x20000` actually drops privilege on a
+given machine is **still not confirmed**, and one operator round trip is what
+settles it. Until then this release is honest about elevation reporting, not
+proven correct about elevation.
+
+---
+
 ## [0.4.0] - 2026-08-13
 
 ### Added — watch an install, and see what it left behind (`zrw`, `bu2`)

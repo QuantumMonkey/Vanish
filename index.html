@@ -238,10 +238,15 @@
                        construction, not something that needs its own filter-aware
                        logic. -->
                   <th><input type="checkbox" id="chk-select-all-apps" title="Select all shown"></th>
-                  <th style="width: 45%;">Name</th>
-                  <th style="width: 25%;">Type</th>
-                  <th style="width: 15%;">Date</th>
-                  <th style="width: 15%;">Size</th>
+                  <!-- 5z5: these sum to 94%, not 100%. The checkbox column
+                       ahead of them is a fixed 34px, and under the
+                       table-layout:fixed this table now uses, declared widths
+                       that total more than the table box overflow it instead
+                       of being treated as hints. -->
+                  <th style="width: 42%;">Name</th>
+                  <th style="width: 21%;">Type</th>
+                  <th style="width: 13%;">Date</th>
+                  <th style="width: 14%;">Size</th>
                 </tr>
               </thead>
               <tbody id="apps-tbody">
@@ -525,13 +530,24 @@
             <table class="apps-table process-table">
               <thead>
                 <tr>
-                  <th data-sort="name" style="width: 30%;">Process</th>
+                  <!-- 5z5: these percentages are authoritative now, not hints -
+                       .process-table is table-layout:fixed so the table can never
+                       exceed its container. Sized against the narrow state (the
+                       operator's 1110x741 with a row selected, which leaves the
+                       table 598px) so that every header still fits on one line
+                       there, including the sorted column's arrow. Process is
+                       deliberately the widest and the only one that ellipsises:
+                       it is the one column whose content has no natural bound. -->
+                  <th data-sort="name" style="width: 19%;">Process</th>
                   <th data-sort="pid" style="width: 8%;">PID</th>
                   <th data-sort="cpu" style="width: 10%;">CPU</th>
-                  <th data-sort="gpu" style="width: 10%;" title="Measured every 15 seconds, on its own slower clock than this table. The percentage is that program's work summed across all of the GPU's engines (3D, video, copy), so it will not always match Task Manager's own figure exactly.">GPU</th>
-                  <th data-sort="memory" style="width: 12%;">Memory</th>
-                  <th data-sort="io" style="width: 12%;">Disk I/O</th>
-                  <th style="width: 18%;">Indicators</th>
+                  <!-- Wider than CPU on purpose: this cell carries a vendor
+                       icon in front of the number, and at 10% the two wrapped
+                       onto separate lines. -->
+                  <th data-sort="gpu" style="width: 14%;" title="Measured every 15 seconds, on its own slower clock than this table. The percentage is that program's work summed across all of the GPU's engines (3D, video, copy), so it will not always match Task Manager's own figure exactly.">GPU</th>
+                  <th data-sort="memory" style="width: 15%;">Memory</th>
+                  <th data-sort="io" style="width: 14%;">Disk I/O</th>
+                  <th style="width: 20%;">Indicators</th>
                 </tr>
               </thead>
               <tbody id="process-tbody">

@@ -454,6 +454,7 @@ function gpuCellHtml(pid) {
   if (value != null) {
     const adapters = (entry && typeof entry === 'object' && entry.adapters) || null;
     let mark = '';
+    let more = '';
     if (adapters) {
       const entries = Object.entries(adapters).sort((a, b) => b[1] - a[1]);
       if (entries.length > 0) {
@@ -462,11 +463,17 @@ function gpuCellHtml(pid) {
         // A process using more than one adapter is NOT reduced to one - the
         // busier is shown and the count says there is more, rather than
         // quietly picking a winner.
-        const more = entries.length > 1 ? `<sup title="Also using ${entries.length - 1} other adapter(s)">+${entries.length - 1}</sup>` : '';
-        mark = ` <i class="fa-solid ${m.icon} gpu-row-mark${m.vendor ? ' is-' + m.vendor : ''}" title="${esc(m.label)}"></i>${more}`;
+        more = entries.length > 1 ? `<sup title="Also using ${entries.length - 1} other adapter(s)">+${entries.length - 1}</sup>` : '';
+        mark = `<i class="fa-solid ${m.icon} gpu-row-mark${m.vendor ? ' is-' + m.vendor : ''}" title="${esc(m.label)}"></i>`;
       }
     }
-    return `${esc(value.toFixed(1))}%${mark}`;
+    // The adapter mark leads, the number follows. It used to trail the
+    // percentage, which read as a footnote on the figure; which card is doing
+    // the work is the thing that qualifies the number, so it belongs in front
+    // of it the way a currency symbol does. It is an icon rather than a name
+    // in a column this narrow - "NVIDIA" spelled out wraps onto a second line
+    // and pushes the whole table taller for a word the colour already says.
+    return `${mark}${esc(value.toFixed(1))}%${more}`;
   }
   if (gpuSampledPids === null) {
     return '<span title="The first GPU measurement of this session has not finished yet.">measuring...</span>';
@@ -681,7 +688,11 @@ function renderProcessTable() {
         .join('');
       return `
         <tr class="app-row ${p.pid === selectedPid ? 'selected' : ''}" data-pid="${esc(p.pid)}">
-          <td style="font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
+          <!-- 5z5: the name cell ellipsises now that .process-table is
+               table-layout:fixed, so the full name has to survive somewhere -
+               a truncated process name is exactly the thing a user is trying
+               to read. -->
+          <td style="font-weight: 600; color: var(--text-white);" title="${esc(p.name)}">${esc(p.name)}</td>
           <td style="color: var(--text-gray);">${esc(p.pid)}</td>
           <td style="color: var(--text-gray);">${esc(p.cpuPercent.toFixed(1))}%</td>
           <td style="color: var(--text-gray);">${gpuCellHtml(p.pid)}</td>

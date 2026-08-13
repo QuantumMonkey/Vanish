@@ -259,9 +259,22 @@ function Get-UninstallRegistryEntries {
                     $displayName = [string]$key.GetValue('DisplayName')
                     if ([string]::IsNullOrWhiteSpace($displayName)) { continue }
 
+                    # c0y: the date and WHERE IT CAME FROM travel together.
+                    # The fallback below is defensible - a good many installers
+                    # do name their uninstall key with the install date - and it
+                    # is properly guarded, so a key named "RealPlayer 25.0"
+                    # correctly yields nothing rather than a fabricated date.
+                    # What was wrong was downstream: an inferred date and a
+                    # recorded one rendered identically, so a user sorting by
+                    # age or deciding whether something is old enough to remove
+                    # was acting on a mix of the two with no way to tell which
+                    # was which. Same discipline as bu2's owned/orphaned/
+                    # unattributed - a guess never wears the clothes of a fact.
                     $installDate = Format-InstallDate ([string]$key.GetValue('InstallDate'))
+                    $installDateSource = if ($installDate) { 'recorded' } else { $null }
                     if (-not $installDate -and $childName -match '^\d{8}$') {
                         $installDate = Format-InstallDate $childName
+                        if ($installDate) { $installDateSource = 'key-name' }
                     }
 
                     $sizeBytes = 0
@@ -278,6 +291,7 @@ function Get-UninstallRegistryEntries {
                         publisher       = if ($key.GetValue('Publisher')) { [string]$key.GetValue('Publisher') } else { "Unknown Publisher" }
                         version         = if ($key.GetValue('DisplayVersion')) { [string]$key.GetValue('DisplayVersion') } else { "Unknown" }
                         installDate     = $installDate
+                        installDateSource = $installDateSource
                         uninstallString = [string]$key.GetValue('UninstallString')
                         installLocation = [string]$key.GetValue('InstallLocation')
                         icon            = [string]$key.GetValue('DisplayIcon')
@@ -609,6 +623,7 @@ function Get-InstalledApps {
             publisher            = $e.publisher
             version              = $e.version
             installDate          = $e.installDate
+            installDateSource    = $e.installDateSource
             uninstallString      = $e.uninstallString
             installLocation      = $e.installLocation
             icon                 = $e.icon
@@ -664,6 +679,7 @@ function Get-WindowsFeatures {
                 publisher            = 'Microsoft Windows'
                 version              = $label
                 installDate          = $null
+                installDateSource    = $null
                 installLocation      = ''
                 registryPath         = ''
                 icon                 = ''
@@ -769,7 +785,14 @@ function Get-UwpApps {
                 name            = $displayName
                 publisher       = $pkg.PublisherId
                 version         = $pkg.Version
+                # c0y: this is the RealPlayer mistake in code form. $date is
+                # the install FOLDER's CreationTime, not an install record -
+                # exactly the kind of plausible-but-differently-sourced value
+                # that got stated as fact in conversation. It is a good
+                # estimate and worth showing; it is not a date the package
+                # recorded, and it no longer claims to be.
                 installDate     = $date
+                installDateSource = if ($date) { 'folder-created' } else { $null }
                 packageFullName = [string]$pkg.PackageFullName
                 uninstallString = $uninstallCmd
                 installLocation = $pkg.InstallLocation
@@ -1123,10 +1146,61 @@ function Get-UacDiagnostics {
         $isGroupMember = $null   # domain policy blocks the query, module missing, etc -- unknown
     }
 
+    # qyt: WHY does UAC read as off. On a domain-joined, GPO-managed machine
+    # EnableLUA is very often force-set by Group Policy and silently reverts on
+    # the next policy refresh if a local admin changes it by hand. That is a
+    # materially different situation from a home machine where somebody
+    # switched the same value off once and it stays off - in the first case the
+    # user cannot fix it and should not be told to try.
+    #
+    # Windows does not tag policy-origin on these values, so there is no clean
+    # flag to read. Two facts get us most of the way honestly:
+    $partOfDomain = $null
+    try {
+        $partOfDomain = [bool](Get-CimInstance -Query "SELECT PartOfDomain FROM Win32_ComputerSystem" -ErrorAction Stop).PartOfDomain
+    } catch {
+        $partOfDomain = $null   # unknown, not false (Rule 24)
+    }
+
+    # Can an ADMINISTRATOR token write the policy key? Two deliberate changes
+    # from how qyt was originally specified, both about not overclaiming:
+    #
+    # 1. This is only asked when the current process is ALREADY elevated. An
+    #    unelevated process cannot write HKLM under any circumstances, so
+    #    running the probe from Audit Mode would report "locked by policy" on
+    #    every ordinary home machine in the world - a confident, plausible,
+    #    completely wrong answer, which is the specific failure this issue
+    #    exists to prevent. Unelevated leaves it $null: unknown.
+    # 2. It writes a SCRATCH value and removes it, rather than setting and
+    #    reverting EnableLUA as the issue suggested. The scratch value proves
+    #    write access to the same key with the same ACL, and a failure halfway
+    #    through leaves a stray value instead of a machine with UAC off.
+    $policyWritable = $null
+    if ($isElevatedNow) {
+        $policyKey = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
+        $probeName = 'VanishWriteProbe'
+        try {
+            New-ItemProperty -Path $policyKey -Name $probeName -Value 1 -PropertyType DWord -Force -ErrorAction Stop | Out-Null
+            $policyWritable = $true
+        } catch {
+            $policyWritable = $false
+        } finally {
+            try { Remove-ItemProperty -Path $policyKey -Name $probeName -ErrorAction Stop } catch {}
+        }
+    }
+
+    # Deliberately named "likely". The heuristic can say "this looks locked
+    # down, and this machine is domain-joined"; it cannot say "Group Policy
+    # did this", and no wording built on it may claim otherwise.
+    $lockLikely = ($partOfDomain -eq $true -and $policyWritable -eq $false)
+
     return @{
-        enableLua     = $enableLua
-        isElevatedNow = $isElevatedNow
-        isGroupMember = $isGroupMember
+        enableLua      = $enableLua
+        isElevatedNow  = $isElevatedNow
+        isGroupMember  = $isGroupMember
+        partOfDomain   = $partOfDomain
+        policyWritable = $policyWritable
+        lockLikely     = $lockLikely
     }
 }
 
@@ -5561,7 +5635,11 @@ if ($Action) {
                 } elseif ($uac.isGroupMember -eq $false) {
                     $cause = 'not-admin'
                 } elseif ($uac.enableLua -eq $false) {
-                    $cause = 'uac-disabled'
+                    # qyt: same machine fact, two different things to tell the
+                    # user. "Turn UAC back on" is useful advice on a personal
+                    # machine and useless on a managed one, where the setting
+                    # reverts on the next policy refresh.
+                    $cause = if ($uac.lockLikely) { 'uac-disabled-locked' } else { 'uac-disabled' }
                 }
                 @{
                     success         = $false

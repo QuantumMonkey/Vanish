@@ -33,6 +33,9 @@ $suites = @(
     @{ Name = "Network attribution (bfh.1)";   Kind = "ps";       Path = "test\network-verify.ps1" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },
     @{ Name = "Security regressions";          Kind = "ps";       Path = "test\security-verify.ps1" },
+    @{ Name = "Details panel layout (5z5)";    Kind = "electron"; Path = "test/details-panel-layout-verify.js" },
+    @{ Name = "Install date provenance (c0y)"; Kind = "electron"; Path = "test/install-date-provenance-verify.js" },
+    @{ Name = "UAC policy lock (qyt)";          Kind = "node";     Path = "test/uac-lock-verify.js" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
     @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" }
 )

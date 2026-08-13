@@ -545,9 +545,18 @@ body::before {
   gap: 24px;
 }
 
+/* 5z5, and this is the third instance of the same omission in this file.
+   .process-list-container carries min-width:0 with a comment explaining why
+   a flex item defaults to min-width:auto and refuses to shrink below its
+   content. This container is the same kind of flex item beside the same
+   kind of details panel and never got it, so with the tables now on
+   table-layout:fixed it stayed 2px wider than the space it had. Two pixels
+   is not the point; being the only one of the pair without the fix is. */
 .apps-list-container {
   flex: 1;
+  min-width: 0;
   overflow-y: auto;
+  overflow-x: auto;
   padding-right: 8px;
 }
 
@@ -587,6 +596,25 @@ body::before {
   padding-left: 12px;
   padding-right: 0;
   text-align: center;
+}
+
+/* 5z5: this table has the identical overflow, and it was found by writing
+   the regression test against the CLASS rather than against the panel that
+   was reported. It never showed up by hand because its Name and Publisher
+   columns are usually prose and wrap; seed it with an app whose name has no
+   spaces ("python3.11-3.11.9-amd64", "Microsoft.WindowsCommunicationsApps")
+   and it overflowed its container at 1110, 1000 and 1280px exactly the way
+   Task Manager did. Fixing the reported instance and leaving this one is
+   precisely the habit that produced 5z5 in the first place, so it gets the
+   same treatment: fixed layout, and the Name column ellipsises because it
+   is the one column with no natural bound. */
+#all-apps-table {
+  table-layout: fixed;
+}
+#all-apps-table tbody td:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The bulk row reuses .btn-clear-filters-inline so it cannot change the height
@@ -630,6 +658,22 @@ body::before {
   z-index: 2;
   background: rgba(11, 15, 25, 0.92);
   backdrop-filter: blur(12px);
+}
+
+/* c0y: a value Vanish worked out, marked as such. Deliberately quiet - the
+   claim is "approximate", not "suspect", and a loud warning colour on a date
+   that is probably right would be its own kind of dishonesty. The tilde
+   carries a title naming exactly where the date came from, and the details
+   pane spells out "(approx.)" in full because it has room for words. */
+.inferred-mark {
+  margin-left: 3px;
+  color: var(--text-muted);
+  font-weight: 600;
+  cursor: help;
+}
+.details-value.inferred-value {
+  color: var(--text-gray);
+  cursor: help;
 }
 
 .app-row {
@@ -759,12 +803,17 @@ body::before {
   pointer-events: none;
 }
 
-/* ri6: before any selection this panel was invisible (opacity:0) but still
-   claiming its full clamp() width from the workspace, permanently squeezing
-   the app list for nothing. Collapse it to zero out of the layout instead -
-   scoped to the All Programs sidebar specifically, since that is what was
-   reported; Task Manager's process-details panel is unchanged. */
-#details-sidebar:not(.active) {
+/* An invisible panel (opacity:0) that still claims its clamp() width is dead
+   space on a wide window and stolen space on a narrow one. Collapse it out of
+   the layout instead.
+
+   5z5: this rule was originally written for #details-sidebar alone, "since
+   that is what was reported", with a comment noting Task Manager's pane was
+   deliberately left alone. The operator then reported Task Manager. A fix
+   whose comment names the sibling it skipped is a bug filed in prose, so the
+   behaviour now belongs to the CLASS and every .details-panel gets it. Only
+   the active width is allowed to differ per panel. */
+.details-panel:not(.active) {
   width: 0;
   padding: 0;
   border-width: 0;
@@ -2577,27 +2626,88 @@ input:checked + .slider:before {
   overflow-x: auto;
   padding: 0 8px 8px;
 }
-.process-table th { cursor: pointer; user-select: none; white-space: nowrap; }
-.process-table th[data-sort]:hover { color: var(--text-white); }
-.process-table th.sorted::after { content: " \25BC"; font-size: 8px; color: var(--color-primary); }
-.process-table th.sorted.asc::after { content: " \25B2"; }
-.process-table td { font-size: 12px; }
-/* aaw/layout: the details pane takes space only when a process is selected.
-   It previously reserved 320px permanently - dead space on a wide window, and
-   on a narrow one it stole the table's width and pushed the Indicators column
-   out of view entirely. width:0 rather than display:none so the panel keeps
-   its own scroll/transition behaviour and simply has no width to give away. */
-.process-details {
-  width: 0;
-  flex-shrink: 0;
-  overflow: hidden;
-  padding: 0;
-  border: 0;
-  transition: width var(--transition-smooth);
+
+/* 5z5, and this is the cause rather than the one that was assumed. min-width:0
+   above was necessary and not sufficient: the container DID shrink, and the
+   table refused to follow it. Measured at the operating 1110x741 with a row
+   selected - container content box 544px, table 602px, table right edge x=850
+   against a container ending at x=790. The pane was never painting over
+   anything. The table was overflowing into a horizontal scroller nobody
+   notices, and the Indicators column was clipped mid-word at the container
+   edge, which looks identical to being covered.
+
+   No single column owned those 602px: six nowrap headers plus a Process
+   column whose content is a filename with no spaces to break at, so the one
+   column that should have given ground could not. All Programs never hits
+   this because its Name and Publisher columns are prose and wrap.
+
+   table-layout:fixed makes the declared th percentages authoritative, so the
+   table is exactly as wide as its container at every window size and cannot
+   overflow at all; the name cell then ellipsises instead of setting a floor.
+   renderer/core.js puts the full name in the cell title, so nothing is lost.
+   test/details-panel-layout-verify.js holds BOTH tables to this rule, since
+   filing the sibling instead of the class is what caused this bug twice. */
+.process-table {
+  table-layout: fixed;
 }
 
+/* 5z5: 16px of side padding is right for a five-column table and ruinous
+   for a seven-column one - it spent 224px of a 504px table on whitespace at
+   a 1000px window, which is why Memory and Indicators still rendered
+   truncated after the widths were rebalanced. 10px gives those two columns
+   back the ~84px they needed and changes nothing about the columns fitting,
+   because table-layout:fixed already guarantees that. */
+.process-table th,
+.process-table td {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.process-table tbody td:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The GPU cell is an adapter icon followed by a figure, and those two are one
+   reading - "12.1% on the NVIDIA card", not two facts stacked. The column is
+   sized to fit them side by side; nowrap is the guarantee that a narrower
+   window breaks something visible rather than silently splitting the icon
+   away from the number it qualifies. */
+.process-table tbody td:nth-child(4) {
+  white-space: nowrap;
+}
+/* 5z5: nowrap here used to be load-bearing - under table-layout:auto it was
+   what reserved each column its min-content width. Under table-layout:fixed
+   the declared percentages decide the widths and nowrap can no longer widen
+   anything; all it can still do is clip a header mid-word, which is exactly
+   what the operator screenshotted ("MEMOR", "DISK I/"). Wrapping is the
+   safety valve now: the percentages below are sized so every header fits on
+   one line at the narrow state, and a window narrower still gets a two-line
+   header rather than a truncated one. */
+.process-table th { cursor: pointer; user-select: none; }
+.process-table th[data-sort]:hover { color: var(--text-white); }
+/* 5z5: a non-breaking space, not a plain one. Now that headers are allowed
+   to wrap, a plain space let the sort arrow drop onto a second line and made
+   the whole header row 17px taller for every column - permanently, since one
+   column is always sorted. */
+.process-table th.sorted::after { content: "\00A0\25BC"; font-size: 8px; color: var(--color-primary); }
+.process-table th.sorted.asc::after { content: "\00A0\25B2"; }
+.process-table td { font-size: 12px; }
+/* 5z5: this pane now declares NOTHING about its own width. Everything it used
+   to restate - the collapse when inactive, the padding, the border, and
+   finally the width itself - lives on .details-panel, so both panels are one
+   behaviour with one place to change it.
+
+   The hard-coded 320px was the last special-case and it was also the
+   expensive one: at the 1110x741 the operator reported, it took 320 of the
+   workspace's 870px and left 544px for seven columns, which is not enough to
+   spell out their own headers. The class clamp gives up 250px there and the
+   full 340px on a wide window, which is what the All Programs sidebar has
+   always done. Its old base rule also restated padding:0/border:0 and never
+   restored them in .active, so a SELECTED pane rendered with its labels flush
+   against the glass edge - plain in the screenshot, invisible to every width
+   measurement taken of it. */
 .process-details.active {
-  width: 320px;
   overflow-y: auto;
 }
 .indicator-chip {
@@ -2982,8 +3092,9 @@ input:checked + .slider:before {
    mark reads as NVIDIA and a red one as AMD at a glance, without anyone having
    to parse a label. Neutral grey when the LUID matched no known card, because
    an unresolved adapter must not borrow either brand. */
+/* The mark leads the number now, so the gap goes on the other side. */
 .gpu-row-mark {
-  margin-left: 5px;
+  margin-right: 5px;
   font-size: 11px;
   color: var(--text-muted);
   vertical-align: baseline;

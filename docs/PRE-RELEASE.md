@@ -22,7 +22,7 @@ and the waivers previously recorded against 1.0 move to 0.9's gate instead.
 
 | Version | Theme | Contains |
 | --- | --- | --- |
-| **0.5** | Elevation you can trust | `1dq` (de-elevation reports success without verifying it), `qyt` (UAC disabled vs locked by policy) |
+| **0.5** | Elevation you can trust | SHIPPED 2026-08-13. `1dq` (de-elevation reports success without verifying it), `qyt` (UAC disabled vs locked by policy), plus `5z5` and `c0y` as they were open bugs |
 | **0.6** | Say which, and say what matters | `aaw` (GPU column names the adapter), `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
 | **0.7** | Space you can actually recover | `7v3` (orphaned MSI/MSP cache, 1.2 GB measured), `be8` (firewall rule orphans), `ztl` (SharedDLLs + ghost PnP) |
 | **0.8** | Other people's tools, used properly | `7sl` (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
@@ -159,6 +159,26 @@ Phase 0 settles what that flakiness actually was.
 - [x] Version bumped to 0.4.0, CHANGELOG dated, tagged, pushed.
 - [x] Known-limitations note in the README covering the three waived gates:
       unsigned binary, no clean-VM pass, single-user acceptance.
+
+#### 0.5.0 -- 2026-08-13
+
+- [x] `npm test` 660 passed, 0 failed. Two suites report NOT RUN and always
+      have: `vault-ipc-verify` and `phase4-ipc-verify` both refuse outside
+      Full Mode and need an elevated shell. That gap is `9sy`, not a
+      regression.
+- [x] `qyt` shipped, which was 0.5's remaining scope. `1dq` closed 2026-08-13.
+- [x] `5z5` and `c0y` fixed and pinned by new suites
+      (`details-panel-layout-verify`, `install-date-provenance-verify`,
+      `uac-lock-verify`).
+- [ ] **The de-elevation round trip is STILL NOT DONE, and 0.5 does not claim
+      it.** The theme is "elevation you can trust" and what shipped is
+      elevation that cannot lie to you about what happened -- detection, not
+      a proven mechanism. The oplog's last entry is still
+      `2026-08-13T04:37:29` from a pre-fix build. Until an operator does one
+      round trip on a 0.5.0 artifact, whether `runas /trustlevel:0x20000`
+      actually drops privilege on this machine remains unknown, and `9rv`
+      stays open by its own design note: do not build more diagnostics
+      before taking the one measurement.
 
 ---
 

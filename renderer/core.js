@@ -561,8 +561,23 @@ function elevationFailureMessage(cause) {
         'Sign in with an administrator account, or ask one to add this account to the Administrators group.';
     case 'uac-disabled':
       return 'User Account Control is turned off on this machine, so Windows never showed a permission ' +
-        "prompt to accept. Vanish stays in Audit Mode - check this PC's UAC/Group Policy settings, or " +
+        "prompt to accept. Vanish stays in Audit Mode - turn UAC back on in Windows' own settings, or " +
         'sign in from an account that is already an administrator.';
+    case 'uac-disabled-locked':
+      // qyt: the same machine fact as above with different advice attached,
+      // because on a managed machine "turn UAC back on" is advice the user
+      // cannot act on - the setting reverts at the next policy refresh.
+      //
+      // "Likely" is load-bearing and is not hedging for its own sake. Windows
+      // does not record whether these values came from Group Policy, so what
+      // Vanish actually knows is narrower than the conclusion: this machine is
+      // domain-joined AND an administrator token could not write the policy
+      // key. That is strong evidence and it is not proof, and the wording is
+      // not allowed to promote one to the other.
+      return 'User Account Control is turned off on this machine, so Windows never showed a permission ' +
+        'prompt to accept - and this looks like a managed machine where that setting is likely enforced ' +
+        "by your organisation's policy rather than chosen locally, so changing it by hand would probably " +
+        'be undone. Vanish stays in Audit Mode. Ask whoever administers this PC.';
     case 'engine-error':
       return "Vanish couldn't reach its own scanning engine to request elevation. Try restarting Vanish.";
     case 'declined':
@@ -666,6 +681,48 @@ function formatBytes(bytes, decimals = 2) {
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+}
+
+// c0y: where an install date actually came from, in one place, so the table
+// and the details pane cannot drift apart about it.
+//
+// This exists because of a mistake made in conversation, not one found in
+// code: an install date was read off an adjacent registry row and stated as
+// fact. Auditing our own code for the same move found it twice. A date the
+// program recorded and a date Vanish worked out from a key name or a folder's
+// creation time were rendered identically, in the same styling, with nothing
+// separating them - so a user sorting by age was mixing measurements and
+// guesses without being told.
+//
+// The fallbacks stay. A probable date beats "Unknown". It just has to admit
+// what it is, which is the same rule bu2 enforces for owned/orphaned/
+// unattributed sizes.
+const INSTALL_DATE_SOURCES = {
+  recorded: {
+    inferred: false,
+    note: 'Recorded by the program itself when it was installed.',
+  },
+  'key-name': {
+    inferred: true,
+    note: 'Approximate. This program recorded no install date, so Vanish read this from its uninstall entry being named as a date. Many installers do name it that way, but it is Vanish working it out, not the program saying so.',
+  },
+  'folder-created': {
+    inferred: true,
+    note: 'Approximate. A Store app records no install date, so this is when its folder was created. That is usually the install, but a repair or an update can move it.',
+  },
+};
+
+function installDateProvenance(app) {
+  // An older engine build, or any path that never set the field, sends a date
+  // with no source. Treat that as unknown provenance rather than as recorded:
+  // claiming a date is measured when nothing said so is the exact fault here.
+  if (!app || !app.installDate) return { inferred: false, note: '' };
+  const known = INSTALL_DATE_SOURCES[app.installDateSource];
+  if (known) return known;
+  return {
+    inferred: true,
+    note: 'Approximate. Vanish could not establish where this date came from.',
+  };
 }
 
 // Everything the user would call an application. Components and update rows are
@@ -849,6 +906,7 @@ function renderTable(apps) {
 
     const sizeStr = app.sizeBytes ? formatBytes(app.sizeBytes, 1) : 'Unknown';
     const dateStr = app.installDate ? app.installDate : 'Unknown';
+    const dateProv = installDateProvenance(app);
     const checked = bulkSelectedAppIds.has(app.id);
 
     row.innerHTML = `
@@ -867,7 +925,7 @@ function renderTable(apps) {
           app.type === 'UWP' ? 'Windows App' : app.type === 'Feature' ? 'Feature' : 'Desktop'
         }</span>
       </td>
-      <td style="color: var(--text-gray); font-size: 13px;">${esc(dateStr)}</td>
+      <td style="color: var(--text-gray); font-size: 13px;"${dateProv.inferred ? ` title="${esc(dateProv.note)}"` : ''}>${esc(dateStr)}${dateProv.inferred ? '<span class="inferred-mark" aria-label="approximate">~</span>' : ''}</td>
       <td style="color: var(--text-gray); font-size: 13px; font-weight: 500;">${esc(sizeStr)}</td>
     `;
 
@@ -920,7 +978,14 @@ function selectApp(app, rowElement) {
   elements.detTitle.textContent = app.name;
   elements.detPublisher.textContent = app.publisher;
   elements.detVersion.textContent = app.version;
-  elements.detDate.textContent = app.installDate || 'Unknown';
+  // c0y: the details pane has room for words, so it uses them rather than a
+  // mark the user has to decode.
+  const detProv = installDateProvenance(app);
+  elements.detDate.textContent = app.installDate
+    ? (detProv.inferred ? `${app.installDate} (approx.)` : app.installDate)
+    : 'Unknown';
+  elements.detDate.title = app.installDate ? detProv.note : '';
+  elements.detDate.classList.toggle('inferred-value', detProv.inferred);
   elements.detSize.textContent = app.sizeBytes ? formatBytes(app.sizeBytes, 1) : 'Unknown';
   elements.detPath.textContent = app.installLocation || 'Unknown';
   elements.detReg.textContent = app.registryPath || 'Unknown';
