@@ -1204,6 +1204,99 @@ function Get-UacDiagnostics {
     }
 }
 
+# 5.7 De-elevation mechanisms (9vp).
+#
+# MEASURED, not reasoned about. test/deelevation-probe.ps1 was run from an
+# elevated shell on the operator's machine 2026-08-13 and probed three ways
+# of starting a process without the privilege the caller holds:
+#
+#   runas.exe /trustlevel:0x20000              NO RESULT (exit 1)
+#   explorer token, CreateProcessWithTokenW    NO RESULT (child died 0xc0000142)
+#   scheduled task, RunLevel Limited           DROPPED PRIVILEGE
+#                                              Medium Mandatory Level, S-1-16-8192
+#
+# That closes a question five sessions could not: runas /trustlevel is the
+# Windows-documented mechanism for this and it does not work here. In the app
+# it was worse than failing - it exited 0, so 0.5.0 reported a successful
+# de-elevation and came back Full Mode, which is the relaunch-deelevated-
+# mismatch record in the operator's oplog at 14:17:31.
+#
+# So the scheduled task leads now and runas is the fallback, not the reverse.
+# runas is kept because it is documented, needs no task registration, and may
+# well work on machines where SAFER policy is intact - but it has to prove
+# itself rather than be assumed.
+
+# Evidence that the relaunch HAPPENED, which is the whole 1dq lesson: a new
+# process for this executable that did not exist before we asked. Neither an
+# exit code nor a task state proves a window is coming up; a new PID does.
+function Wait-ForNewProcess {
+    param([string]$ExePath, [int[]]$BeforePids, [int]$TimeoutMs = 15000)
+    $name = [System.IO.Path]::GetFileNameWithoutExtension($ExePath)
+    $deadline = (Get-Date).AddMilliseconds($TimeoutMs)
+    while ((Get-Date) -lt $deadline) {
+        $now = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+        $new = @($now | Where-Object { $BeforePids -notcontains $_ })
+        if ($new.Count -gt 0) { return $new[0] }
+        Start-Sleep -Milliseconds 250
+    }
+    return $null
+}
+
+function Invoke-DeelevatedViaScheduledTask {
+    param([string]$ExePath, [string[]]$ArgList)
+
+    $taskName = "VanishAuditModeRelaunch"
+    $registered = $false
+    try {
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($ExePath)
+        $beforePids = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+
+        $actionArgs = @{ Execute = $ExePath }
+        if ($ArgList -and @($ArgList).Count -gt 0) {
+            $actionArgs.Argument = ((@($ArgList) | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+        }
+        $workDir = Split-Path -Parent $ExePath
+        if ($workDir) { $actionArgs.WorkingDirectory = $workDir }
+        $action = New-ScheduledTaskAction @actionArgs
+
+        # RunLevel Limited is the whole point: the task runs as this user
+        # WITHOUT the elevation this process holds. Interactive logon so it
+        # lands in the logged-on session and can actually paint a window.
+        $principal = New-ScheduledTaskPrincipal `
+            -UserId ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME) `
+            -LogonType Interactive -RunLevel Limited
+
+        # ExecutionTimeLimit Zero means UNLIMITED, and it is not optional: the
+        # default is 72 hours, after which Task Scheduler would terminate the
+        # app out from under someone who simply left it open.
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+            -ExecutionTimeLimit ([TimeSpan]::Zero)
+
+        Register-ScheduledTask -TaskName $taskName -Action $action `
+            -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+        $registered = $true
+
+        Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+        $newPid = Wait-ForNewProcess -ExePath $ExePath -BeforePids $beforePids
+        if (-not $newPid) {
+            return @{ success = $false; method = "scheduled-task"; error = "The task was registered and started, but no new process appeared within 15 seconds." }
+        }
+        return @{ success = $true; method = "scheduled-task"; newPid = $newPid }
+    } catch {
+        return @{ success = $false; method = "scheduled-task"; error = $_.Exception.Message }
+    } finally {
+        # Always remove it. The started process is independent of the task, so
+        # unregistering does not disturb it - but a task left behind would show
+        # up in the user's Task Scheduler as something Vanish installed, which
+        # is exactly the kind of residue this app exists to object to.
+        if ($registered) {
+            try { Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction Stop } catch { }
+        }
+    }
+}
+
 # ==========================================
 # STAGE 2 - AUDIT & HEALTH ADVISOR BACKEND
 # ==========================================
@@ -5577,6 +5670,21 @@ if ($Action) {
                 # captured because runas reports its real reason there (the
                 # Secondary Logon service being unavailable, a trust level the
                 # policy refuses, a target it cannot open).
+                # 9vp: try the mechanism that was MEASURED to work here first.
+                # See Invoke-DeelevatedViaScheduledTask for the probe results.
+                $taskResult = Invoke-DeelevatedViaScheduledTask -ExePath $Params.exePath -ArgList $argList
+                if ($taskResult.success) {
+                    $taskResult | ConvertTo-Json -Compress
+                    return
+                }
+
+                # Fall through to runas, and carry WHY the first one failed so a
+                # failure report names both attempts rather than only the last.
+                $taskError = $taskResult.error
+
+                $name = [System.IO.Path]::GetFileNameWithoutExtension($Params.exePath)
+                $beforePids = @(Get-Process -Name $name -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id)
+
                 $errFile = [System.IO.Path]::GetTempFileName()
                 $outFile = [System.IO.Path]::GetTempFileName()
                 try {
@@ -5593,17 +5701,36 @@ if ($Action) {
                     $detail = (@($stderr, $stdout) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() }) -join ' '
 
                     if ($proc.ExitCode -ne 0) {
+                        $why = if ($detail) { $detail } else { "runas.exe exited with code $($proc.ExitCode)." }
                         @{
-                            success  = $false
-                            exitCode = $proc.ExitCode
-                            error    = if ($detail) { $detail } else { "runas.exe exited with code $($proc.ExitCode)." }
+                            success   = $false
+                            method    = "runas-trustlevel"
+                            exitCode  = $proc.ExitCode
+                            taskError = $taskError
+                            error     = "Both ways of restarting without administrator rights failed. Scheduled task: $taskError Then runas: $why"
                         } | ConvertTo-Json -Compress
                     } else {
-                        # Exit code 0 means runas accepted the request. It still
-                        # does not prove the new process is at medium integrity -
-                        # only the next launch's own tier check can prove that,
+                        # 9vp: exit code 0 from runas is NOT evidence, and
+                        # treating it as evidence is what produced the
+                        # relaunch-deelevated-mismatch in the operator's oplog -
+                        # runas exited 0 and Windows started the process elevated
+                        # anyway. So the fallback now has to show a new process
+                        # exists, the same standard the scheduled-task path meets.
+                        # Whether that process is actually at medium integrity is
+                        # still only provable by the next launch's own tier check,
                         # which is what the relaunch-intent marker is for.
-                        @{ success = $true; exitCode = 0; detail = $detail } | ConvertTo-Json -Compress
+                        $fallbackPid = Wait-ForNewProcess -ExePath $Params.exePath -BeforePids $beforePids
+                        if (-not $fallbackPid) {
+                            @{
+                                success   = $false
+                                method    = "runas-trustlevel"
+                                exitCode  = 0
+                                taskError = $taskError
+                                error     = "Both ways of restarting without administrator rights failed. Scheduled task: $taskError Then runas reported success but no new process appeared within 15 seconds."
+                            } | ConvertTo-Json -Compress
+                        } else {
+                            @{ success = $true; method = "runas-trustlevel"; exitCode = 0; newPid = $fallbackPid; detail = $detail } | ConvertTo-Json -Compress
+                        }
                     }
                 } finally {
                     Remove-Item -LiteralPath $errFile, $outFile -Force -ErrorAction SilentlyContinue

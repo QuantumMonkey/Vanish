@@ -911,7 +911,11 @@ async function attemptDeelevatedRelaunch(trigger) {
         store.writeJsonAtomic(store.elevationAttemptPath(), {
           attemptedAt: new Date().toISOString(),
           trigger: 'user-click',
-          direction: 'deelevate'
+          direction: 'deelevate',
+          // 9vp: WHICH mechanism claimed the success. There are two now, and
+          // a mismatch record that cannot say which one produced it sends the
+          // next session back to guessing.
+          method: res.method || null
         });
       } catch {
         // Diagnostic-only; never block a real de-elevation.
@@ -922,9 +926,18 @@ async function attemptDeelevatedRelaunch(trigger) {
       tier: currentTier,
       items: {},
       outcome: res && res.success ? 'success' : 'error',
-      meta: { trigger, error: res && res.error }
+      meta: {
+        trigger,
+        // The 2026-08-13 record said only "success" and left five sessions
+        // with nothing to work from. Say which mechanism ran, and what the
+        // evidence for it was.
+        method: (res && res.method) || null,
+        newPid: (res && res.newPid) || null,
+        taskError: (res && res.taskError) || null,
+        error: res && res.error
+      }
     });
-    if (res && res.success) return { success: true };
+    if (res && res.success) return { success: true, method: res.method, newPid: res.newPid };
     return { success: false, error: (res && res.error) || 'Could not restart without administrator rights.' };
   } catch (error) {
     // runPowerShell() itself threw - the engine couldn't be reached, not a

@@ -8,6 +8,63 @@ full decision rules.
 
 ---
 
+## [0.5.2] - 2026-08-13
+
+### Fixed -- de-elevation actually de-elevates (`9vp`)
+
+Five sessions of investigation ended in one measurement. Run from an elevated
+shell on the operator's machine, `test/deelevation-probe.ps1` tried three ways
+of starting a process without the privilege the caller holds:
+
+| Mechanism | Result |
+| --- | --- |
+| `runas.exe /trustlevel:0x20000` | no result, exit 1 |
+| explorer token via `CreateProcessWithTokenW` | no result, child died `0xc0000142` |
+| scheduled task at `RunLevel Limited` | **dropped privilege** -- Medium Mandatory Level, `S-1-16-8192` |
+
+`runas /trustlevel` is the Windows-documented mechanism for exactly this
+operation, dating to the original UAC design, and it does not work here. In the
+app it did something worse than fail: it **exited 0**, so 0.5.0 reported a
+successful de-elevation and came back in Full Mode. That is the
+`relaunch-deelevated-mismatch` in the operator's oplog at 14:17:31.
+
+So the scheduled task leads now and `runas` is the fallback rather than the
+reverse. `runas` is kept because it is documented, needs no task registration,
+and may well work where SAFER policy is intact -- but it has to prove itself.
+
+**A launch is no longer a success until a process exists.** Both mechanisms now
+wait for a new process for that executable and report its PID. An exit code
+proved nothing, which is precisely how this survived five sessions, and it is
+not accepted as evidence by either path any more.
+
+Two details that would have bitten later, both asserted in the suite:
+
+* The task is registered with an **unlimited** execution time limit. The default
+  is 72 hours, after which Task Scheduler would have terminated the app out
+  from under anyone who simply left it open.
+* The task is unregistered in a `finally`. The launched process is independent
+  of it, so cleanup costs nothing -- and a task left behind would appear in the
+  user's Task Scheduler as something Vanish installed, which is the exact kind
+  of residue this app exists to object to.
+
+**The record now says which mechanism ran.** The 2026-08-13 oplog entry said
+only `success` and left five sessions with nothing to work from. Both the
+relaunch-intent marker and the oplog carry the method, the PID, and -- when
+everything fails -- the reason from *both* attempts rather than only the last.
+
+### Still open
+
+The operator also reported that "Restart as administrator" from the Audit Mode
+banner comes back in Audit Mode. That is filed separately (`adg`) with its
+evidence gap stated rather than a cause invented: the oplog carries no
+`relaunch-elevated` entry at all, and no `app-start` at `tier=audit` since
+2026-08-07, so the banner should not have been on screen to click. The likeliest
+reading is that it was this same fault seen from the other side -- the app never
+reached Audit Mode -- in which case it closes with this fix. That is a
+hypothesis and is labelled as one.
+
+---
+
 ## [0.5.1] - 2026-08-13
 
 ### Fixed -- every per-process GPU figure was missing, and 0.5.0 shipped it
