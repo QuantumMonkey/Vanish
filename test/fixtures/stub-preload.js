@@ -181,6 +181,19 @@ contextBridge.exposeInMainWorld('api', {
   }),
   snapshotState: stub('snapshotState', { watching: false, takenAt: null }),
   snapshotCancel: stub('snapshotCancel', { success: true }),
+  attributionScan: stub('attributionScan', {
+    success: true,
+    counts: { owned: 3, orphaned: 1, unattributed: 1, system: 2 },
+    reclaimableBytes: 1048576,
+    measuredCount: 2,
+    recordedInstallCount: 1,
+    results: [
+      { path: 'C:\\Program Files\\GoneApp', state: 'orphaned', owner: 'GoneApp',
+        evidence: 'recorded', confidence: 'certain', sizeBytes: 1048576, measured: true, partial: false },
+      { path: 'C:\\Program Files\\Mystery', state: 'unattributed', owner: null,
+        evidence: 'none', confidence: null, sizeBytes: 2048, measured: true, partial: true }
+    ]
+  }),
   queueGet: stub('queueGet', { items: [], running: false, paused: false, counts: {} }),
   queueAdd: stub('queueAdd', { success: true }),
   queueRemove: stub('queueRemove', { success: true }),

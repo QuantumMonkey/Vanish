@@ -640,6 +640,33 @@
             <div id="snapshot-result"></div>
           </div>
 
+          <!-- bu2: size attribution. Sits beside "Watch an install" because the
+               two are one story: zrw records who created a folder, this reports
+               what those folders cost and which of them outlived their program.
+               Deliberately not a treemap - "what is big" is answered by
+               WinDirStat, WizTree and Windows' own Storage page, and the half
+               none of them can answer is whose bytes these are. -->
+          <div class="snapshot-card" id="attribution-section">
+            <div class="snapshot-card-head">
+              <div class="snapshot-card-title">
+                <i class="fa-solid fa-hard-drive"></i>
+                Where your disk space went
+              </div>
+              <div class="snapshot-card-actions">
+                <button class="btn-sec btn-compact" id="btn-attribution-scan">
+                  <i class="fa-solid fa-magnifying-glass"></i> Scan
+                </button>
+              </div>
+            </div>
+            <p class="snapshot-card-lede">
+              Matches the folders in Program Files and your app data against the programs actually
+              installed on this PC. Folders left behind by a program you no longer have are named as
+              such; folders Vanish cannot explain are listed separately and never presented as
+              rubbish. Reading only - nothing is removed here.
+            </p>
+            <div id="attribution-result"></div>
+          </div>
+
           <div id="cleaner-sections"></div>
         </div>
       </div><!-- /clean-panel -->

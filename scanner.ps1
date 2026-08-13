@@ -4924,6 +4924,126 @@ function ConvertTo-FindingList {
     return ,$list
 }
 
+# The directories any installed program could plausibly own, top level only.
+# Shared by zrw's snapshot and bu2's attribution scan: if these two ever
+# disagreed about scope, a directory recorded by a monitored install could be
+# invisible to the scan that is supposed to attribute it.
+function Get-TopLevelProgramDirs {
+    $roots = @(
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:ProgramData,
+        $env:LOCALAPPDATA,
+        $env:APPDATA
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
+
+    $dirs = [System.Collections.Generic.List[string]]::new()
+    foreach ($root in $roots) {
+        try {
+            Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue |
+                ForEach-Object { $dirs.Add($_.FullName) }
+        } catch { }
+    }
+    return $dirs
+}
+
+# bu2: measure specific directories, and ONLY the ones asked for.
+#
+# The whole reason this takes a path list rather than scanning a tree is that
+# attribution is cheap and measurement is expensive. Classifying every
+# top-level directory against the installed-programs map is milliseconds;
+# walking all of them is minutes; walking the handful that came back orphaned
+# or unexplained is seconds. The caller decides what is worth the walk.
+#
+# Uses .NET enumeration rather than Get-ChildItem -Recurse: on a folder with
+# tens of thousands of files the cmdlet's object construction dominates, and
+# EnumerationOptions handles reparse points and unreadable subtrees without
+# throwing on every one.
+function Measure-Paths {
+    param($p)
+
+    $paths = @()
+    if ($p -and $p.paths) { $paths = @($p.paths) }
+
+    # A time budget, because a directory walk has no upper bound a user would
+    # accept. Measured on the operator's machine: 134 unexplained folders took
+    # 62 seconds, dominated by a 12GB WSL tree and an npm cache with hundreds
+    # of thousands of tiny files. A scan that takes a minute is a scan nobody
+    # runs twice.
+    #
+    # What is NOT done here is silently truncating: everything past the budget
+    # comes back with sizeBytes = $null and a reason, and the UI reports it as
+    # unmeasured rather than as small. A wrong number is worse than no number.
+    $budgetSeconds = 20
+    if ($p -and $p.budgetSeconds) { $budgetSeconds = [int]$p.budgetSeconds }
+    $clock = [System.Diagnostics.Stopwatch]::StartNew()
+
+    $results = [System.Collections.Generic.List[PSCustomObject]]::new()
+    foreach ($target in $paths) {
+        if ([string]::IsNullOrWhiteSpace($target)) { continue }
+        if ($clock.Elapsed.TotalSeconds -ge $budgetSeconds) {
+            $results.Add([PSCustomObject]@{
+                path = $target; sizeBytes = $null
+                error = 'Not measured - the scan reached its time limit'
+            })
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $target)) {
+            $results.Add([PSCustomObject]@{ path = $target; sizeBytes = $null; error = 'No longer on disk' })
+            continue
+        }
+        # A manual stack walk rather than Directory::EnumerateFiles with
+        # AllDirectories. Two reasons, both learned the hard way:
+        # EnumerationOptions (which would handle this declaratively) is .NET
+        # Core only and does not exist in the .NET Framework that Windows
+        # PowerShell 5.1 runs on; and the recursive overload aborts the WHOLE
+        # walk on the first UnauthorizedAccessException, which on a real
+        # ProgramData tree is close to guaranteed. Per-directory try/catch means
+        # one unreadable subtree costs that subtree, not the measurement.
+        $total = [long]0
+        $count = 0
+        $skipped = 0
+        $stack = New-Object System.Collections.Stack
+        $stack.Push($target)
+        $ranOut = $false
+        while ($stack.Count -gt 0) {
+            if ($clock.Elapsed.TotalSeconds -ge $budgetSeconds) { $ranOut = $true; break }
+            $dir = $stack.Pop()
+            try {
+                $di = New-Object System.IO.DirectoryInfo $dir
+                foreach ($f in $di.EnumerateFiles()) {
+                    try { $total += $f.Length; $count++ } catch { }
+                }
+                foreach ($d in $di.EnumerateDirectories()) {
+                    # A junction or symlink is not this folder's bytes - it is
+                    # somewhere else's, and following one can loop forever.
+                    if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                    $stack.Push($d.FullName)
+                }
+            } catch {
+                $skipped++
+            }
+        }
+
+        # partial = true means this number is a FLOOR, not a total. Reported
+        # rather than smoothed over: "3.2 GB" and "at least 3.2 GB, 4 folders
+        # unreadable" are different claims and the user is entitled to know
+        # which one they are looking at.
+        $results.Add([PSCustomObject]@{
+            path        = $target
+            sizeBytes   = $total
+            fileCount   = $count
+            skippedDirs = $skipped
+            partial     = ($skipped -gt 0 -or $ranOut)
+            timedOut    = $ranOut
+            error       = $null
+        })
+
+    }
+
+    [PSCustomObject]@{ success = $true; results = @($results) }
+}
+
 # ---------------------------------------------------------------------------
 # zrw: install snapshot.
 #
@@ -4970,21 +5090,9 @@ function Get-InstallSnapshot {
 
     # Top-level directory names only. Enumerating a whole Program Files tree
     # would turn a snapshot into a scan, and the delta would be no more useful.
-    $dirRoots = @(
-        $env:ProgramFiles,
-        ${env:ProgramFiles(x86)},
-        $env:ProgramData,
-        $env:LOCALAPPDATA,
-        $env:APPDATA
-    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
-
-    $dirs = [System.Collections.Generic.List[string]]::new()
-    foreach ($root in $dirRoots) {
-        try {
-            Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue |
-                ForEach-Object { $dirs.Add($_.FullName) }
-        } catch { }
-    }
+    # Shared with bu2's attribution scan (Get-TopLevelProgramDirs) so the two
+    # features can never disagree about which directories are even in scope.
+    $dirs = Get-TopLevelProgramDirs
 
     # Uninstall entries by their registry key path, not by display name: a name
     # can change between snapshots (an installer rewriting its own entry mid
@@ -5236,6 +5344,9 @@ if ($Action) {
             Test-VanishDataDirAcl -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         # ---- PHASE 4: SYSTEM CLEAN ----
+        "measure-paths" {
+            Measure-Paths -p $Params | ConvertTo-Json -Depth 5 -Compress
+        }
         "install-snapshot" {
             # zrw: read-only, no elevation required - it is two Get-ChildItem
             # passes and a registry read. Deliberately callable in Audit Mode,

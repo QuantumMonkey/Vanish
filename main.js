@@ -8,6 +8,7 @@ const store = require('./lib/store');
 const vault = require('./lib/vault');
 const queue = require('./lib/queue');
 const snapshot = require('./lib/snapshot'); // zrw: install snapshot diff
+const attribution = require('./lib/attribution'); // bu2: size attribution
 
 let mainWindow;
 
@@ -1493,14 +1494,108 @@ ipcMain.handle('snapshot-finish', async () => {
 
     // Recorded because this is ground truth for bu2's size attribution - a
     // path in here belongs to what was installed, as fact, not heuristic.
+    //
+    // Resolving the PROGRAM here, at the only moment it is knowable, is what
+    // makes that ground truth usable. bu2 may only call a directory "orphaned"
+    // when it knows whose it was and that they are gone; a recorded path with
+    // no owner stays unattributed forever. The added uninstall keys name the
+    // program, so match them against the live list while it is still fresh.
+    let installedProgram = null;
+    try {
+      const addedKeys = (diff.categories.uninstall && diff.categories.uninstall.added) || [];
+      if (addedKeys.length > 0) {
+        const apps = await runPowerShell('list-desktop', {});
+        const wanted = new Set(addedKeys.map(lastKeySegment).filter(Boolean));
+        const match = (Array.isArray(apps) ? apps : []).find(
+          (a) => a && wanted.has(lastKeySegment(a.registryPath))
+        );
+        if (match && match.name) installedProgram = String(match.name);
+      }
+    } catch {
+      // Best effort. A failure here costs the attribution label, not the diff
+      // the user asked for, so it must not surface as an error.
+    }
+
     store.appendOplog({
       action: 'install-snapshot-diff',
       tier: currentTier,
       items: { paths: snapshot.attributionPaths(diff) },
       outcome: diff.changed ? 'success' : 'no-change',
-      meta: { summary, totalAdded: diff.totalAdded, totalRemoved: diff.totalRemoved }
+      meta: { summary, totalAdded: diff.totalAdded, totalRemoved: diff.totalRemoved, program: installedProgram }
     });
     return { success: true, diff, summary };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+// Registry key paths arrive in two shapes depending on who read them:
+// "HKEY_LOCAL_MACHINE\\Software\\...\\Uninstall\\{guid}" from Get-ChildItem and
+// "HKLM:\\Software\\...\\Uninstall\\{guid}" from the app enumeration. The final
+// segment - the product code or program key name - is the same either way and
+// is the only part worth comparing.
+function lastKeySegment(value) {
+  if (!value) return '';
+  const parts = String(value).split('\\').filter(Boolean);
+  return parts.length ? parts[parts.length - 1].toLowerCase() : '';
+}
+
+// bu2: the attribution scan.
+//
+// Three cheap inputs and one expensive one, in that order on purpose. The
+// directory list, the installed-programs map and the recorded install deltas
+// are all milliseconds; measuring directories is the only slow part, so it
+// runs LAST and only against what classification could not explain. On a
+// machine with ~230 top-level program directories that is typically a handful,
+// which is the difference between a scan that takes seconds and one that takes
+// minutes.
+ipcMain.handle('attribution-scan', async () => {
+  try {
+    const [snap, apps] = await Promise.all([
+      runPowerShell('install-snapshot', {}),
+      runPowerShell('list-desktop', {})
+    ]);
+    if (!snap || snap.success !== true) {
+      return { success: false, error: (snap && snap.error) || 'Could not read the program folders.' };
+    }
+
+    const attributed = attribution.attribute({
+      dirs: Array.isArray(snap.dirs) ? snap.dirs : [],
+      installedApps: Array.isArray(apps) ? apps : [],
+      recordedInstalls: store.recordedInstalls()
+    });
+
+    const candidates = attribution.sizeCandidates(attributed);
+    let sizes = [];
+    if (candidates.length > 0) {
+      const measured = await runPowerShell('measure-paths', { paths: candidates });
+      sizes = (measured && Array.isArray(measured.results)) ? measured.results : [];
+    }
+
+    const merged = attribution.withSizes(attributed, sizes);
+    store.appendOplog({
+      action: 'attribution-scan',
+      tier: currentTier,
+      items: {},
+      outcome: 'success',
+      meta: {
+        dirs: attributed.results.length,
+        measured: candidates.length,
+        orphaned: merged.counts.orphaned,
+        unattributed: merged.counts.unattributed,
+        reclaimableBytes: merged.reclaimableBytes
+      }
+    });
+
+    return {
+      success: true,
+      results: merged.results,
+      counts: merged.counts,
+      reclaimableBytes: merged.reclaimableBytes,
+      measuredCount: candidates.length,
+      // Stated so the UI never has to imply the scan knew more than it did.
+      recordedInstallCount: store.recordedInstalls().length
+    };
   } catch (error) {
     return { success: false, error: error.message };
   }

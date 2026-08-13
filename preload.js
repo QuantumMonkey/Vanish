@@ -95,6 +95,9 @@ contextBridge.exposeInMainWorld('api', {
   snapshotFinish: () => ipcRenderer.invoke('snapshot-finish'),
   snapshotState: () => ipcRenderer.invoke('snapshot-state'),
   snapshotCancel: () => ipcRenderer.invoke('snapshot-cancel'),
+
+  // bu2: size attribution. Read-only; no tier gate.
+  attributionScan: () => ipcRenderer.invoke('attribution-scan'),
   cleanerPurge: (params) => ipcRenderer.invoke('cleaner-purge', params),
 
   // 6g2 - interim state while a long scan runs. Before this, queue-update was

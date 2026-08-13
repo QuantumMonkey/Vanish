@@ -4363,6 +4363,7 @@ function setupCleanTab() {
   // lives in the same panel; kept in its own function so the cleaner setup
   // above stays about cleaners.
   wireInstallSnapshot();
+  wireAttribution();
 
   document.getElementById('btn-scan-all-cleaners').addEventListener('click', async () => {
     for (const c of CLEANERS) {
@@ -5408,4 +5409,88 @@ function wireInstallSnapshot() {
     snapshotWatching = !!(s && s.watching);
     renderSnapshotState();
   }).catch(() => {});
+}
+
+
+// ---------------------------------------------------------------------------
+// bu2: size attribution.
+//
+// The rendering rule that matters: "orphaned" and "unexplained" are different
+// claims and are never styled or worded the same. Orphaned is a fact Vanish
+// can defend - it watched the install and the program is gone. Unexplained is
+// an admission. Presenting the second as the first is how every cleaner that
+// ever lost someone's data got there.
+// ---------------------------------------------------------------------------
+function attributionRow(r) {
+  const size = r.measured ? formatBytes(r.sizeBytes, 1) : 'not measured';
+  const partial = r.partial ? ' (at least - some folders could not be read)' : '';
+
+  let pill;
+  let detail;
+  if (r.state === 'orphaned') {
+    pill = '<span class="risk-pill moderate">left behind</span>';
+    detail = `belonged to ${esc(r.owner)}, which is no longer installed`;
+  } else {
+    pill = '<span class="risk-pill safe">unexplained</span>';
+    detail = r.evidence === 'recorded-unknown-owner'
+      ? 'Vanish watched this appear but never learned which program made it'
+      : 'no installed program claims this folder - that does not mean it is rubbish';
+  }
+
+  return `<div class="finding-row">
+    ${pill}
+    <span style="flex:1;">
+      <span title="${esc(r.path)}">${esc(r.path)}</span>
+      <div class="app-publisher-name">${detail}</div>
+    </span>
+    <span style="white-space:nowrap; font-weight:600;">${esc(size)}${esc(partial)}</span>
+  </div>`;
+}
+
+function renderAttribution(res) {
+  const el = document.getElementById('attribution-result');
+  if (!el) return;
+
+  const listed = res.results.filter((r) => r.state === 'orphaned' || r.state === 'unattributed');
+  const orphaned = res.results.filter((r) => r.state === 'orphaned');
+
+  // The headline is only ever about what Vanish can defend. Unexplained
+  // folders get their own count, never folded into a reclaimable total.
+  const headline = orphaned.length > 0
+    ? `${formatBytes(res.reclaimableBytes, 1)} in ${orphaned.length} folder${orphaned.length === 1 ? '' : 's'} left behind by programs you no longer have`
+    : 'No folders were found that Vanish can prove outlived their program';
+
+  const caveat = res.recordedInstallCount === 0
+    ? 'Vanish can only say a folder was "left behind" if it watched the install that created it. It has not watched any yet, so everything below is listed as unexplained - use "Watch an install" above and this gets sharper over time.'
+    : `Based on ${res.recordedInstallCount} recorded install${res.recordedInstallCount === 1 ? '' : 's'}. Folders from before that are listed as unexplained rather than guessed at.`;
+
+  el.innerHTML = `
+    <div class="summary-line" style="margin-bottom: 10px;"><strong>${esc(headline)}</strong></div>
+    <p class="snapshot-card-lede" style="margin: 0 0 10px;">${esc(caveat)}</p>
+    ${listed.length ? listed.map(attributionRow).join('') : '<p class="snapshot-card-lede">Every folder was matched to a program on this PC.</p>'}
+    <p class="snapshot-card-lede" style="margin-top: 10px;">
+      ${esc(`${res.counts.owned} matched to installed programs, ${res.counts.system} belong to Windows itself. ${res.measuredCount} folder${res.measuredCount === 1 ? ' was' : 's were'} measured - the rest did not need to be.`)}
+    </p>`;
+}
+
+function wireAttribution() {
+  const btn = document.getElementById('btn-attribution-scan');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const el = document.getElementById('attribution-result');
+    btn.disabled = true;
+    if (el) el.innerHTML = '<p class="snapshot-card-lede">Matching folders against installed programs...</p>';
+    try {
+      const res = await window.api.attributionScan();
+      if (!res || res.success !== true) {
+        const msg = (res && res.error) || 'The scan could not run.';
+        if (el) el.innerHTML = '';
+        toast(msg, 'error', 7000);
+        return;
+      }
+      renderAttribution(res);
+    } finally {
+      btn.disabled = false;
+    }
+  });
 }
