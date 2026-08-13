@@ -28,6 +28,7 @@ $suites = @(
     @{ Name = "Install snapshot (zrw)";        Kind = "node";     Path = "test/snapshot-verify.js" },
     @{ Name = "Size attribution (bu2)";        Kind = "node";     Path = "test/attribution-verify.js" },
     @{ Name = "Platform uninstalls (8ns)";     Kind = "node";     Path = "test/platforms-verify.js" },
+    @{ Name = "Relaunch intent (1dq)";          Kind = "node";     Path = "test/elevation-intent-verify.js" },
     @{ Name = "Icon set";                      Kind = "node";     Path = "test/icon-verify.js" },
     @{ Name = "Network attribution (bfh.1)";   Kind = "ps";       Path = "test\network-verify.ps1" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },

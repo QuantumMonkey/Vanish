@@ -1,4 +1,4 @@
-# Vanish 1.0 -- pre-release task list
+# Vanish -- the road to 1.0
 
 Decided 2026-08-12. This file is the release scope. If something is not in
 the ship list below, it is not in 1.0, and that is a decision rather than an
@@ -13,24 +13,49 @@ we objected to.
 
 ---
 
-## Status — 2026-08-13
+## Status and version plan — 2026-08-13
 
-**Released 0.4.0.** A MAJOR bump, not the 1.0 bump, and deliberately so: this
-document's own ship list still has Phase 3 outstanding, and `docs/RELEASING.md`
-gates 1.0 on that list being done or explicitly waived. A major feature
-completing is a MAJOR bump. Bumping RELEASE here would have meant breaking the
-release rule on the same day it was written.
+**Released 0.4.0.** Operator direction, same day: *everything gets done before
+1.0; 0.9 is for the pre-release stuff; the other features are filed under the
+versions in between.* So 1.0 now means **finished**, not "shipped with waivers",
+and the waivers previously recorded against 1.0 move to 0.9's gate instead.
 
-| Phase | State |
+| Version | Theme | Contains |
+| --- | --- | --- |
+| **0.5** | Elevation you can trust | `1dq` (de-elevation reports success without verifying it), `qyt` (UAC disabled vs locked by policy) |
+| **0.6** | Say which, and say what matters | `aaw` (GPU column names the adapter), `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
+| **0.7** | Space you can actually recover | `7v3` (orphaned MSI/MSP cache, 1.2 GB measured), `be8` (firewall rule orphans), `ztl` (SharedDLLs + ghost PnP) |
+| **0.8** | Other people's tools, used properly | `7sl` (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
+| **0.9** | Pre-release | The six elevated confirmations, the demo recording, code signing, a second machine, final docs pass |
+| **1.0** | Everything above, done | No waivers carried forward |
+
+### What 0.9 actually is, in plain terms
+
+Two things have been referred to by shorthand that was never explained:
+
+**"The six elevated confirmations"** are six features that are already BUILT and
+already pass their automated tests, but whose final check needs a human sitting
+at a Windows UAC prompt, because consent dialogs cannot be automated by design.
+Each is one manual run to confirm the thing does in real life what the tests say
+it does:
+
+| Issue | What you would actually do |
 | --- | --- |
-| 0 — unblock (`9rv`) | **Outstanding.** ~30 seconds of operator time; blocks nothing else. |
-| 1 — build (`zrw`, `bu2`) | **Done.** |
-| 2 — safety and honesty gates (`1td`, `vhm`, `8ns`, `k2o`) | **Done**, except the demo GIF, which needs a human. |
-| 3 — live verification, six elevated confirmations | **Outstanding.** Every one needs a human at a real UAC prompt; none can be automated. |
-| 4 — cut the release (`sy2`) | **Done for 0.4.0**: 544/544, both artifacts built and content-verified against source, packaged app booted from `app.asar` with no console errors, tagged. |
+| `69a` | Launch Vanish from a folder path containing a space, click Restart as administrator, confirm it comes back elevated and not broken |
+| `9sy` | Run `npx electron test/real-data-verify.js` from an admin PowerShell and check it passes against your real machine |
+| `dmu` | On a startup entry, use each of Remove / Set to manual / Disable and confirm each does what it says |
+| `e7q` | Let the Store-leftover sweep quarantine a real leftover folder, then restore it from Quarantine and confirm the folder is back |
+| `bfh.2` | Turn the network hold on, confirm background transfers pause, turn it off, confirm everything returns |
+| `1qp` | Force Uninstall one genuinely broken entry and confirm the outcome |
 
-What stands between 0.4.0 and 1.0 is therefore **not code**. It is Phase 0 and
-Phase 3, both of which require a person at a consent dialog.
+**"The demo GIF"** is a 30-60 second screen recording of one normal run - scan,
+pick a program, walk the wizard, review the leftovers, purge - saved as
+`docs/media/vanish-demo.gif` and dropped into the README where a placeholder
+comment currently sits. It exists so someone landing on the repo can see what
+the app does without installing it. It needs a human because it is a recording
+of a person using software.
+
+Neither is code. Both are 0.9.
 
 ## Cut permanently
 
@@ -46,10 +71,11 @@ re-litigates them from scratch.
 | A treemap / "what is big" view | WinDirStat, WizTree, TreeSize and Windows' own Storage page all answer this. See `bu2` -- we build the half they all stop short of. |
 | Hand-written cleaner definitions | BleachBit maintains hundreds in CleanerML and has for years. See `7sl` -- we bring the vault, not a second catalogue. |
 
-## Waived for this release
+## Previously waived -- now moved into 0.9
 
-Not wrong as gates. Waived by a deliberate call about who this release is
-for, with the cost recorded.
+These were waived when 1.0 meant "ship it". Under the current direction 1.0
+means finished, so they are gates again rather than accepted costs. `1w0` and
+`442` were deferred rather than closed precisely so this reversal was cheap.
 
 | Item | Status | Cost of skipping, accepted knowingly |
 | --- | --- | --- |

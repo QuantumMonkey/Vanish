@@ -423,15 +423,32 @@ async function checkElevation() {
   // instead of leaving it to look like the click did nothing.
   if (tierState.elevationMismatch) {
     const m = tierState.elevationMismatch;
-    const uacNote = m.uac && m.uac.enableLua === false
-      ? ' User Account Control appears to be turned off on this machine, which may be why.'
-      : '';
-    toast(
-      'Vanish tried to restart with administrator rights a moment ago and reported success, but this session ' +
-      `started in Audit Mode anyway.${uacNote} This has been logged - if you see it again, that is worth reporting.`,
-      'warn',
-      12000
-    );
+
+    // 1dq: both directions. This message only ever described the elevate
+    // case, so when the operator's round trip failed the OTHER way on
+    // 2026-08-13 - two de-elevations reporting success, both landing back in
+    // Full Mode - the app said nothing at all. A relaunch that lands in the
+    // tier it was leaving has failed whichever way it was going, and this is
+    // the one moment the app can say so with certainty.
+    if (m.direction === 'deelevate') {
+      toast(
+        'Vanish tried to restart WITHOUT administrator rights a moment ago and reported success, but ' +
+        'this session started with them anyway. Nothing was lost - you are still in Full Mode - but the ' +
+        'switch did not take. This has been logged with the reason.',
+        'warn',
+        12000
+      );
+    } else {
+      const uacNote = m.uac && m.uac.enableLua === false
+        ? ' User Account Control appears to be turned off on this machine, which may be why.'
+        : '';
+      toast(
+        'Vanish tried to restart with administrator rights a moment ago and reported success, but this session ' +
+        `started in Audit Mode anyway.${uacNote} This has been logged - if you see it again, that is worth reporting.`,
+        'warn',
+        12000
+      );
+    }
   }
 }
 
@@ -522,7 +539,14 @@ async function requestDeelevation() {
   }
 
   if (wait) wait.classList.remove('active');
-  toast((res && res.error) || 'Could not restart without administrator rights.', 'warn', 9000);
+  // 1dq: the engine now reports runas.exe's own exit code and stderr instead
+  // of calling the launch a success. A real reason is far more useful than
+  // the single sentence that used to cover every possible cause.
+  const reason = (res && res.error) || 'Could not restart without administrator rights.';
+  const code = res && typeof res.exitCode === 'number' && res.exitCode !== 0
+    ? ' (runas exit code ' + res.exitCode + ')'
+    : '';
+  toast(reason + code, 'warn', 10000);
 }
 
 // scanner.ps1 now tells apart WHY a relaunch-elevated attempt failed instead

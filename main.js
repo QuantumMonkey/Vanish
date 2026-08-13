@@ -162,15 +162,32 @@ const bootstrapped = app.whenReady().then(async () => {
         const msSinceAttempt = Date.now() - Date.parse(marker.attemptedAt);
         // A marker only counts as evidence of THIS boot if it is recent and
         // not from the future (clock skew, or a malformed timestamp).
-        if (msSinceAttempt >= 0 && msSinceAttempt < 5 * 60 * 1000 && !isFullMode()) {
+        const recent = msSinceAttempt >= 0 && msSinceAttempt < 5 * 60 * 1000;
+
+        // 1dq: BOTH directions. 6lg only ever checked "asked to elevate, came
+        // back Audit", so the mirror case was invisible - and the mirror case
+        // is the one that actually bit: the operator's 2026-08-13 round trip
+        // logged two successful de-elevations and came back Full Mode both
+        // times, with nothing anywhere saying so. A relaunch that reports
+        // success and lands in the tier it was leaving is a failed relaunch in
+        // either direction, and the app is the only thing positioned to notice.
+        const wanted = marker.direction === 'deelevate' ? TIER_AUDIT : TIER_FULL;
+        const landed = isFullMode() ? TIER_FULL : TIER_AUDIT;
+
+        if (recent && landed !== wanted) {
           elevationMismatchDiagnostic = {
             attemptedAt: marker.attemptedAt,
             trigger: marker.trigger,
+            direction: marker.direction || 'elevate',
+            wantedTier: wanted,
+            landedTier: landed,
             msSinceAttempt,
             uac: lastUacDiagnostics
           };
           store.appendOplog({
-            action: 'relaunch-elevated-mismatch',
+            action: marker.direction === 'deelevate'
+              ? 'relaunch-deelevated-mismatch'
+              : 'relaunch-elevated-mismatch',
             tier: currentTier,
             items: {},
             outcome: 'error',
@@ -823,7 +840,8 @@ async function attemptElevatedRelaunch(trigger) {
       try {
         store.writeJsonAtomic(store.elevationAttemptPath(), {
           attemptedAt: new Date().toISOString(),
-          trigger
+          trigger,
+          direction: 'elevate'
         });
       } catch {
         // Diagnostic-only; never let this block a real elevation attempt.
@@ -883,6 +901,22 @@ async function attemptDeelevatedRelaunch(trigger) {
 
   try {
     const res = await runPowerShell('relaunch-deelevated', { exePath, argList });
+
+    // 1dq: record the INTENT before quitting, so the next launch can tell
+    // whether it actually happened. Written only on a reported success -
+    // a failure is already visible to the user right now and does not need
+    // a next-boot diagnostic to explain it.
+    if (res && res.success === true) {
+      try {
+        store.writeJsonAtomic(store.elevationAttemptPath(), {
+          attemptedAt: new Date().toISOString(),
+          trigger: 'user-click',
+          direction: 'deelevate'
+        });
+      } catch {
+        // Diagnostic-only; never block a real de-elevation.
+      }
+    }
     store.appendOplog({
       action: 'relaunch-deelevated',
       tier: currentTier,

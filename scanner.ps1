@@ -5455,8 +5455,54 @@ if ($Action) {
                 # runas - it is not runas's own args, so it gets its own quoting
                 # regardless of what is inside it.
                 $commandLine = '"' + $Params.exePath + '"' + $argString
-                $null = Start-Process -FilePath "runas.exe" -ArgumentList @('/trustlevel:0x20000', $commandLine) -ErrorAction Stop
-                @{ success = $true } | ConvertTo-Json -Compress
+
+                # 1dq: capture the OUTCOME, not the launch.
+                #
+                # This previously did Start-Process without -Wait and reported
+                # success the moment runas.exe existed as a process. runas.exe
+                # then ran, and whatever it decided went to a console window
+                # that closed immediately. Its exit code was never read. So
+                # every way runas itself can fail was invisible and reported to
+                # the user as "restarting" - which is exactly what the operator
+                # hit on 2026-08-13: two de-elevation attempts both logged
+                # success, and both came back Full Mode.
+                #
+                # runas.exe exits promptly after handing the process off, so
+                # -Wait costs nothing here and buys the exit code. stderr is
+                # captured because runas reports its real reason there (the
+                # Secondary Logon service being unavailable, a trust level the
+                # policy refuses, a target it cannot open).
+                $errFile = [System.IO.Path]::GetTempFileName()
+                $outFile = [System.IO.Path]::GetTempFileName()
+                try {
+                    $proc = Start-Process -FilePath "runas.exe" `
+                        -ArgumentList @('/trustlevel:0x20000', $commandLine) `
+                        -Wait -PassThru -WindowStyle Hidden `
+                        -RedirectStandardError $errFile -RedirectStandardOutput $outFile `
+                        -ErrorAction Stop
+
+                    $stderr = ''
+                    $stdout = ''
+                    try { $stderr = (Get-Content -LiteralPath $errFile -Raw -ErrorAction SilentlyContinue) } catch { }
+                    try { $stdout = (Get-Content -LiteralPath $outFile -Raw -ErrorAction SilentlyContinue) } catch { }
+                    $detail = (@($stderr, $stdout) | Where-Object { $_ -and $_.Trim() } | ForEach-Object { $_.Trim() }) -join ' '
+
+                    if ($proc.ExitCode -ne 0) {
+                        @{
+                            success  = $false
+                            exitCode = $proc.ExitCode
+                            error    = if ($detail) { $detail } else { "runas.exe exited with code $($proc.ExitCode)." }
+                        } | ConvertTo-Json -Compress
+                    } else {
+                        # Exit code 0 means runas accepted the request. It still
+                        # does not prove the new process is at medium integrity -
+                        # only the next launch's own tier check can prove that,
+                        # which is what the relaunch-intent marker is for.
+                        @{ success = $true; exitCode = 0; detail = $detail } | ConvertTo-Json -Compress
+                    }
+                } finally {
+                    Remove-Item -LiteralPath $errFile, $outFile -Force -ErrorAction SilentlyContinue
+                }
             } catch {
                 @{ success = $false; error = $_.Exception.Message } | ConvertTo-Json -Compress
             }
