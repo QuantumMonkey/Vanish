@@ -29,10 +29,11 @@ wins. It was written later and with the full picture.
 | `HANDOFF-2026-08-08.md` | 2026-08-07 to 08-08 | Corrections table work and the network attribution slice. |
 | `HANDOFF-2026-08-09.md` | 2026-08-09 | The fourth operator punch list (12 items) and its reasoning. |
 | `HANDOFF-2026-08-12.md` | 2026-08-10 to 08-12 | `dtd`'s two implementation attempts and why the first failed live; the elevation-loop investigation as it stood before the root cause was found (see `9rv`); the 5rz resume point, now completed. |
+| `HANDOFF-2026-08-13.md` | 2026-08-13 | The elevation root cause (de-elevation, not re-elevation) and how four sessions missed it; the rpdsvc correction that produced `v6y`; the scoped Rule 6 amendment for startup grouping. **Its Phase 0 instruction is live at the time of writing** -- check bd `9rv` before acting on it. |
 
-## The lesson these five exist to teach
+## The lesson these files exist to teach
 
-Five files, all of which said "start here", is itself the problem this folder
+Several files, each of which said "start here", is itself the problem this folder
 solves. A handoff is a snapshot of one session's uncertainty, not a plan. When
 they accumulate at the top level of `docs/`, every one of them reads as a live
 instruction and the next session has to work out which future it is living in.
