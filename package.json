@@ -1,6 +1,6 @@
 {
   "name": "vanish-uninstaller",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "On-device Windows application auditor and manager - approval-gated uninstalls, leftover scanning, and system health audits. No telemetry, no cloud.",
   "main": "main.js",
   "scripts": {

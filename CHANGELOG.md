@@ -8,6 +8,65 @@ full decision rules.
 
 ---
 
+## [0.5.1] - 2026-08-13
+
+### Fixed -- every per-process GPU figure was missing, and 0.5.0 shipped it
+
+A regression, caught by the operator within an hour of release: the adapter
+summary pill read "GPU 0: 57%" above a table in which every single row showed
+`0%` or a dash.
+
+The `aaw` work changed the accumulator inside `Get-GpuUsageByProcess` from a
+plain number to `@{ total; adapters }`, so the table could name *which* card a
+process was using. The projection that builds the returned map was not changed
+with it, and went on doing `[Math]::Min(100, $byPid[$k])` against what was now
+a hashtable. That throws once per running process, so the map came back empty
+and the renderer had nothing to draw.
+
+**Why it survived a release is the part worth keeping.** It looked half-alive
+rather than broken: the per-adapter totals are a separate accumulator that is
+still a plain number, so the summary pill kept reporting a perfectly correct
+percentage above a table claiming nothing was using the GPU. A feature that is
+visibly working in one place is the easiest kind of broken to miss. The
+PowerShell error was non-fatal too -- it printed to the stream and the function
+returned anyway, so nothing crashed and nothing was logged.
+
+Nothing asserted the payload contract between engine and renderer.
+`test/gpu-shape-verify.js` does now, and checks the specific way this hid: that
+the engine emits no PowerShell error text at all, on top of the shape itself.
+
+Verified live: the engine returns `{"33844":{"total":14,"adapters":{"0":14}}}`,
+and fed through the real renderer that produces the NVIDIA icon and `14.0%`,
+joined to the physical adapter on its LUID.
+
+### Note -- de-elevation is now understood, and is not fixed here
+
+0.5.0 asked for one round trip. It happened, and `1dq`'s instrumentation did
+exactly what it was built to do -- the first mismatch record ever captured:
+
+```
+14:16:56  relaunch-deelevated           success   trigger=user-click
+14:17:31  relaunch-deelevated-mismatch  error     direction=deelevate
+          wantedTier=audit  landedTier=full  msSinceAttempt=34537
+```
+
+`runas.exe` accepted the request and exited 0, and Windows started the process
+**elevated anyway**. The mechanism is wrong rather than broken. The app's own
+auto-elevate path is ruled out on evidence -- `startupMode` was already
+`audit`, and that is the only `startupMode` read in the entire main process.
+
+This also corrects the working assumption that the Settings toggle "now works":
+this machine has not reached Audit Mode since 2026-08-07. Every `app-start`
+since is `tier=full`. What changed in 0.5.0 is that the app stopped claiming
+otherwise.
+
+`test/deelevation-probe.ps1` settles which mechanism actually drops privilege
+here -- `runas /trustlevel`, the shell token via `CreateProcessWithTokenW`, or a
+scheduled task at limited run level. It refuses to run unelevated, because from
+an unelevated shell all three would "succeed" with no privilege to drop.
+
+---
+
 ## [0.5.0] - 2026-08-13
 
 ### Added -- UAC that is off, and UAC you are not allowed to turn on (`qyt`)

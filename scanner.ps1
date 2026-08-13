@@ -3542,9 +3542,28 @@ function Get-GpuUsageByProcess {
         $byAdapter[$physIdx] += $sample.CookedValue
     }
 
+    # aaw follow-up: this projection was left behind when the accumulator
+    # above changed shape. $byPid[$k] used to be a plain number; aaw made it
+    # @{ total; adapters } so the caller could say WHICH adapter a process was
+    # using, and this line kept doing [Math]::Min(100, <hashtable>). That
+    # throws - "Cannot convert argument val2 ... System.Collections.Hashtable
+    # ... to type System.Decimal" - once PER PROCESS, so byPid came back empty
+    # and every row in the table showed 0% or a dash.
+    #
+    # It looked half-alive rather than broken, which is why it survived a
+    # release: $byAdapter is a separate accumulator that is still a plain
+    # number, so the adapter summary pill kept reporting a correct 57% while
+    # every per-process figure underneath it was gone.
     $pidResult = @{}
     foreach ($k in $byPid.Keys) {
-        $pidResult["$k"] = [Math]::Round([Math]::Min(100, $byPid[$k]), 1)
+        $adapterPercents = @{}
+        foreach ($a in $byPid[$k].adapters.Keys) {
+            $adapterPercents["$a"] = [Math]::Round([Math]::Min(100, $byPid[$k].adapters[$a]), 1)
+        }
+        $pidResult["$k"] = @{
+            total    = [Math]::Round([Math]::Min(100, $byPid[$k].total), 1)
+            adapters = $adapterPercents
+        }
     }
 
     # Every phys_N seen this sample gets an entry, even at 0% - a LUID with no
