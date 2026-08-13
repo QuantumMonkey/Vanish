@@ -418,11 +418,56 @@ const GPU_SAMPLE_INTERVAL_MS = 15000;
 // sample has completed yet this session, which is a third state again.
 let gpuSampledPids = null;
 
+// aaw: byPid entries are { total, adapters }; older engines sent a bare
+// number. One accessor so every reader agrees on which it is.
+function gpuTotal(pid) {
+  const e = gpuUsageByPid[pid];
+  if (e == null) return null;
+  return typeof e === 'object' ? e.total : e;
+}
+
 // The GPU cell's three honest states. Kept as a function rather than inlined
 // so the "-" case can never silently drift back into meaning "zero".
+// aaw: which adapter, per row. gpuVendorInfo maps LUID -> vendor and was
+// already used for the summary pill above the table; this applies the same
+// resolution per process. It resolves nothing new and guesses nothing - an
+// adapter whose LUID does not match a known card keeps the neutral chip icon
+// and its ordinal, exactly as the pill does.
+function gpuAdapterMark(physIdx) {
+  const a = (gpuAdapterUsage || []).find((x) => x.physIndex === physIdx);
+  const vendorMatch = a && (gpuVendorInfo || []).find(
+    (v) => v.luidHigh === a.luidHigh && v.luidLow === a.luidLow
+  );
+  const vendor = vendorMatch ? vendorMatch.vendor : null;
+  const icon = vendor === 'amd' ? 'fa-amd' : vendor === 'nvidia' ? 'fa-nvidia' : 'fa-microchip';
+  const label = vendorMatch ? vendorMatch.name : `GPU ${physIdx}`;
+  return { icon, label, vendor };
+}
+
 function gpuCellHtml(pid) {
-  const value = gpuUsageByPid[pid];
-  if (value != null) return `${esc(value.toFixed(1))}%`;
+  const entry = gpuUsageByPid[pid];
+  // The engine now sends { total, adapters }. A plain number is the older
+  // shape and is still read, so a stale response mid-upgrade renders rather
+  // than throwing.
+  const value = entry && typeof entry === 'object' ? entry.total : entry;
+
+  if (value != null) {
+    const adapters = (entry && typeof entry === 'object' && entry.adapters) || null;
+    let mark = '';
+    if (adapters) {
+      const entries = Object.entries(adapters).sort((a, b) => b[1] - a[1]);
+      if (entries.length > 0) {
+        const [topIdx] = entries[0];
+        const m = gpuAdapterMark(Number(topIdx));
+        // A process using more than one adapter is NOT reduced to one - the
+        // busier is shown and the count says there is more, rather than
+        // quietly picking a winner.
+        const more = entries.length > 1 ? `<sup title="Also using ${entries.length - 1} other adapter(s)">+${entries.length - 1}</sup>` : '';
+        mark = ` <i class="fa-solid ${m.icon} gpu-row-mark${m.vendor ? ' is-' + m.vendor : ''}" title="${esc(m.label)}"></i>${more}`;
+      }
+    }
+    return `${esc(value.toFixed(1))}%${mark}`;
+  }
   if (gpuSampledPids === null) {
     return '<span title="The first GPU measurement of this session has not finished yet.">measuring...</span>';
   }
@@ -436,7 +481,7 @@ const PROCESS_SORTERS = {
   name: (a, b) => a.name.localeCompare(b.name),
   pid: (a, b) => a.pid - b.pid,
   cpu: (a, b) => a.cpuPercent - b.cpuPercent,
-  gpu: (a, b) => (gpuUsageByPid[a.pid] || 0) - (gpuUsageByPid[b.pid] || 0),
+  gpu: (a, b) => (gpuTotal(a.pid) || 0) - (gpuTotal(b.pid) || 0),
   memory: (a, b) => a.memoryBytes - b.memoryBytes,
   io: (a, b) => a.ioBytesPerSec - b.ioBytesPerSec
 };

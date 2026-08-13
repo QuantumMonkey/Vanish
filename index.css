@@ -2564,13 +2564,42 @@ input:checked + .slider:before {
 
 /* --- SCR-03: process table ---------------------------------------------- */
 .process-workspace { flex: 1; display: flex; min-height: 0; }
-.process-list-container { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
+/* min-width:0 is load-bearing, not tidying. A flex item defaults to
+   min-width:auto, which refuses to shrink below its content - so when the
+   details pane claimed its 320px the table did not compress, it overflowed,
+   and the pane painted straight over the Indicators column. Caught by
+   screenshotting the narrow window rather than by the measurements, which
+   reported the pane and the column as both technically present. */
+.process-list-container {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: auto;
+  padding: 0 8px 8px;
+}
 .process-table th { cursor: pointer; user-select: none; white-space: nowrap; }
 .process-table th[data-sort]:hover { color: var(--text-white); }
 .process-table th.sorted::after { content: " \25BC"; font-size: 8px; color: var(--color-primary); }
 .process-table th.sorted.asc::after { content: " \25B2"; }
 .process-table td { font-size: 12px; }
-.process-details { width: 320px; flex-shrink: 0; }
+/* aaw/layout: the details pane takes space only when a process is selected.
+   It previously reserved 320px permanently - dead space on a wide window, and
+   on a narrow one it stole the table's width and pushed the Indicators column
+   out of view entirely. width:0 rather than display:none so the panel keeps
+   its own scroll/transition behaviour and simply has no width to give away. */
+.process-details {
+  width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  transition: width var(--transition-smooth);
+}
+
+.process-details.active {
+  width: 320px;
+  overflow-y: auto;
+}
 .indicator-chip {
   display: inline-flex;
   align-items: center;
@@ -2948,3 +2977,17 @@ input:checked + .slider:before {
   max-height: 300px;
   overflow-y: auto;
 }
+
+/* aaw: the per-row GPU vendor mark. The brand colours are the point - a green
+   mark reads as NVIDIA and a red one as AMD at a glance, without anyone having
+   to parse a label. Neutral grey when the LUID matched no known card, because
+   an unresolved adapter must not borrow either brand. */
+.gpu-row-mark {
+  margin-left: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  vertical-align: baseline;
+}
+
+.gpu-row-mark.is-nvidia { color: hsl(92, 68%, 45%); }
+.gpu-row-mark.is-amd { color: hsl(0, 78%, 55%); }

@@ -3449,8 +3449,20 @@ function Get-GpuUsageByProcess {
 
         if ($sample.CookedValue -le 0) { continue }
 
-        if (-not $byPid.ContainsKey($procId)) { $byPid[$procId] = 0.0 }
-        $byPid[$procId] += $sample.CookedValue
+        # aaw: keep WHICH adapter the work was on. This previously summed
+        # straight into a flat number, so the LUID parsed two lines above was
+        # used for the adapter totals and thrown away per process - meaning
+        # "which GPU is this program using" was unanswerable downstream no
+        # matter what the UI did. Total is still carried, so existing callers
+        # that only want a percentage are unaffected.
+        if (-not $byPid.ContainsKey($procId)) {
+            $byPid[$procId] = @{ total = 0.0; adapters = @{} }
+        }
+        $byPid[$procId].total += $sample.CookedValue
+        if (-not $byPid[$procId].adapters.ContainsKey($physIdx)) {
+            $byPid[$procId].adapters[$physIdx] = 0.0
+        }
+        $byPid[$procId].adapters[$physIdx] += $sample.CookedValue
 
         if (-not $byAdapter.ContainsKey($physIdx)) { $byAdapter[$physIdx] = 0.0 }
         $byAdapter[$physIdx] += $sample.CookedValue
