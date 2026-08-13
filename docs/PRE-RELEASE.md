@@ -23,7 +23,7 @@ and the waivers previously recorded against 1.0 move to 0.9's gate instead.
 | Version | Theme | Contains |
 | --- | --- | --- |
 | **0.5** | Elevation you can trust | SHIPPED 2026-08-13. `1dq` (de-elevation reports success without verifying it), `qyt` (UAC disabled vs locked by policy), plus `5z5` and `c0y` as they were open bugs |
-| **0.6** | Say which, and say what matters | `aaw` (GPU column names the adapter), `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
+| **0.6** | Say which, and say what matters | SHIPPED 2026-08-14: `aaw` (GPU column names the adapter) and `ddx` (what can be reached from outside). Still open under this theme: `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
 | **0.7** | Space you can actually recover | `7v3` (orphaned MSI/MSP cache, 1.2 GB measured), `be8` (firewall rule orphans), `ztl` (SharedDLLs + ghost PnP) |
 | **0.8** | Other people's tools, used properly | `7sl` (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
 | **0.9** | Pre-release | The six elevated confirmations, the demo recording, code signing, a second machine, final docs pass |
@@ -170,7 +170,30 @@ Phase 0 settles what that flakiness actually was.
 - [x] `5z5` and `c0y` fixed and pinned by new suites
       (`details-panel-layout-verify`, `install-date-provenance-verify`,
       `uac-lock-verify`).
-- [ ] **The de-elevation round trip is STILL NOT DONE, and 0.5 does not claim
+- [x] **The de-elevation round trip was done, and it found the bug.** The
+      operator ran a 0.5.0 artifact 2026-08-13; `1dq`'s instrumentation
+      produced the first `relaunch-deelevated-mismatch` ever recorded, and a
+      follow-up probe from an elevated shell measured all three candidate
+      mechanisms. `runas /trustlevel:0x20000` -- the Windows-documented one --
+      does not work on that machine and exits 0 while failing. A scheduled
+      task at `RunLevel Limited` drops privilege correctly. Shipped in 0.5.2,
+      confirmed working by the operator.
+
+#### 0.6.0 -- 2026-08-14
+
+- [x] `npm test` 719 passed, 0 failed.
+- [x] `ddx` shipped -- the listener panel. `aaw` closed across 0.5.0-0.5.3.
+- [x] Both artifacts built, `app.asar` hash-matched, packaged app booted clean.
+- [ ] **The six elevated confirmations are still outstanding.** Four of them
+      (`dmu`, `e7q`, `bfh.2`, `9sy`) now have a single runner:
+      `test/elevated-confirmations.ps1`. It has NOT been run yet -- the
+      first attempt used a `Start-Process -ArgumentList` form that splits on
+      the space in the repo path, so the elevated window opened and did
+      nothing. The corrected invocation quotes inside the argument.
+- [ ] `69a` cannot go in that runner: it tests the UAC branch itself and needs
+      an UNELEVATED start. `1qp` needs a clean VM.
+
+- [ ] **Superseded note kept for the record:** 0.5 did not claim
       it.** The theme is "elevation you can trust" and what shipped is
       elevation that cannot lie to you about what happened -- detection, not
       a proven mechanism. The oplog's last entry is still
