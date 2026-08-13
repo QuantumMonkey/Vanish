@@ -41,7 +41,7 @@
     "files": [
       "main.js",
       "preload.js",
-      "renderer.js",
+      "renderer/**/*",
       "index.html",
       "index.css",
       "splash.html",

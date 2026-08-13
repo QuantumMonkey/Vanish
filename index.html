@@ -1316,6 +1316,15 @@
   <!-- 8ns: shared with the main process rather than duplicated. Same file,
        same patterns, same test suite, loaded here as a classic script. -->
   <script src="lib/platforms.js"></script>
-  <script src="renderer.js"></script>
+  <!-- The renderer, split by feature. Classic scripts sharing one global
+       lexical environment, so load order is for human reading order rather
+       than for resolution. -->
+  <script src="renderer/core.js"></script>
+  <script src="renderer/settings-about.js"></script>
+  <script src="renderer/wizard.js"></script>
+  <script src="renderer/audit.js"></script>
+  <script src="renderer/quarantine-tasks.js"></script>
+  <script src="renderer/queue-clean.js"></script>
+  <script src="renderer/force-tour.js"></script>
 </body>
 </html>

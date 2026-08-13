@@ -1,0 +1,1117 @@
+// Vanish renderer -- Health Advisor: startup, storage, network activity, GPU
+//
+// Includes kp0's manual-tap ping - the one deliberate exception to zero
+// outbound network I/O, and the only place the app sends anything.
+//
+// Part of the renderer split out of a single 5,500-line renderer.js. These are
+// CLASSIC SCRIPTS, not modules: top-level let/const/function share one global
+// lexical environment across all of them, which is why this was a safe pure
+// file split and why no imports or exports appear below. index.html loads them
+// in the order listed there.
+
+// ==========================================
+// STAGE 2 - AUDIT & HEALTH ADVISOR UI
+// ==========================================
+
+let auditLoaded = false;
+// The rows currently on screen, so a click resolves to the item the user was
+// actually looking at rather than to whatever the DOM can be re-parsed into.
+let startupItems = [];
+
+async function loadAuditData(force = false) {
+  if (auditLoaded && !force) return;
+
+  const loadingEl = document.getElementById('audit-loading');
+  const contentEl = document.getElementById('audit-content');
+  loadingEl.style.display = 'flex';
+  contentEl.style.display = 'none';
+  auditLoaded = false;
+
+  try {
+    // Fire every PowerShell query in parallel. The network read spends most of
+    // its time asleep between two counter samples, so running it alongside the
+    // others costs the load almost nothing in wall-clock time.
+    const [diag, startup, redundancy, network] = await Promise.all([
+      window.api.getSystemDiagnostics(),
+      window.api.getStartupItems(),
+      window.api.getSoftwareRedundancy(),
+      window.api.getNetworkActivity()
+    ]);
+
+    renderSysInfoCards(diag);
+    renderDiskBars(diag.disks || [], diag.disksError);
+    renderNetworkActivity(network);
+    renderStartupTable(startup);
+    renderRedundancyGroups(redundancy);
+
+    auditLoaded = true;
+    loadingEl.style.display = 'none';
+    contentEl.style.display = 'flex';
+  } catch (err) {
+    loadingEl.innerHTML = `
+      <i class="fa-solid fa-circle-xmark" style="font-size: 28px; color: var(--color-danger);"></i>
+      <div style="color: var(--color-danger);">Could not read your system information: ${err.message}</div>
+    `;
+  }
+}
+
+// Attach refresh button
+document.addEventListener('DOMContentLoaded', () => {
+  const btnRefresh = document.getElementById('btn-refresh-audit');
+  if (btnRefresh) {
+    btnRefresh.addEventListener('click', () => loadAuditData(true));
+  }
+});
+
+function renderSysInfoCards(diag) {
+  const grid = document.getElementById('audit-sysinfo-grid');
+  if (!grid || !diag) return;
+
+  const uptimeStr = diag.os && diag.os.uptimeHours != null
+    ? `${diag.os.uptimeHours}h uptime`
+    : '';
+
+  const ramPct  = diag.ram && diag.ram.pctUsed != null ? `${diag.ram.pctUsed}%` : '';
+  const ramSub  = diag.ram ? `${diag.ram.usedGB ?? '?'} / ${diag.ram.totalGB ?? '?'} GB used` : '';
+
+  const cpuClockGHz = diag.cpu && diag.cpu.maxClockMHz
+    ? `${(diag.cpu.maxClockMHz / 1000).toFixed(2)} GHz`
+    : '';
+  const cpuSub = diag.cpu ? `${diag.cpu.cores ?? '?'} cores / ${diag.cpu.logicalCores ?? '?'} threads` : '';
+
+  // A machine with switchable graphics has two adapters and both matter. The
+  // engine has reported both since the last fix; this card was where the second
+  // one disappeared, clipped by a single nowrap line with an ellipsis. Each
+  // adapter gets its own line now.
+  const gpus = Array.isArray(diag.gpus) && diag.gpus.length
+    ? diag.gpus
+    : (diag.gpu ? String(diag.gpu).split(' + ') : ['Unknown']);
+
+  const cards = [
+    { label: 'Operating System',  value: diag.os?.caption  ?? 'Unknown',    sub: `Build ${diag.os?.build ?? '?'} - ${diag.os?.architecture ?? ''}` },
+    { label: 'System Uptime',     value: uptimeStr || 'Unknown',              sub: '' },
+    { label: 'CPU',               value: shortenCpuName(diag.cpu?.name),      sub: `${cpuClockGHz} - ${cpuSub}` },
+    { label: 'RAM Usage',         value: ramPct || 'Unknown',                 sub: ramSub },
+    { label: gpus.length > 1 ? `Graphics (${gpus.length})` : 'Graphics', values: gpus, sub: '' },
+    { label: 'Machine',           value: `${diag.manufacturer ?? ''} ${diag.model ?? ''}`.trim() || 'Unknown', sub: '' }
+  ];
+
+  // Every value wraps, not just the graphics one: "AMD Ryzen 9 5900HX with Ra..."
+  // and "ASUSTeK COMPUTER INC. RO..." were the same defect on the same row,
+  // just less obviously wrong than a missing GPU.
+  grid.innerHTML = cards.map(c => {
+    const lines = (c.values || [c.value])
+      .map((v) => `<span class="card-value wrap" title="${esc(v)}">${esc(v)}</span>`)
+      .join('');
+    return `
+    <div class="audit-info-card">
+      <span class="card-label">${esc(c.label)}</span>
+      ${lines}
+      ${c.sub ? `<span class="card-sub">${esc(c.sub)}</span>` : ''}
+    </div>`;
+  }).join('');
+}
+
+function shortenCpuName(name) {
+  if (!name) return 'Unknown';
+  // Collapse repeated whitespace and strip trailing processor brand noise
+  return name.replace(/\s+/g, ' ').replace(/ CPU @.*$/, '').trim();
+}
+
+// bfh.1. The output of this section is a VERDICT, not a list of connections.
+// hks. A bare connection count reads as a threat number: the operator's own
+// words were "one program holding 54 open connections looks worrisome". For
+// most of what actually holds dozens of sockets - a browser, a sync client, a
+// game launcher - that count is just how the program works, and the useful
+// thing to show is what is normal FOR THAT KIND of program.
+//
+// Deliberately context, never a verdict. This does not score risk, does not
+// call anything safe, and does not call anything suspicious - Rule 6 keeps
+// this panel out of security/firewall framing, and a "trusted process" list
+// would be exactly that framing wearing a friendlier label. Matching is on
+// the process name only, entirely local: no lookup, no reverse-DNS, no
+// outbound I/O of any kind (INV-4).
+const NET_PROGRAM_KINDS = [
+  {
+    kind: 'a web browser',
+    test: /^(chrome|firefox|msedge|brave|opera|opera_gx|vivaldi|chromium|iexplore|arc|librewolf|waterfox|tor)$/,
+    normal: 'Browsers open a separate connection per tab, per ad, per tracker and per background sync, so dozens at once is ordinary even when you are only reading one page.'
+  },
+  {
+    kind: 'a file-sync program',
+    test: /^(onedrive|dropbox|googledrivefs|googledrivesync|box|boxdrive|megasync|nextcloud|owncloud|icloud|pcloud|sync|resilio|syncthing)$/,
+    normal: 'Sync clients keep several connections open at once so uploads, downloads and change-notifications do not queue behind each other.'
+  },
+  {
+    kind: 'a game launcher or store',
+    test: /^(steam|steamwebhelper|epicgameslauncher|epicwebhelper|battle\.net|agent|galaxyclient|galaxy|origin|eadesktop|easteamproxy|ubisoftconnect|upc|riotclient|riotclientservices|playnite)$/,
+    normal: 'Launchers keep a store page, a friends/chat service, a download manager and an update checker connected at the same time, and content downloads often use many parallel connections on purpose.'
+  },
+  {
+    kind: 'a chat or meeting program',
+    test: /^(teams|ms-teams|slack|discord|zoom|skype|telegram|whatsapp|signal|element|webexmta|webex)$/,
+    normal: 'Chat and meeting apps hold a live connection for messages plus separate ones for presence, media and file transfers.'
+  },
+  {
+    kind: 'security software',
+    test: /^(avp|avpui|kavfs|msmpeng|mpdefendercoreservice|nissrv|avgui|avgsvc|avastui|afwserv|mbam|mbamservice|nortonsecurity|ns|mcshield|masvc|sentinelagent|csfalconservice|csfalconcontainer|bdagent|vsserv|ekrn|egui)$/,
+    normal: 'Security software checks files and pages against its vendor\'s cloud service, which means many short-lived connections while it is scanning.'
+  },
+  {
+    kind: 'an updater or download service',
+    test: /^(svchost|googleupdate|goog(le)?updater|msedgeupdate|microsoftedgeupdate|adobearmsvc|adobeupdateservice|squirrel|update|updater|wuauclt|usocoreworker|deliveryoptimization|dosvc)$/,
+    normal: 'Update and delivery services fetch from several servers at once, and Windows itself shares parts of an update between machines, so the count moves around a lot.'
+  },
+  {
+    kind: 'a developer tool',
+    test: /^(code|code - insiders|node|npm|claude|python|pythonw|docker|dockerd|com\.docker\.backend|git|ssh|java|javaw|devenv|rider64|idea64|pycharm64|wsl|wslservice)$/,
+    normal: 'Developer tools talk to package registries, language servers, containers and remote APIs at the same time, often several per project you have open.'
+  },
+  {
+    kind: 'a media or streaming app',
+    test: /^(spotify|itunes|applemusic|vlc|plex|plexmediaserver|netflix|obs64|obs|steamstreaming)$/,
+    normal: 'Streaming apps hold a media connection plus separate ones for artwork, recommendations and playback reporting.'
+  },
+  {
+    kind: 'part of Windows',
+    test: /^(system|lsass|services|spoolsv|searchindexer|searchapp|explorer|taskhostw|backgroundtaskhost|runtimebroker|smartscreen|settingssynchost|wsappx|startmenuexperiencehost)$/,
+    normal: 'Windows components fetch content, licences, time and telemetry-free service data on their own schedule, independent of anything you opened.'
+  }
+];
+
+// The count at which a bare number starts reading as alarming rather than
+// incidental. Below this the tooltip still explains the program, but nothing
+// visible is added to the row - the number speaks for itself.
+const NET_NOTABLE_CONNECTION_COUNT = 10;
+
+function classifyNetProgram(name) {
+  const key = String(name || '').toLowerCase().replace(/\.exe$/, '').trim();
+  return NET_PROGRAM_KINDS.find((k) => k.test.test(key)) || null;
+}
+
+// The tooltip text for one row's connection count. Always says what was
+// counted; adds the per-kind reassurance when the program is recognised, and
+// says plainly that it does not recognise the program when it does not -
+// rather than implying the unrecognised case is the suspicious one.
+function netConnectionTitle(name, count) {
+  const kind = classifyNetProgram(name);
+  const counted = `${count} connection${count === 1 ? '' : 's'} open right now. This is a count of connections, not of bandwidth used.`;
+  if (kind) return `${counted}\n\n${name} is ${kind.kind}. ${kind.normal}`;
+  return (
+    `${counted}\n\nVanish does not have a description for this program, which says nothing either way about it - ` +
+    'most programs that talk to the internet keep several connections open. Expand the row to see the addresses it is connected to.'
+  );
+}
+
+// "Nothing on this PC is using the network" is a first-class answer here, not
+// an empty state - it is the answer that tells someone to stop looking at their
+// PC and go look at their router.
+//
+// The one thing this must never do is imply a per-program byte rate. Windows
+// does not attribute bytes to a process without an ETW kernel trace, so any
+// per-app "12 Mbps" on this screen would be invented. It reports connections
+// held, and says so.
+function renderNetworkActivity(net) {
+  const body = document.getElementById('audit-network-body');
+  const badge = document.getElementById('audit-network-badge');
+  if (!body) return;
+
+  if (!net || net.success !== true || net.verdict === 'unreadable') {
+    if (badge) badge.style.display = 'none';
+    body.innerHTML = `<div class="panel-state error" style="padding: 12px 0;">
+      <i class="fa-solid fa-circle-xmark"></i>
+      <div>Could not read the network adapters on this PC${net && net.error ? `: ${esc(net.error)}` : '.'}</div>
+    </div>`;
+    wireNetworkRefresh();
+    return;
+  }
+
+  // formatBytes(0) returns 'Unknown' (its convention for an untracked size,
+  // see xw2) - wrong here, where 0 is a confirmed reading, not a missing one.
+  const rate = (bytesPerSecond) => {
+    const b = bytesPerSecond || 0;
+    return b === 0 ? '0 B/s' : `${formatBytes(b, 1)}/s`;
+  };
+  const gateway = (net.adapters || []).filter((a) => a.hasGateway);
+  const primary = gateway.length ? gateway[0] : (net.adapters || [])[0];
+  const processes = net.processes || [];
+  const top = processes.slice(0, 6);
+
+  // h8j: the byte-rate sample is short (sampleMs, default 1s) and can land in
+  // a quiet gap of genuinely bursty traffic - "the rate was low right now" and
+  // "nothing is using the network" are different claims, and conflating them
+  // is exactly what an operator with real open connections during a quiet
+  // sample caught. A low rate with open connections gets its own, more
+  // honestly-hedged wording instead of reusing the true-idle verdict.
+  const sampleSeconds = (net.sampleMs || 1000) / 1000;
+  const quietWithConnections = processes.length > 0;
+
+  const verdicts = {
+    busy: {
+      icon: 'fa-arrows-up-down',
+      cls: 'is-busy',
+      title: 'Something on this PC is using the network',
+      detail:
+        `The connection carried ${rate(net.totalBytesPerSecond)} while this was measured. ` +
+        (top.length
+          ? `${top.length === 1 ? 'One program has' : `${top.length} programs have`} connections open right now.`
+          : 'No program held an open connection, so this is Windows itself.')
+    },
+    quiet: quietWithConnections
+      ? {
+          icon: 'fa-circle-check',
+          cls: 'is-quiet',
+          title: 'Low traffic in this sample - not necessarily idle',
+          detail:
+            `The connection carried ${rate(net.totalBytesPerSecond)} during a ${sampleSeconds}s sample, but ` +
+            `${processes.length === 1 ? '1 program has' : `${processes.length} programs have`} a connection open right ` +
+            'now. A short sample can land in a quiet gap of bursty traffic, so a low reading here does not mean ' +
+            'nothing is using the network - only that little moved in that instant.'
+        }
+      : {
+          icon: 'fa-circle-check',
+          cls: 'is-quiet',
+          title: 'Nothing on this PC is using the network',
+          detail:
+            `The connection carried ${rate(net.totalBytesPerSecond)} while this was measured, and no program held an ` +
+            'open connection. If something still feels slow, the cause is not on this PC - it is the router or the ' +
+            'connection beyond it, and nothing Vanish can change here will help.'
+        },
+    'link-weak': {
+      icon: 'fa-triangle-exclamation',
+      cls: 'is-weak',
+      title: 'The Wi-Fi signal is the limit here',
+      detail:
+        `The signal is at ${net.signalPercent}%. At this strength the link itself is the constraint, so closing ` +
+        'programs will not make much difference. Moving closer to the access point, or using a cable, will.'
+    }
+  };
+
+  const v = verdicts[net.verdict] || verdicts.quiet;
+
+  // Operator report: "network activity doesnt show upload, download speeds."
+  // scanner.ps1 has always computed receiveBytesPerSecond/sendBytesPerSecond
+  // per adapter (they already drive the busy/quiet verdict) - only the split
+  // figures themselves were never displayed. No new engine capability, no
+  // new network I/O, just surfacing a number already in the response.
+  // anc: these two were a fragment of text inside the "Looked at:" line. They
+  // are the two numbers most people come to this panel for, so they get their
+  // own tiles.
+  //
+  // The tiles show the adapter carrying the default route. Deliberately NOT
+  // expressed as a percentage of link speed: linkSpeedBps is the negotiated
+  // rate to the router, not the speed of the internet connection behind it,
+  // and "0.4% used" against the wrong denominator is a confident wrong answer.
+  //
+  // kp0: the fourth tile, ping - the app's one deliberate, scoped exception
+  // to zero outbound network I/O. netPrimaryAdapter is cached at module
+  // level so runPing() can rebuild just this tile after a tap without
+  // needing the whole `net` response again.
+  netPrimaryAdapter = primary;
+  if (pingDestination === null && primary && primary.gatewayAddress) {
+    pingDestination = primary.gatewayAddress;
+    pingDestinationIsGateway = true; // kct
+  }
+
+  const rateTiles = primary
+    ? `<div class="net-rate-tiles">
+         <div class="net-rate-tile">
+           <i class="fa-solid fa-arrow-down net-rate-icon is-down"></i>
+           <div class="net-rate-text">
+             <div class="net-rate-value">${esc(rate(primary.receiveBytesPerSecond))}</div>
+             <div class="net-rate-label">Download</div>
+           </div>
+         </div>
+         <div class="net-rate-tile">
+           <i class="fa-solid fa-arrow-up net-rate-icon is-up"></i>
+           <div class="net-rate-text">
+             <div class="net-rate-value">${esc(rate(primary.sendBytesPerSecond))}</div>
+             <div class="net-rate-label">Upload</div>
+           </div>
+         </div>
+         <div class="net-rate-tile is-meta">
+           <i class="fa-solid fa-ethernet net-rate-icon"></i>
+           <div class="net-rate-text">
+             <div class="net-rate-value">${esc(primary.name)}</div>
+             <div class="net-rate-label">${primary.isWireless ? 'Wi-Fi' : 'Wired'}${
+               net.signalPercent != null ? ` &middot; signal ${esc(net.signalPercent)}%` : ''
+             }</div>
+           </div>
+         </div>
+         <div id="net-ping-tile-container">${pingTileHtml()}</div>
+       </div>`
+    : '';
+
+  const examined = [
+    // anc: adapter name and the up/down rates moved into the tiles above -
+    // repeating them here would just be the old inline text back again.
+    `${processes.length} program(s) with a connection open`,
+    net.updateTransfers != null
+      ? `Windows Update: ${net.updateTransfers === 0 ? 'not downloading' : `${net.updateTransfers} download(s) running`}`
+      : null,
+    net.bitsJobs != null
+      ? `background transfers: ${net.bitsJobs === 0 ? 'none' : net.bitsJobs}`
+      : 'background transfers: needs administrator to see every account'
+  ].filter(Boolean);
+
+  const signalLine =
+    net.signalNote === 'needs-location-permission'
+      ? 'Wi-Fi signal strength was not read: Windows keeps it behind the Location privacy setting.'
+      : net.signalNote === 'needs-elevation'
+        ? 'Wi-Fi signal strength was not read: Windows only reports it to an administrator.'
+        : null;
+
+  // Operator report: "are we able to enumerate the connections open and
+  // places connected to... would that help decide if risky." The IPs were
+  // always collected (scanner.ps1); this makes "places connected to" a real,
+  // checkable list instead of just a count, without a port (kept stripped -
+  // see the comment where scanner.ps1 collects it) or any DNS lookup (would
+  // be outbound network I/O, which this panel is tested to never do).
+  const rows = top
+    .map((p, i) => {
+      const peers = Array.isArray(p.peers) ? p.peers : [];
+      const rowId = `net-peers-${i}`;
+      // hks: a high count is where the reassurance has to be VISIBLE, not
+      // only on hover - the whole complaint was that the bare number reads
+      // as worrying on sight. Below the threshold the tooltip still carries
+      // the same context for anyone who goes looking.
+      const kind = classifyNetProgram(p.name);
+      const countLabel =
+        kind && p.connectionCount >= NET_NOTABLE_CONNECTION_COUNT
+          ? `${esc(p.connectionCount)} <span class="net-kind-note">normal for ${esc(kind.kind)}</span>`
+          : esc(p.connectionCount);
+      return `
+      <tr class="app-row${peers.length ? ' net-row-expandable' : ''}" ${peers.length ? `data-peers-toggle="${rowId}"` : ''}>
+        <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
+        <td style="font-size: 12px; color: var(--text-gray);">${esc(p.processId)}</td>
+        <td style="font-size: 12px; color: var(--text-gray);" title="${esc(netConnectionTitle(p.name, p.connectionCount))}">${countLabel}</td>
+        <td style="font-size: 12px; color: var(--text-gray);">
+          ${esc(p.peerCount)}${peers.length ? ' <i class="fa-solid fa-chevron-right net-peers-chevron"></i>' : ''}
+        </td>
+      </tr>
+      ${peers.length ? `
+      <tr class="net-peers-row" id="${rowId}" style="display: none;">
+        <td colspan="4">
+          <div class="net-peers-list">${peers.map((ip) => `<span class="net-peer-pill">${esc(ip)}</span>`).join('')}</div>
+        </td>
+      </tr>` : ''}`;
+    })
+    .join('');
+
+  body.innerHTML = `
+    <div class="net-verdict ${v.cls}">
+      <div class="net-verdict-icon"><i class="fa-solid ${v.icon}"></i></div>
+      <div class="net-verdict-main">
+        <div class="net-verdict-title">${esc(v.title)}</div>
+        <div class="net-verdict-detail">${esc(v.detail)}</div>
+      </div>
+      <button class="btn-sec btn-compact" id="btn-network-refresh">
+        <i class="fa-solid fa-rotate-right"></i> Measure again
+      </button>
+    </div>
+
+    ${rateTiles}
+
+    <div class="panel-inline-note">Looked at: ${examined.map(esc).join(' &middot; ')}${signalLine ? ` &middot; ${esc(signalLine)}` : ''}</div>
+
+    <div id="network-hold-row"></div>
+
+    ${
+      top.length
+        ? `<div style="overflow-x: auto;">
+             <table class="apps-table">
+               <thead>
+                 <tr>
+                   <th style="width: 40%;">Program</th>
+                   <th style="width: 15%;">ID</th>
+                   <th style="width: 22%;">Connections open</th>
+                   <th style="width: 23%;">Places connected to</th>
+                 </tr>
+               </thead>
+               <tbody>${rows}</tbody>
+             </table>
+           </div>
+           <div class="panel-inline-note">Windows does not tell any program how many bytes each other program used
+             without a kernel-level trace, so this is what each one has open - not a share of the speed.</div>`
+        : ''
+    }`;
+
+  if (badge) {
+    badge.style.display = 'inline-flex';
+    badge.textContent = net.verdict === 'busy' ? 'in use' : net.verdict === 'link-weak' ? 'weak signal' : 'idle';
+    badge.className = net.verdict === 'busy' ? 'audit-badge' : 'audit-badge';
+  }
+
+  wireNetworkRefresh();
+  wireNetworkPeerToggles();
+  wirePingTile();
+  renderNetworkHold();
+}
+
+function wireNetworkPeerToggles() {
+  document.querySelectorAll('[data-peers-toggle]').forEach((row) => {
+    row.addEventListener('click', () => {
+      const target = document.getElementById(row.getAttribute('data-peers-toggle'));
+      if (!target) return;
+      const showing = target.style.display !== 'none';
+      target.style.display = showing ? 'none' : 'table-row';
+      row.classList.toggle('is-expanded', !showing);
+    });
+  });
+}
+
+// --- kp0: manual-tap ping -----------------------------------------------
+//
+// The app's one deliberate, scoped exception to "no network I/O ever" -
+// enforced HERE, not just described in the About page: nothing calls
+// runPing() except the tile's own click handler wired in wirePingTile().
+// No timer, no auto-run on tab open or refresh, no retry loop.
+let netPrimaryAdapter = null;
+let pingDestination = null; // null until the first render picks up a gateway
+// kct: is pingDestination still the gateway Vanish detected, or something the
+// user typed? Only the former may be described on screen as "your router".
+let pingDestinationIsGateway = false;
+let pingEditing = false;
+let pingState = { status: 'idle' }; // idle | running | success | error
+
+function pingTileHtml() {
+  // kct: name the destination, do not just print it. The auto-detected value
+  // is the machine's own default gateway - i.e. the user's router - and the
+  // whole reason kp0 was allowed to exist is that the one packet it sends
+  // stays on the local network. Printing a bare "10.128.67.147" hid exactly
+  // that: the operator saw an unexplained private IP in the one feature that
+  // admits to sending traffic, looked it up in an external tool, and was told
+  // it has no location or owner. Correct data, no confidence.
+  //
+  // Only claimed while the destination IS the detected gateway. Once the user
+  // edits it, Vanish no longer knows what the address is and must not say it
+  // does - "your router" pointing at 8.8.8.8 would be a confident wrong answer
+  // of exactly the kind this app refuses everywhere else.
+  const label = !pingDestination
+    ? 'no gateway found'
+    : pingDestinationIsGateway
+      ? `your router (${esc(pingDestination)})`
+      : esc(pingDestination);
+  const editRow = pingEditing
+    ? `<input type="text" class="net-ping-dest-input" id="net-ping-dest-input" value="${esc(pingDestination || '')}"
+         placeholder="IP address or hostname" spellcheck="false">`
+    : `<div class="net-rate-label">
+         to ${label}
+         <button class="net-ping-edit-btn" id="net-ping-edit-btn" title="Change what Ping tests against">
+           <i class="fa-solid fa-pen"></i>
+         </button>
+       </div>`;
+
+  let icon = 'fa-tower-broadcast';
+  let value = 'Tap to test';
+  if (pingState.status === 'running') {
+    icon = 'fa-spinner fa-spin';
+    value = 'Pinging&hellip;';
+  } else if (pingState.status === 'success') {
+    value = `${esc(pingState.roundTripMs)} ms`;
+  } else if (pingState.status === 'error') {
+    icon = 'fa-triangle-exclamation';
+    value = 'No reply';
+  }
+
+  return `
+    <div class="net-rate-tile net-ping-tile${pingState.status === 'error' ? ' is-weak' : ''}" id="net-ping-tile"
+         title="Sends one ICMP echo to the address below and reports whether it replies and how fast. This is the only network traffic Vanish ever sends, and only when you tap this tile.">
+      <i class="fa-solid ${icon} net-rate-icon"></i>
+      <div class="net-rate-text">
+        <div class="net-rate-value" id="net-ping-value">${value}</div>
+        ${editRow}
+      </div>
+    </div>`;
+}
+
+function reRenderPingTile() {
+  const container = document.getElementById('net-ping-tile-container');
+  if (container) container.innerHTML = pingTileHtml();
+  wirePingTile();
+}
+
+function wirePingTile() {
+  const tile = document.getElementById('net-ping-tile');
+  if (tile) {
+    tile.addEventListener('click', (e) => {
+      if (e.target.closest('.net-ping-edit-btn') || e.target.closest('.net-ping-dest-input')) return;
+      runPing();
+    });
+  }
+
+  const editBtn = document.getElementById('net-ping-edit-btn');
+  if (editBtn) {
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      pingEditing = true;
+      reRenderPingTile();
+      const input = document.getElementById('net-ping-dest-input');
+      if (input) { input.focus(); input.select(); }
+    });
+  }
+
+  const input = document.getElementById('net-ping-dest-input');
+  if (input) {
+    input.addEventListener('click', (e) => e.stopPropagation());
+    const commit = () => {
+      const value = input.value.trim();
+      if (value) {
+        // kct: an edited destination is only still "your router" if the user
+        // typed the detected gateway back in. Compared rather than assumed,
+        // so retyping the same address does not silently downgrade the label.
+        pingDestinationIsGateway =
+          !!(netPrimaryAdapter && netPrimaryAdapter.gatewayAddress === value);
+        pingDestination = value;
+        pingState = { status: 'idle' };
+      }
+      pingEditing = false;
+      reRenderPingTile();
+    };
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') commit();
+      if (e.key === 'Escape') { pingEditing = false; reRenderPingTile(); }
+    });
+    input.addEventListener('blur', commit);
+  }
+}
+
+async function runPing() {
+  if (pingState.status === 'running') return;
+  if (!pingDestination) {
+    toast('No destination to ping - this PC has no default gateway right now.', 'warn');
+    return;
+  }
+
+  // Condition 4 (bd kp0): a one-time explanation before the FIRST tap ever,
+  // naming what is sent, where, and that it is the app's only outbound
+  // traffic - not a generic "are you sure". Declining does not set the
+  // remembered flag, so the next tap asks again rather than silently
+  // pinging without ever having been agreed to.
+  if (!appSettings.pingConsentGiven) {
+    const ok = await confirmDialog({
+      title: 'Send a network request?',
+      body:
+        `Vanish will send one ICMP ping to ${pingDestination}` +
+        // kct: the consent dialog is the one place a person decides whether to
+        // allow the app's only outbound packet. "10.128.67.147" means nothing
+        // to most people; "your own router, on this network" is the fact that
+        // actually informs the decision - and it is only stated when true.
+        (pingDestinationIsGateway
+          ? ' - your own router, on this network, not anywhere on the internet - '
+          : ' ') +
+        'and read whether it replies and how fast. ' +
+        'This is the only network traffic Vanish ever sends - everything else in the app only reads ' +
+        'information already on this PC. You can change the destination with the pencil icon, and nothing ' +
+        'is ever sent unless you tap this tile.',
+      confirmLabel: 'Send it'
+    });
+    if (!ok) return;
+    // saveSettings() updates the module-level appSettings itself; it has no
+    // return value.
+    await saveSettings({ pingConsentGiven: true });
+  }
+
+  pingState = { status: 'running' };
+  reRenderPingTile();
+
+  let res;
+  try {
+    res = await window.api.networkPing({ destination: pingDestination });
+  } catch (err) {
+    res = { success: false, error: err.message };
+  }
+
+  pingState = res && res.success === true
+    ? { status: 'success', roundTripMs: res.roundTripMs }
+    : { status: 'error', error: (res && res.error) || 'No reply.' };
+  reRenderPingTile();
+}
+
+// bfh.2. A hold changes a machine-wide Windows policy and pauses other
+// people's transfers, so while it is on it must be impossible to miss - the
+// failure mode of a quiet background toggle is a user who never gets another
+// Windows update and has no idea why.
+async function renderNetworkHold() {
+  const row = document.getElementById('network-hold-row');
+  if (!row) return;
+
+  let state = null;
+  try {
+    state = await window.api.networkHoldState();
+  } catch {
+    return;
+  }
+
+  if (state && state.active) {
+    const heldJobsList = (state.record && state.record.bitsJobs) || [];
+    const heldJobs = heldJobsList.length;
+    const since = state.record && state.record.startedAt
+      ? new Date(state.record.startedAt).toLocaleTimeString()
+      : null;
+
+    // Operator report: the hold worked, but nothing named what it actually
+    // held - "N background transfer(s)" is a number with nothing to check it
+    // against. Each captured job already carries a displayName (scanner.ps1
+    // network-hold-capture); a PID-level list isn't possible (BITS jobs
+    // aren't reliably tied to one live process), but naming the transfers
+    // themselves is the concrete, checkable version of the same idea.
+    const jobList = heldJobs > 0
+      ? `<ul class="net-hold-jobs">${heldJobsList.map((j) => `<li>${esc(j.displayName || j.jobId)}</li>`).join('')}</ul>`
+      : '';
+
+    row.innerHTML = `
+      <div class="net-hold is-on">
+        <div class="net-hold-main">
+          <div class="net-hold-title"><i class="fa-solid fa-pause"></i> Background transfers are being held</div>
+          <div class="net-hold-detail">
+            Windows Update's background downloads are capped and
+            ${heldJobs === 0 ? 'no other transfer was running to pause' : `${heldJobs} background transfer(s) are paused`}${since ? `, since ${esc(since)}` : ''}.
+            Releasing puts every setting back exactly as it was. Vanish also releases it by itself if it is closed or crashes.
+          </div>
+          ${jobList}
+        </div>
+        <button class="btn-primary btn-compact" id="btn-network-release" data-destructive="true">
+          <i class="fa-solid fa-play"></i> Release
+        </button>
+      </div>`;
+  } else {
+    row.innerHTML = `
+      <div class="net-hold">
+        <div class="net-hold-main">
+          <div class="net-hold-title">Hold background transfers</div>
+          <div class="net-hold-detail">
+            Caps Windows Update's background downloading and pauses background transfers that are running, until you
+            release it. It cannot give a program more speed - it only stops other things taking it - and it does
+            nothing about traffic from other devices on your network.
+          </div>
+        </div>
+        <button class="btn-sec btn-compact" id="btn-network-hold" data-destructive="true">
+          <i class="fa-solid fa-pause"></i> Hold
+        </button>
+      </div>`;
+  }
+
+  const hold = document.getElementById('btn-network-hold');
+  if (hold) hold.addEventListener('click', () => applyNetworkHold());
+  const release = document.getElementById('btn-network-release');
+  if (release) release.addEventListener('click', () => releaseNetworkHold());
+
+  applyTierLocks();
+}
+
+async function applyNetworkHold() {
+  if (!guardFullMode()) return;
+
+  const ok = await confirmDialog({
+    title: 'Hold background transfers?',
+    body:
+      "Windows Update's background downloads are capped, and background transfers that are running now are paused. " +
+      'Nothing is uninstalled and nothing is deleted. Every setting is written down before it is changed, so releasing ' +
+      'puts it all back - and Vanish releases it automatically if it closes or crashes while the hold is on.',
+    confirmLabel: 'Hold them'
+  });
+  if (!ok) return;
+
+  const res = await window.api.networkHoldApply();
+  if (!res || res.success !== true) {
+    toast(`Nothing was held: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
+    await renderNetworkHold();
+    return;
+  }
+
+  toast(
+    `Background transfers held. ${res.appliedCount} setting(s) changed, and every one of them is recorded so it can be put back.`,
+    'success',
+    6000
+  );
+  await renderNetworkHold();
+}
+
+async function releaseNetworkHold() {
+  if (!guardFullMode()) return;
+
+  const res = await window.api.networkHoldRevert();
+  if (!res || res.success !== true) {
+    // A partial release keeps its record on disk on purpose, so this is
+    // recoverable rather than stranded - say so instead of just failing.
+    toast(
+      `Some settings could not be put back: ${(res && res.error) || 'no reason given'}. Vanish still has the record and will try again next time it starts.`,
+      'error',
+      10000
+    );
+    await renderNetworkHold();
+    return;
+  }
+
+  toast('Background transfers released. Every setting is back where it was.', 'success', 5000);
+  await renderNetworkHold();
+}
+
+function wireNetworkRefresh() {
+  const btn = document.getElementById('btn-network-refresh');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const badge = document.getElementById('audit-network-badge');
+    if (badge) {
+      badge.style.display = 'inline-flex';
+      badge.textContent = 'measuring';
+    }
+    btn.disabled = true;
+    // Only this section re-samples. Re-running the whole Health Advisor to
+    // answer one question is the pattern 7oo.5 was about.
+    const net = await window.api.getNetworkActivity();
+    renderNetworkActivity(net);
+  });
+}
+
+// Operator-proposed throttle: "put that on a manual refresh only... or an
+// interval based refresh we could set in settings." Off (0) by default -
+// today's manual-only "Measure again" behaviour is unchanged unless a
+// person opts in from Settings. Only runs while the Health Advisor tab is
+// actually visible (switchTab starts/stops it), same lifecycle as the Task
+// Manager sampler.
+let networkRefreshTimer = null;
+
+function startNetworkAutoRefresh() {
+  stopNetworkAutoRefresh();
+  const seconds = appSettings.networkRefreshSeconds || 0;
+  if (seconds <= 0) return;
+  networkRefreshTimer = setInterval(async () => {
+    const net = await window.api.getNetworkActivity();
+    renderNetworkActivity(net);
+  }, seconds * 1000);
+}
+
+function stopNetworkAutoRefresh() {
+  if (networkRefreshTimer) {
+    clearInterval(networkRefreshTimer);
+    networkRefreshTimer = null;
+  }
+}
+
+function renderDiskBars(disks, error) {
+  const list = document.getElementById('audit-disk-list');
+  if (!list) return;
+
+  // "No local drives found" is a claim about the machine. If the query failed,
+  // say that instead - a broken query rendered as an empty result is what let
+  // this section ship dead (7oo.8).
+  if (error) {
+    list.innerHTML = `<div class="panel-state error" style="padding: 12px 0;">
+      <i class="fa-solid fa-circle-xmark"></i>
+      <div>Could not read the drives on this PC: ${esc(error)}</div>
+    </div>`;
+    return;
+  }
+
+  if (!disks || disks.length === 0) {
+    list.innerHTML = '<div style="color: var(--text-gray); font-size: 13px;">No local drives found.</div>';
+    return;
+  }
+
+  list.innerHTML = disks.map(d => {
+    const pct = d.pctUsed ?? 0;
+    const fillClass = pct >= 90 ? 'danger' : pct >= 75 ? 'warn' : '';
+    return `
+      <div class="disk-bar-row">
+        <div class="disk-bar-header">
+          <span class="disk-bar-drive">${esc(d.drive)}:\ &nbsp;<span style="font-weight:400; font-size:12px; color:var(--text-gray);">${esc(d.label)}</span></span>
+          <span class="disk-bar-stats">${d.usedGB} GB used of ${d.totalGB} GB &nbsp;-&nbsp; ${d.freeGB} GB free &nbsp;-&nbsp; ${pct}% full</span>
+        </div>
+        <div class="disk-bar-track">
+          <div class="disk-bar-fill ${fillClass}" style="width: ${pct}%;"></div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderStartupTable(startup) {
+  const tbody      = document.getElementById('audit-startup-tbody');
+  const countBadge = document.getElementById('audit-startup-count');
+  const orphanBadge= document.getElementById('audit-orphan-count');
+  if (!tbody) return;
+
+  const items   = startup.items   ?? [];
+  const total   = startup.total   ?? items.length;
+  const orphans = startup.orphans ?? 0;
+
+  if (countBadge)  countBadge.textContent  = total;
+  if (orphanBadge) {
+    orphanBadge.textContent = `${orphans} broken`;
+    orphanBadge.style.display = orphans > 0 ? 'inline-flex' : 'none';
+  }
+
+  // 7oo.11: this surface acts now, and what it does is reversible. The note
+  // says which, because the difference between "removed" and "removed, and
+  // here is how to undo it" is the whole basis for clicking the button.
+  const noteEl = document.getElementById('audit-startup-note');
+  if (noteEl) {
+    noteEl.textContent = startup.detectionNote ||
+      'Every change here is saved to quarantine first, so it can be put back.';
+  }
+
+  // Keep the rows so the click handlers can find their item by index rather
+  // than re-deriving it from the DOM.
+  startupItems = items;
+
+  if (items.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="5" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
+          <i class="fa-solid fa-circle-check" style="color:var(--color-success); margin-right:6px;"></i>Nothing extra starts with Windows on this PC.
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = items.map((item, index) => {
+    const sourceClass = item.source === 'Registry' ? 'registry'
+                      : item.source === 'TaskScheduler' ? 'task'
+                      : 'service';
+    const sourceLabel = item.source === 'TaskScheduler' ? 'Task' : item.source;
+
+    const dotClass = item.exeExists === false ? 'orphan'
+                   : item.enabled ? 'active'
+                   : 'passive';
+    const statusLabel = item.exeExists === false ? 'Broken'
+                      : item.enabled ? 'Active'
+                      : 'Inactive';
+
+    const cmdShort = (item.command || '').length > 80
+      ? (item.command || '').slice(0, 80) + '...'
+      : (item.command || '-');
+
+    // An orphan the user is told about but given nothing to do with is the
+    // defect this fixes. Every orphaned row now carries the concrete place its
+    // own kind of entry is managed.
+    const suggestionRow = item.exeExists === false && item.suggestion
+      ? `<tr class="startup-suggestion-row">
+           <td colspan="5">
+             <div class="startup-suggestion">
+               <i class="fa-solid fa-lightbulb"></i>
+               <div>
+                 <div><strong>The program at ${esc(item.exePath || 'this location')} is gone, so this entry does nothing every time Windows starts.</strong></div>
+                 <div>${esc(item.suggestion)}</div>
+               </div>
+             </div>
+           </td>
+         </tr>`
+      : '';
+
+    // The label changes with the row's own state: a disabled task offers to be
+    // enabled again, which is what makes disabling it safe to try.
+    const actionLabel = item.action === 'task-disable'
+      ? (item.enabled ? 'Disable' : 'Enable')
+      : item.actionLabel || 'Turn off';
+
+    const actionCell = item.action
+      ? `<button class="btn-sec btn-compact startup-action-btn" data-startup-index="${index}"
+                 data-destructive="true"
+                 title="${esc(item.suggestion || '')}">${esc(actionLabel)}</button>`
+      : `<span style="font-size:11.5px; color: var(--text-muted);">Managed by Windows</span>`;
+
+    return `
+      <tr class="app-row${item.exeExists === false ? ' is-orphan' : ''}">
+        <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(item.name)}</td>
+        <td><span class="source-badge ${esc(sourceClass)}">${esc(sourceLabel)}</span></td>
+        <td>
+          <span class="status-dot ${esc(dotClass)}"></span>
+          <span style="font-size:12px; color: var(--text-gray);">${statusLabel}</span>
+        </td>
+        <td class="mono" style="color: var(--text-muted); word-break: break-all;" title="${esc(item.command || '')}">${esc(cmdShort)}</td>
+        <td style="text-align: right; white-space: nowrap;">${actionCell}</td>
+      </tr>
+      ${suggestionRow}
+    `;
+  }).join('');
+
+  tbody.querySelectorAll('.startup-action-btn').forEach((btn) => {
+    btn.addEventListener('click', () =>
+      runStartupAction(parseInt(btn.getAttribute('data-startup-index'), 10))
+    );
+  });
+
+  // Audit Mode leaves these visible and inert with the reason, like every other
+  // destructive control in the app (REQ-04).
+  applyTierLocks();
+}
+
+// 7oo.11. Three actions, one confirmation shape: say what will change, say
+// where the undo lives, then do it and report the result on the row.
+async function runStartupAction(index) {
+  const item = startupItems[index];
+  if (!item || !item.action) return;
+  if (!guardFullMode()) return;
+
+  const isTask = item.action === 'task-disable';
+  const enabling = isTask && !item.enabled;
+
+  let title;
+  let body;
+  if (isTask) {
+    title = enabling ? `Enable "${item.name}"?` : `Disable "${item.name}"?`;
+    body = enabling
+      ? 'The task runs at logon again. Nothing else about it changes.'
+      : 'The task stays on this PC but stops running at logon. This same button turns it back on.';
+  } else if (item.action === 'service-manual') {
+    title = `Stop "${item.name}" starting with Windows?`;
+    body =
+      'The service is set to start only when something asks for it, instead of at every boot. It is not ' +
+      'removed, and it can still run. Its settings are saved to the Quarantine tab first, so the change ' +
+      'can be undone from there.';
+  } else {
+    title = `Remove "${item.name}" from startup?`;
+    body =
+      'This entry stops running when Windows starts. The program itself is not touched or uninstalled. ' +
+      'The startup settings are saved to the Quarantine tab first, so you can put this back.';
+  }
+
+  const ok = await confirmDialog({ title, body, confirmLabel: isTask ? (enabling ? 'Enable' : 'Disable') : 'Do it' });
+  if (!ok) return;
+
+  const res = await window.api.startupAction({
+    action: item.action,
+    item,
+    enable: enabling
+  });
+
+  if (!res || res.success !== true) {
+    toast(`Nothing changed: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
+    return;
+  }
+
+  toast(
+    isTask
+      ? `"${item.name}" is now ${enabling ? 'enabled' : 'disabled'}.`
+      : `"${item.name}" no longer starts with Windows. You can put it back from the Quarantine tab.`,
+    'success',
+    6000
+  );
+
+  // The change is ours, so the result is not in doubt - but a startup list is
+  // cheap to re-read and this keeps the row's state honest rather than guessed.
+  await loadAuditData(true);
+}
+
+// Operator: "redundant software should offer a button that leads to a
+// decision making workflow... a waive-off button... it still shows up in
+// that section, but with the notice that the user overrode it, still
+// offering the decision making buttonflow." Example given: different
+// browsers for different needs is a deliberate choice, not an oversight -
+// waiving records that choice without hiding the suggestion or losing the
+// ability to act on it later.
+function renderRedundancyGroups(redundancy) {
+  const list = document.getElementById('audit-redundancy-list');
+  const countBadge = document.getElementById('audit-redundancy-count');
+  const waivedBadge = document.getElementById('audit-redundancy-waived-count');
+  if (!list) return;
+
+  const groups = redundancy.groups ?? [];
+  const waived = new Set(appSettings.redundancyWaivers || []);
+  const waivedCount = groups.filter((g) => waived.has(g.category)).length;
+
+  // Same count/sub-count pill pattern as Startup Items' "N broken" badge -
+  // operator: "discounts it while showing the discount on the header pill,
+  // like how broken from startup shows up." The primary badge is what still
+  // needs a look (waived groups excluded, i.e. discounted out of it); the
+  // second badge accounts for the difference instead of hiding it.
+  if (countBadge) {
+    const active = groups.length - waivedCount;
+    countBadge.textContent = active;
+    countBadge.style.display = active > 0 ? 'inline-flex' : 'none';
+  }
+  if (waivedBadge) {
+    waivedBadge.textContent = `${waivedCount} waived`;
+    waivedBadge.style.display = waivedCount > 0 ? 'inline-flex' : 'none';
+  }
+
+  if (groups.length === 0) {
+    list.innerHTML = `
+      <div class="audit-ok-box">
+        <i class="fa-solid fa-circle-check"></i>
+        No programs here appear to overlap with each other.
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = groups.map(g => {
+    const isWaived = waived.has(g.category);
+    const rows = (g.apps ?? []).map(a => `
+      <div class="redundancy-app-row">
+        <span class="redundancy-pill">${esc(a.name)}</span>
+        <button class="btn-sec btn-compact redundancy-uninstall-btn" data-app-id="${esc(a.id)}">
+          <i class="fa-solid fa-magnifying-glass"></i> Review to uninstall
+        </button>
+      </div>`
+    ).join('');
+    return `
+      <div class="redundancy-group${isWaived ? ' is-waived' : ''}">
+        <div class="redundancy-group-header">
+          <span class="redundancy-category"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${esc(g.category)}</span>
+          <span class="audit-badge${isWaived ? '' : ' danger'}">${esc(g.count)} installed</span>
+        </div>
+        <div class="redundancy-tip">${esc(g.tip)}</div>
+        ${isWaived
+          ? `<div class="redundancy-override-notice"><i class="fa-solid fa-circle-check"></i> You chose to keep all of these - Vanish will keep showing this group, but will not flag it as unusual.</div>`
+          : ''
+        }
+        <div class="redundancy-app-pills">${rows}</div>
+        <div class="redundancy-actions">
+          <button class="btn-sec btn-compact" data-waive-toggle="${esc(g.category)}">
+            <i class="fa-solid ${isWaived ? 'fa-rotate-left' : 'fa-circle-check'}"></i> ${isWaived ? 'Undo, flag this again' : 'Keep all of these'}
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  wireRedundancyActions();
+}
+
+function wireRedundancyActions() {
+  document.querySelectorAll('.redundancy-uninstall-btn').forEach((btn) => {
+    btn.addEventListener('click', () => jumpToUninstall(btn.getAttribute('data-app-id')));
+  });
+  document.querySelectorAll('[data-waive-toggle]').forEach((btn) => {
+    btn.addEventListener('click', () => toggleRedundancyWaiver(btn.getAttribute('data-waive-toggle')));
+  });
+}
+
+// Jumps to the exact same entry point a person clicking the app in All
+// Programs would reach (selectApp -> the details sidebar's own Clean
+// Uninstall button) rather than opening a second, parallel uninstall path.
+// Stops short of opening the wizard directly - the redundancy group's app
+// object is a collapsed "family" summary (Get-SoftwareRedundancy), not
+// necessarily the exact live registry row, so the details panel is where
+// that gets confirmed before anything destructive is offered.
+function jumpToUninstall(appId) {
+  const app = allApps.find((a) => a.id === appId);
+  if (!app) {
+    toast('That program is no longer on the list - try re-scanning.', 'warn');
+    return;
+  }
+  switchTab('all-apps');
+  clearAppFilters();
+  selectApp(app, null);
+  filterAndRenderApps();
+  const row = elements.appsTbody.querySelector('tr.selected');
+  if (row) row.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
+async function toggleRedundancyWaiver(category) {
+  const current = new Set(appSettings.redundancyWaivers || []);
+  if (current.has(category)) current.delete(category);
+  else current.add(category);
+  await saveSettings({ redundancyWaivers: [...current] });
+  // Only the override state changed - re-running the whole Health Advisor
+  // load (system diagnostics, startup items, AND the network read with its
+  // built-in ~1s sample sleep) to redraw one section's badges would be pure
+  // waiting. Re-fetch just the redundancy groups and redraw only that list.
+  const redundancy = await window.api.getSoftwareRedundancy();
+  renderRedundancyGroups(redundancy);
+}
+

@@ -43,7 +43,14 @@ for (const match of css.matchAll(/^\.(fa-[a-z0-9-]+)\s*\{/gm)) {
 }
 assert(defined.size > 10, `the icon set defines glyphs (${defined.size} found)`);
 
-const sources = ['index.html', 'renderer.js', 'splash.html'].filter((f) =>
+// Every renderer module, discovered rather than listed: a hardcoded list is
+// how this check quietly stopped covering the UI when renderer.js was split
+// into renderer/, still reporting PASS over a fraction of the source.
+const rendererDir = path.join(root, 'renderer');
+const rendererFiles = fs.existsSync(rendererDir)
+  ? fs.readdirSync(rendererDir).filter((f) => f.endsWith('.js')).map((f) => path.join('renderer', f))
+  : [];
+const sources = ['index.html', 'splash.html', ...rendererFiles].filter((f) =>
   fs.existsSync(path.join(root, f))
 );
 

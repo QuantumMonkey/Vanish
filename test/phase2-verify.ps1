@@ -118,7 +118,12 @@ try {
     Assert-True ($destructiveHits.Count -gt 0) "destructive command line pattern is flagged"
 
     # Rule 7 is display-only: prove nothing in the renderer acts on an indicator.
-    $rendererText = Get-Content (Join-Path $root "renderer.js") -Raw
+    # Every renderer module concatenated, discovered rather than named. This
+    # read a single renderer.js until that file was split into renderer/, at
+    # which point the whole suite CRASHED rather than silently passing - which
+    # is the correct failure mode and how this was caught immediately.
+    $rendererFiles = Get-ChildItem (Join-Path $root "renderer") -Filter *.js -ErrorAction SilentlyContinue
+    $rendererText = ($rendererFiles | ForEach-Object { Get-Content $_.FullName -Raw }) -join "`n"
     $actionOnIndicator = ($rendererText -match 'indicators[\s\S]{0,200}(killProcess|unlockPath|purgeRemnants|cleanerPurge|vaultDelete)')
     Assert-True (-not $actionOnIndicator) "no UI action is wired to an indicator (Rule 7: display-only)"
 
