@@ -157,6 +157,38 @@ contextBridge.exposeInMainWorld('api', {
     signalPercent: null, signalNote: null, updateTransfers: 0, bitsJobs: 0, elevated: false
   }),
   networkPing: stub('networkPing', { success: true, destination: '192.168.1.1', roundTripMs: 12 }),
+  // ddx. The default payload is deliberately the shape that motivated the
+  // feature rather than a tidy one: a SYSTEM service listening on every
+  // interface, validly signed, belonging to software the user does not use -
+  // alongside a loopback-only listener that must NOT be presented the same
+  // way. A fixture that only carries the easy case tests nothing.
+  getListeners: stub('getListeners', {
+    success: true,
+    totals: { all: 1, specific: 0, loopback: 1 },
+    programs: [
+      {
+        pid: 4242, name: 'rpdsvc', path: 'C:\\Program Files (x86)\\Real\\RealPlayer\\RPDS\\Bin\\rpdsvc.exe',
+        exposure: 'all', listenerCount: 2,
+        listeners: [
+          { protocol: 'TCP', address: '0.0.0.0', port: '20121', bindClass: 'all', socketCount: 1 },
+          { protocol: 'TCP', address: '::', port: '20121', bindClass: 'all', socketCount: 1 }
+        ],
+        isService: true, serviceNames: ['RealPlayer Desktop Service'], serviceKeys: ['rpdsvc'],
+        runsAsSystem: true, serviceAccount: 'LocalSystem', startMode: 'Auto',
+        signature: { status: 'Valid', signer: 'RealNetworks LLC', isEv: true }
+      },
+      {
+        pid: 5150, name: 'localthing', path: 'C:\\Tools\\localthing.exe',
+        exposure: 'loopback', listenerCount: 1,
+        listeners: [
+          { protocol: 'TCP', address: '127.0.0.1', port: '9229', bindClass: 'loopback', socketCount: 1 }
+        ],
+        isService: false, serviceNames: [], serviceKeys: [],
+        runsAsSystem: false, serviceAccount: null, startMode: null,
+        signature: { status: 'not-checked', signer: null, isEv: false }
+      }
+    ]
+  }),
   networkHoldState: stub('networkHoldState', { active: false, record: null }),
   networkHoldApply: stub('networkHoldApply', { success: true }),
   networkHoldRevert: stub('networkHoldRevert', { success: true }),

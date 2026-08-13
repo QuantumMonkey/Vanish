@@ -31,16 +31,18 @@ async function loadAuditData(force = false) {
     // Fire every PowerShell query in parallel. The network read spends most of
     // its time asleep between two counter samples, so running it alongside the
     // others costs the load almost nothing in wall-clock time.
-    const [diag, startup, redundancy, network] = await Promise.all([
+    const [diag, startup, redundancy, network, listeners] = await Promise.all([
       window.api.getSystemDiagnostics(),
       window.api.getStartupItems(),
       window.api.getSoftwareRedundancy(),
-      window.api.getNetworkActivity()
+      window.api.getNetworkActivity(),
+      window.api.getListeners()
     ]);
 
     renderSysInfoCards(diag);
     renderDiskBars(diag.disks || [], diag.disksError);
     renderNetworkActivity(network);
+    renderListeners(listeners);
     renderStartupTable(startup);
     renderRedundancyGroups(redundancy);
 
@@ -1114,4 +1116,148 @@ async function toggleRedundancyWaiver(category) {
   const redundancy = await window.api.getSoftwareRedundancy();
   renderRedundancyGroups(redundancy);
 }
-
+
+// ddx: what can be reached from outside.
+//
+// This exists because I gave the operator a confidently wrong answer about a
+// service on their machine. They asked about rpdsvc, which had 54 open
+// connections. I said: Remote Desktop, all loopback, nothing leaving the
+// machine. The connections really were all loopback. It was also listening on
+// 0.0.0.0:20121 as LocalSystem, and it was not Remote Desktop at all - it is
+// RealPlayer's, software they do not use.
+//
+// "Who is this talking to" and "who can start a conversation with this" are
+// different questions, and Vanish was answering only the reassuring one.
+//
+// THE RULES THIS PANEL FOLLOWS, and they are why it reads the way it does:
+//
+//   1. No score, no rank, no "dangerous" (Rule 6). Being reachable is not the
+//      same as being unsafe, and we cannot tell the difference from here. The
+//      defensible claim is "this is reachable"; anything stronger is invented.
+//   2. The signature and the exposure are shown TOGETHER, always. Showing only
+//      "signed by RealNetworks" is reassurance theatre; showing only "SYSTEM,
+//      listening on every interface" is scaremongering. Both are true at once.
+//      Signed means AUTHENTIC, not SAFE, and the wording says so.
+//   3. LocalSystem is stated but never treated as a verdict. Most of Windows
+//      runs as LocalSystem. On its own it is a weak signal.
+//   4. Plain language leads, netstat's syntax follows as evidence. "Accepting
+//      connections from other devices on your network" is the fact;
+//      "0.0.0.0:20121" is the proof, and belongs beside it rather than instead
+//      of it.
+const LISTENER_EXPOSURE = {
+  all: {
+    label: 'Reachable from your network',
+    detail: 'Anything that can reach this PC - other devices on your Wi-Fi or LAN, and '
+      + 'whatever your router lets through - can try to open a connection to this program.',
+    cls: 'is-exposed'
+  },
+  specific: {
+    label: 'Reachable on one network',
+    detail: 'This program accepts connections on a specific network connection rather than '
+      + 'all of them. Who can reach it depends on what that network is.',
+    cls: 'is-partial'
+  },
+  loopback: {
+    label: 'This PC only',
+    detail: 'Only programs already running on this PC can connect to it. Nothing on your '
+      + 'network can reach it.',
+    cls: 'is-local'
+  }
+};
+
+function listenerSignatureLine(sig) {
+  if (!sig || sig.status === 'not-checked') {
+    return '<span class="listener-sig unknown">Signature not checked</span>';
+  }
+  if (sig.status === 'Valid') {
+    const who = sig.signer ? esc(sig.signer) : 'a verified publisher';
+    const ev = sig.isEv ? ' <span class="listener-ev" title="Extended Validation: the publisher is a vetted legal entity">EV</span>' : '';
+    // "Authentic, not safe" is the entire point of showing this next to an
+    // exposure line rather than on its own.
+    return `<span class="listener-sig ok" title="Signed means this really is the publisher's software. It does not mean it is safe.">Signed by ${who}${ev}</span>`;
+  }
+  if (sig.status === 'unreadable') {
+    return '<span class="listener-sig unknown">Signature could not be read</span>';
+  }
+  return `<span class="listener-sig bad" title="Windows could not confirm this binary is what its publisher shipped.">Signature: ${esc(sig.status)}</span>`;
+}
+
+function renderListeners(res) {
+  const body = document.getElementById('audit-listeners-body');
+  const badge = document.getElementById('audit-listeners-badge');
+  if (!body) return;
+
+  if (!res || res.success !== true) {
+    body.innerHTML = `<div class="panel-state">Could not read listening programs${
+      res && res.error ? `: ${esc(res.error)}` : '.'}</div>`;
+    if (badge) badge.style.display = 'none';
+    return;
+  }
+
+  const programs = res.programs || [];
+  const totals = res.totals || { all: 0, specific: 0, loopback: 0 };
+
+  if (badge) {
+    // The count that matters is the reachable-from-elsewhere one. Reporting a
+    // total of every listener would bury it - most machines have plenty of
+    // loopback listeners and none of them are the point.
+    badge.style.display = '';
+    badge.textContent = `${totals.all} reachable from your network`;
+    badge.classList.toggle('danger', false);
+  }
+
+  if (programs.length === 0) {
+    body.innerHTML = '<div class="panel-state">Nothing on this PC is waiting for incoming connections.</div>';
+    return;
+  }
+
+  body.innerHTML = programs
+    .map((p) => {
+      const ex = LISTENER_EXPOSURE[p.exposure] || LISTENER_EXPOSURE.loopback;
+      // A browser opens a WebRTC/QUIC socket per connection, so msedge alone
+      // listed 40-odd ephemeral high ports and buried every row under it.
+      // Show the first few - they sort low-port first, which is where the
+      // recognisable services live - and put the rest in the tooltip. The
+      // count is stated, so nothing is silently dropped.
+      const ENDPOINT_CAP = 8;
+      const all = p.listeners || [];
+      const fmt = (l) => `${l.protocol} ${l.address}:${l.port}${l.socketCount > 1 ? ` x${l.socketCount}` : ''}`;
+      const shown = all.slice(0, ENDPOINT_CAP);
+      const hidden = all.length - shown.length;
+      const endpoints = shown
+        .map((l) => `${esc(l.protocol)} ${esc(l.address)}:${esc(l.port)}${l.socketCount > 1 ? ` <span class="listener-xn">x${esc(l.socketCount)}</span>` : ''}`)
+        .join('<span class="listener-sep">,</span> ')
+        + (hidden > 0
+          ? `<span class="listener-more" title="${esc(all.map(fmt).join(', '))}"> and ${hidden} more</span>`
+          : '');
+
+      // Facts, each of which the user can check, none of which is a verdict.
+      const facts = [];
+      if (p.isService && p.serviceNames && p.serviceNames.length) {
+        facts.push(`Windows service: ${esc(p.serviceNames.join(', '))}`);
+      }
+      if (p.serviceAccount) {
+        facts.push(`Runs as ${esc(p.serviceAccount)}`);
+      }
+      if (p.startMode) {
+        facts.push(`Starts ${esc(String(p.startMode).toLowerCase())}`);
+      }
+
+      return `
+        <div class="listener-row ${ex.cls}">
+          <div class="listener-head">
+            <span class="listener-name">${esc(p.name)}</span>
+            <span class="listener-pid">PID ${esc(p.pid)}</span>
+            <span class="listener-exposure">${esc(ex.label)}</span>
+          </div>
+          <div class="listener-detail">${esc(ex.detail)}</div>
+          <div class="listener-endpoints" title="The sockets this program has open, as Windows reports them.">${endpoints}</div>
+          ${facts.length ? `<div class="listener-facts">${facts.map((x) => `<span>${x}</span>`).join('')}</div>` : ''}
+          <div class="listener-foot">
+            ${listenerSignatureLine(p.signature)}
+            ${p.path ? `<span class="listener-path" title="${esc(p.path)}">${esc(p.path)}</span>` : ''}
+          </div>
+        </div>`;
+    })
+    .join('');
+}

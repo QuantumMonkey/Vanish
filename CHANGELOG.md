@@ -8,6 +8,77 @@ full decision rules.
 
 ---
 
+## [0.6.0] - 2026-08-14
+
+### Added -- what can be reached from outside (`ddx`)
+
+Vanish could tell you who a program was **talking to**. It could not tell you
+who could **start a conversation with it**, and the second is the
+security-relevant question.
+
+This feature exists because of a wrong answer. Asked about `rpdsvc` with 54
+open connections, the answer given was "Remote Desktop, all loopback, nothing
+leaving the machine". The connections really were all loopback. It was also
+listening on `0.0.0.0:20121` as LocalSystem, it was not Remote Desktop at all
+-- it is RealPlayer's -- and Remote Desktop was disabled on that machine
+anyway. Every individual fact offered was true and the conclusion was wrong.
+
+The new Health Advisor section lists every program waiting for an incoming
+connection, and says in plain language who can reach it:
+
+* **Reachable from your network** -- bound to `0.0.0.0` or `::`
+* **Reachable on one network** -- bound to one specific interface
+* **This PC only** -- loopback, visually recessed because it is the
+  uninteresting case and should look it
+
+Each row names the owning program, the service behind it, the account it runs
+as, whether it starts automatically, and the actual sockets as evidence beside
+the claim rather than instead of it.
+
+**What it refuses to do is the design.** No score, no rank, no "dangerous"
+label. Being reachable is not the same as being unsafe and Vanish cannot tell
+the difference from here -- the defensible claim is "this is reachable", and
+anything stronger would be invented. The panel says so in as many words.
+
+**Signature and exposure are always shown together.** Showing only "signed by
+RealNetworks" is reassurance theatre; showing only "SYSTEM, listening on every
+interface" is scaremongering. Both are true at once. Signed means the software
+is authentic, **not** that it is safe, and the UI says that where a user will
+find it. LocalSystem is reported as a fact and never editorialised into a
+warning -- most of Windows runs as LocalSystem.
+
+On the machine this was built against it produces, unprompted:
+
+> **rpdsvc** -- Reachable from your network -- `TCP :::20121, TCP 0.0.0.0:20121`
+> -- Windows service: RealTimes Desktop Service -- Runs as LocalSystem -- Starts
+> auto -- Signed by RealNetworks LLC (EV)
+
+That is a sentence nothing else on the machine assembles.
+
+Read-only by design: anything actionable routes through the startup and service
+controls that already exist. Available in **both** tiers on purpose -- Audit
+Mode is where a cautious user sits, and this is exactly the question they are
+sitting there to ask.
+
+One detail worth recording: a SYSTEM service will not tell an unelevated caller
+its own binary path, so in Audit Mode every such service came back unsigned --
+including `rpdsvc`, the case the whole feature was built for. `Win32_Service`
+reports the same path and needs no elevation, so it is used as the fallback and
+15 of 19 externally-bound programs now resolve a signature in Audit Mode. The
+remaining four are kernel processes with genuinely no readable path, and they
+say "not checked" rather than reporting a reassuring default.
+
+### Fixed -- a busy machine no longer blanks the GPU column
+
+The GPU Engine performance counter throws under load, which is precisely when
+someone opens a task manager. The engine reported the failure honestly and the
+whole column went blank for that sample. It now retries once before reporting,
+and still reports honestly if the retry fails too -- a second attempt, not a
+pretence that the first worked. Reproduced by running two Electron suites
+alongside it, and the retry holds under the same load.
+
+---
+
 ## [0.5.3] - 2026-08-13
 
 ### Fixed -- the GPU column named the wrong card (`02f`)

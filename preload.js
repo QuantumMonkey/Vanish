@@ -72,6 +72,7 @@ contextBridge.exposeInMainWorld('api', {
   // bfh.1 - network attribution: what is using the connection, and whether
   // anything on this machine is at all. Read-only, no network I/O.
   getNetworkActivity: (params) => ipcRenderer.invoke('get-network-activity', params),
+  getListeners: () => ipcRenderer.invoke('get-listeners'),
 
   // kp0 - the one deliberate exception: a single ICMP echo, only on an
   // explicit user tap. See main.js's handler for why this does not weaken

@@ -1749,6 +1749,218 @@ function Get-NetConnectionsByProcess {
     return $byPid
 }
 
+# ddx: WHO CAN START A CONVERSATION WITH THIS PROGRAM.
+#
+# Get-NetConnectionsByProcess above answers "who is this program talking to".
+# That is the reassuring half of the picture and it is not the
+# security-relevant half. A service can have every one of its established
+# connections on loopback - genuinely nothing leaving the machine - while
+# also listening on 0.0.0.0, which means anything that can route to this
+# machine may open a new one.
+#
+# This function exists because I told the operator rpdsvc was fine on exactly
+# that reasoning: 54 established connections, all 127.0.0.1, nothing leaving.
+# True, and beside the point - it was also listening on 0.0.0.0:20121 as
+# LocalSystem, belonging to RealPlayer, which they do not use.
+#
+# WHAT THIS DELIBERATELY DOES NOT DO (Rule 6): no score, no rating, no
+# "dangerous" verdict. An externally-bound listener is not automatically a
+# vulnerability. The defensible claim is "this is reachable"; "this is
+# unsafe" is not ours to make and the wording never makes it.
+function Get-ListeningSockets {
+    $byPid = @{}
+    $output = @()
+    try { $output = & netstat.exe -ano 2>$null } catch { return $byPid }
+
+    foreach ($line in $output) {
+        $text = ([string]$line).Trim()
+        $isTcp = $text.StartsWith("TCP")
+        $isUdp = $text.StartsWith("UDP")
+        if (-not ($isTcp -or $isUdp)) { continue }
+        $parts = @($text -split "\s+" | Where-Object { $_ })
+
+        # TCP:  Proto Local Foreign State PID      (5 columns)
+        # UDP:  Proto Local Foreign PID            (4 columns - no state,
+        #       because a UDP socket has none. A bound UDP socket is still
+        #       something that can receive unsolicited traffic, so it counts
+        #       as a listener here even though netstat will not say LISTENING.)
+        if ($isTcp) {
+            if ($parts.Count -lt 5) { continue }
+            if ($parts[3] -ne "LISTENING") { continue }
+            $localRaw = [string]$parts[1]
+            $pidRaw   = [string]$parts[4]
+            $proto    = "TCP"
+        } else {
+            if ($parts.Count -lt 4) { continue }
+            $localRaw = [string]$parts[1]
+            $pidRaw   = [string]$parts[3]
+            $proto    = "UDP"
+        }
+
+        $procId = 0
+        if (-not [int]::TryParse($pidRaw, [ref]$procId)) { continue }
+        if ($procId -le 0) { continue }
+
+        # IPv6 arrives as [::]:445 - the LAST colon separates the port, and
+        # the brackets are netstat syntax rather than part of the address.
+        $cut = $localRaw.LastIndexOf(":")
+        if ($cut -lt 0) { continue }
+        $addr = $localRaw.Substring(0, $cut).Trim("[", "]")
+        $port = $localRaw.Substring($cut + 1)
+
+        # The whole point of the feature is this classification.
+        $class = "specific"
+        if ($addr -eq "0.0.0.0" -or $addr -eq "::" -or $addr -eq "*") { $class = "all" }
+        elseif ($addr -eq "127.0.0.1" -or $addr -eq "::1" -or $addr -like "127.*") { $class = "loopback" }
+
+        if (-not $byPid.ContainsKey($procId)) { $byPid[$procId] = [System.Collections.Generic.List[object]]::new() }
+        $byPid[$procId].Add([PSCustomObject]@{
+            protocol  = $proto
+            address   = $addr
+            port      = $port
+            bindClass = $class
+        })
+    }
+
+    return $byPid
+}
+
+# The signature is checked because the ABSENCE of this check is what made my
+# original rpdsvc answer irresponsible in both directions. "Signed by
+# RealNetworks" and "accepting connections from your whole network as SYSTEM"
+# are both true at once. Showing only the first is reassurance theatre;
+# showing only the second is scaremongering. Signed means AUTHENTIC, not
+# SAFE, and the wording downstream has to keep saying so.
+function Get-BinarySignature {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return @{ status = "unreadable"; signer = $null; isEv = $false }
+    }
+    try {
+        $sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+        $subject = if ($sig.SignerCertificate) { [string]$sig.SignerCertificate.Subject } else { $null }
+        $signer = $null
+        if ($subject -and $subject -match "CN=([^,]+)") { $signer = $Matches[1].Trim('"') }
+        return @{
+            status = [string]$sig.Status
+            signer = $signer
+            # An EV code-signing certificate carries the Private Organization
+            # subject qualifier. Worth surfacing because it means a vetted
+            # legal entity, which is a stronger claim than "signed" - and
+            # still not a claim about safety.
+            isEv   = [bool]($subject -match "Private Organization")
+        }
+    } catch {
+        return @{ status = "unreadable"; signer = $null; isEv = $false }
+    }
+}
+
+function Get-ListenerReport {
+    $byPid = Get-ListeningSockets
+    if ($byPid.Count -eq 0) {
+        return @{ success = $true; programs = @(); totals = @{ all = 0; specific = 0; loopback = 0 } }
+    }
+
+    # One CIM query for every service, joined on PID, rather than one query
+    # per listener. On a machine with 40 listening processes the per-process
+    # version was the whole cost of the panel.
+    $svcByPid = @{}
+    try {
+        foreach ($s in (Get-CimInstance -Query "SELECT Name, DisplayName, ProcessId, StartName, StartMode, PathName FROM Win32_Service WHERE ProcessId <> 0" -ErrorAction Stop)) {
+            if (-not $svcByPid.ContainsKey([int]$s.ProcessId)) { $svcByPid[[int]$s.ProcessId] = @() }
+            $svcByPid[[int]$s.ProcessId] += $s
+        }
+    } catch { }
+
+    $programs = [System.Collections.Generic.List[object]]::new()
+    $totalAll = 0; $totalSpecific = 0; $totalLoopback = 0
+
+    foreach ($procId in $byPid.Keys) {
+        # netstat lists one row PER SOCKET, so a browser binding mDNS on
+        # several interfaces produced four identical "UDP 0.0.0.0:5353" rows.
+        # They are all real sockets and repeating the same endpoint four
+        # times is noise, not evidence - collapse to distinct endpoints and
+        # carry how many sockets sit behind each.
+        $sockets = @($byPid[$procId] | Group-Object protocol, address, port | ForEach-Object {
+            $one = $_.Group[0]
+            [PSCustomObject]@{
+                protocol    = $one.protocol
+                address     = $one.address
+                port        = $one.port
+                bindClass   = $one.bindClass
+                socketCount = $_.Count
+            }
+        } | Sort-Object @{ Expression = { [int]$_.port } })
+        $proc = $null
+        try { $proc = Get-Process -Id $procId -ErrorAction Stop } catch { }
+        $path = $null
+        if ($proc) { try { $path = [string]$proc.Path } catch { $path = $null } }
+
+        # Worst-case exposure decides how the row reads. "Worst" is about
+        # REACH, not danger: all-interfaces is reachable by more things than
+        # a specific interface, which is reachable by more than loopback.
+        $exposure = "loopback"
+        if ($sockets | Where-Object { $_.bindClass -eq "all" }) { $exposure = "all" }
+        elseif ($sockets | Where-Object { $_.bindClass -eq "specific" }) { $exposure = "specific" }
+
+        switch ($exposure) {
+            "all"      { $totalAll++ }
+            "specific" { $totalSpecific++ }
+            default    { $totalLoopback++ }
+        }
+
+        $svcs = @()
+        if ($svcByPid.ContainsKey([int]$procId)) { $svcs = @($svcByPid[[int]$procId]) }
+
+        # Get-Process().Path throws for a process running as another user, so
+        # in Audit Mode every SYSTEM service came back with no path and
+        # therefore no signature - including rpdsvc, the exact case this
+        # feature was built for. Win32_Service.PathName is readable without
+        # elevation and names the same binary, so use it when the process
+        # itself will not say. It arrives as a full command line, so strip
+        # the arguments and the quoting.
+        if (-not $path -and $svcs.Count -gt 0 -and $svcs[0].PathName) {
+            $raw = [string]$svcs[0].PathName
+            if ($raw -match '^\s*"([^"]+)"') { $path = $Matches[1] }
+            elseif ($raw -match '^\s*(\S+\.[Ee][Xx][Ee])') { $path = $Matches[1] }
+            if ($path -and -not (Test-Path -LiteralPath $path)) { $path = $null }
+        }
+
+        # Only checked where it is load-bearing. Authenticode verification
+        # costs real time per binary, and on a loopback-only listener the
+        # answer changes nothing the user would act on. Anything not checked
+        # says "not-checked" rather than reporting a reassuring default -
+        # unknown is not "fine" (Rule 24).
+        $sig = @{ status = "not-checked"; signer = $null; isEv = $false }
+        if ($exposure -ne "loopback" -and $path) { $sig = Get-BinarySignature -Path $path }
+
+        $programs.Add([PSCustomObject]@{
+            pid           = [int]$procId
+            name          = if ($proc) { [string]$proc.ProcessName } else { "PID $procId" }
+            path          = $path
+            exposure      = $exposure
+            listeners     = $sockets
+            listenerCount = $sockets.Count
+            isService     = ($svcs.Count -gt 0)
+            serviceNames  = @($svcs | ForEach-Object { [string]$_.DisplayName })
+            serviceKeys   = @($svcs | ForEach-Object { [string]$_.Name })
+            # LocalSystem is reported because it is true and material. It is
+            # explicitly a WEAK signal on its own - most of Windows runs as
+            # LocalSystem - and nothing downstream may treat it as a verdict.
+            runsAsSystem  = [bool]($svcs | Where-Object { $_.StartName -match "LocalSystem|NT AUTHORITY\\SYSTEM" })
+            serviceAccount = if ($svcs.Count -gt 0) { [string]$svcs[0].StartName } else { $null }
+            startMode     = if ($svcs.Count -gt 0) { [string]$svcs[0].StartMode } else { $null }
+            signature     = $sig
+        })
+    }
+
+    return @{
+        success  = $true
+        programs = @($programs | Sort-Object @{ Expression = { switch ($_.exposure) { "all" { 0 } "specific" { 1 } default { 2 } } } }, @{ Expression = "listenerCount"; Descending = $true })
+        totals   = @{ all = $totalAll; specific = $totalSpecific; loopback = $totalLoopback }
+    }
+}
+
 function Get-NetworkActivity {
     param([object]$p)
 
@@ -3587,10 +3799,29 @@ function Get-GpuUsageByProcess {
     $byAdapter = @{}
     $luidByAdapter = @{}
 
-    try {
-        $counters = Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop
-    } catch {
-        return @{ success = $false; error = $_.Exception.Message; byPid = @{}; byAdapter = @() }
+    # One retry, because this counter is genuinely flaky under load rather
+    # than because retries are a habit. Reproduced by running two Electron
+    # suites alongside it: Get-Counter throws, the engine honestly reported
+    # success=false, and the whole GPU column blanked for that sample. A user
+    # on a busy machine - which is exactly when they open a task manager - was
+    # losing the column for the reason they came to look at it.
+    #
+    # Still returns the failure honestly if the retry also fails. This buys a
+    # second attempt, not a pretence that the first one worked.
+    $counters = $null
+    $counterError = $null
+    foreach ($attempt in 1..2) {
+        try {
+            $counters = Get-Counter '\GPU Engine(*)\Utilization Percentage' -ErrorAction Stop
+            $counterError = $null
+            break
+        } catch {
+            $counterError = $_.Exception.Message
+            if ($attempt -lt 2) { Start-Sleep -Milliseconds 350 }
+        }
+    }
+    if ($counterError) {
+        return @{ success = $false; error = $counterError; byPid = @{}; byAdapter = @() }
     }
 
     # Operator: "you got ids returned from both of them, so why not remember
@@ -5859,6 +6090,9 @@ if ($Action) {
         }
         "get-software-redundancy" {
             Get-SoftwareRedundancy | ConvertTo-Json -Depth 5
+        }
+        "get-listeners" {
+            Get-ListenerReport | ConvertTo-Json -Depth 6
         }
         default {
             @{ success = $false; error = "Unknown action '$Action'" } | ConvertTo-Json

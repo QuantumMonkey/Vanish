@@ -375,6 +375,33 @@
               </div>
             </div>
 
+            <!-- ddx: the other half of the network picture. "Network
+                 activity" above answers who a program is TALKING TO. This
+                 answers who can START a conversation with it, which is the
+                 security-relevant question and was previously invisible.
+                 Deliberately no score and no verdict (Rule 6): it says what
+                 is reachable and by whom, and stops there. -->
+            <div class="audit-section" id="audit-listeners-section">
+              <div class="audit-section-title">
+                <i class="fa-solid fa-door-open"></i> What can be reached from outside
+                <span class="audit-badge" id="audit-listeners-badge" style="display:none;">checking</span>
+              </div>
+              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 4px;">
+                Programs waiting for something to connect TO them. A program can have nothing
+                leaving your PC and still be accepting connections from your network - those are
+                different facts, and this is the one no other panel shows you.
+              </div>
+              <div class="panel-inline-note" id="audit-listeners-note">
+                Being reachable is not the same as being unsafe, and Vanish does not score or rank
+                these. A signature tells you the program is authentic, not that it is safe; both
+                things are shown together so you can judge. Read-only &ndash; anything you want to
+                change is done from Startup Items above.
+              </div>
+              <div id="audit-listeners-body">
+                <!-- injected by renderer -->
+              </div>
+            </div>
+
             <!-- Section: Startup Items -->
             <div class="audit-section">
               <div class="audit-section-title">

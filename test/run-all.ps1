@@ -38,6 +38,7 @@ $suites = @(
     @{ Name = "UAC policy lock (qyt)";          Kind = "node";     Path = "test/uac-lock-verify.js" },
     @{ Name = "GPU payload shape (aaw)";       Kind = "node";     Path = "test/gpu-shape-verify.js" },
     @{ Name = "De-elevation mechanism (9vp)";   Kind = "ps";       Path = "test\deelevation-mechanism-verify.ps1" },
+    @{ Name = "Listener panel (ddx)";          Kind = "electron"; Path = "test/listeners-verify.js" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
     @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" }
 )

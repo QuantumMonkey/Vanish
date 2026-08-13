@@ -1159,6 +1159,19 @@ async function fetchGpuVendorsFromChromeInternals() {
   }
 }
 
+// ddx: read-only, so it is available in BOTH tiers on purpose. Audit Mode is
+// the tier a cautious user sits in, and "what on this machine is reachable
+// from the network" is exactly the question they are in Audit Mode to ask.
+// Gating it behind elevation would hide the finding from the people most
+// likely to want it.
+ipcMain.handle('get-listeners', async () => {
+  try {
+    return await runPowerShell('get-listeners', {});
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-gpu-vendors', async () => {
   if (gpuVendorCache !== null) return gpuVendorCache;
   try {

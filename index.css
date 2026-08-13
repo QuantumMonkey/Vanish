@@ -3102,3 +3102,101 @@ input:checked + .slider:before {
 
 .gpu-row-mark.is-nvidia { color: hsl(92, 68%, 45%); }
 .gpu-row-mark.is-amd { color: hsl(0, 78%, 55%); }
+
+/* ddx: what can be reached from outside.
+   The visual weight is carried by the exposure class and nothing else. There is
+   deliberately no red "danger" treatment anywhere in here: an externally-bound
+   listener is not a vulnerability, it is a fact about reachability, and styling
+   it as an alarm would be the scoring this feature explicitly refuses (Rule 6).
+   The exposed rows get a warm accent so they are findable at a glance; the
+   loopback ones recede. That is the whole hierarchy. */
+.listener-row {
+  border: 1px solid var(--border-glass);
+  border-left: 3px solid var(--text-muted);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  background: rgba(11, 15, 25, 0.45);
+}
+.listener-row.is-exposed { border-left-color: var(--color-warning); }
+.listener-row.is-partial { border-left-color: hsl(38, 60%, 55%); }
+.listener-row.is-local   { border-left-color: var(--text-muted); opacity: 0.75; }
+
+.listener-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.listener-name { font-weight: 600; color: var(--text-white); }
+.listener-pid { font-size: 11px; color: var(--text-muted); font-family: var(--mono); }
+.listener-exposure {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-warning);
+}
+.listener-row.is-local .listener-exposure { color: var(--text-muted); }
+
+.listener-detail { font-size: 12px; color: var(--text-gray); margin-top: 3px; }
+
+/* The evidence, in the syntax Windows uses, next to the plain-language claim
+   rather than instead of it. */
+.listener-endpoints {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-gray);
+  margin-top: 6px;
+  word-break: break-all;
+}
+.listener-sep { color: var(--text-muted); }
+.listener-xn { color: var(--text-muted); }
+
+.listener-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.listener-facts span {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  color: var(--text-gray);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-glass);
+}
+
+.listener-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 7px;
+  flex-wrap: wrap;
+}
+/* Green here means "we could verify who published this", NOT "this is safe".
+   The tooltip says so in as many words, because the colour on its own would
+   quietly make the stronger claim. */
+.listener-sig { font-size: 11px; cursor: help; }
+.listener-sig.ok { color: hsl(142, 55%, 55%); }
+.listener-sig.unknown { color: var(--text-muted); }
+.listener-sig.bad { color: var(--color-warning); }
+.listener-ev {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: hsla(142, 55%, 45%, 0.18);
+  border: 1px solid hsla(142, 55%, 45%, 0.35);
+}
+.listener-path {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  margin-left: auto;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.listener-more { color: var(--text-muted); cursor: help; }

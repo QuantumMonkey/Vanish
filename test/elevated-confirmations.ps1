@@ -249,6 +249,56 @@ try {
     }
     $out | Set-Content -Encoding ascii (Join-Path $outDir '9sy.log')
 
+    # ======================================================================
+    Head 'Operator request - stop rpdsvc and set it to start on demand'
+    # ======================================================================
+    # Operator, 2026-08-13: "turn off rpdsvc, i will start it when i need to
+    # use realplayer."
+    #
+    # Manual, NOT Disabled, and that distinction is the whole request: Manual
+    # means it no longer starts by itself but RealPlayer can still bring it up
+    # when it is actually used. Disabled would break RealPlayer the next time
+    # they open it, which is not what was asked for.
+    #
+    # Recorded here rather than done quietly: this is the one thing in this
+    # script that changes a setting the operator did not create, and it is
+    # reversible with a single documented command, printed below.
+    try {
+        $svc = Get-CimInstance -Query "SELECT Name, StartMode, State, StartName FROM Win32_Service WHERE Name='rpdsvc'" -ErrorAction Stop
+        if (-not $svc) {
+            Note 'rpdsvc is not installed on this machine - nothing to do.'
+            $script:results['rpdsvc'] = 'not installed'
+        } else {
+            Say ("  before: StartMode={0}  State={1}  Account={2}" -f $svc.StartMode, $svc.State, $svc.StartName)
+            $script:results['rpdsvc-before'] = ("StartMode={0}; State={1}" -f $svc.StartMode, $svc.State)
+
+            if ($svc.State -eq 'Running') {
+                Stop-Service -Name rpdsvc -Force -ErrorAction Stop
+                Start-Sleep -Milliseconds 800
+            }
+            & sc.exe config rpdsvc start= demand | Out-Null
+
+            $after = Get-CimInstance -Query "SELECT Name, StartMode, State FROM Win32_Service WHERE Name='rpdsvc'" -ErrorAction Stop
+            Say ("  after:  StartMode={0}  State={1}" -f $after.StartMode, $after.State)
+            Check ($after.StartMode -eq 'Manual') "rpdsvc no longer starts on its own (StartMode=$($after.StartMode))"
+            Check ($after.State -ne 'Running') "rpdsvc is stopped (State=$($after.State))"
+            $script:results['rpdsvc-after'] = ("StartMode={0}; State={1}" -f $after.StartMode, $after.State)
+
+            # The listener was the reason this came up at all - confirm it is
+            # actually gone rather than assuming stopping the service closed it.
+            $still = @(& netstat.exe -ano 2>$null | Select-String -SimpleMatch ':20121')
+            Check ($still.Count -eq 0) "nothing is listening on port 20121 any more ($($still.Count) socket(s) left)"
+
+            Say ''
+            Say '  To undo this at any time:' 'Yellow'
+            Say '    sc.exe config rpdsvc start= auto' 'Yellow'
+            Say '    Start-Service rpdsvc' 'Yellow'
+        }
+    } catch {
+        Check $false "rpdsvc change failed: $($_.Exception.Message)"
+        $script:results['rpdsvc'] = "failed: $($_.Exception.Message)"
+    }
+
 } finally {
     # ======================================================================
     Head 'Cleanup'
