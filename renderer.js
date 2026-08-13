@@ -4237,7 +4237,12 @@ function renderQueue() {
         ? `<span class="method-badge" title="${esc(item.meta && item.meta.matchedName ? 'Matched: ' + item.meta.matchedName : 'How Vanish will run this uninstaller')}">${esc(item.method)}</span>`
         : '';
       const detail = queueItemDetail(item);
-      const retryable = ['failed', 'rebootRequired', 'needsAttention'].includes(item.state);
+      // 8ns: Retry re-runs the identical command. Against a platform launcher
+      // that is not a retry, it is the same doomed request with a second
+      // button press, so the button is withheld rather than left to
+      // disappoint - the message tells the user what to do instead.
+      const retryable = ['failed', 'rebootRequired', 'needsAttention'].includes(item.state)
+        && !queueItemPlatform(item);
       return `
         <div class="queue-item" data-item-id="${esc(item.id)}">
           <div class="queue-item-main">
@@ -4282,12 +4287,29 @@ function renderQueue() {
   applyTierLocks();
 }
 
+// 8ns: which storefront manages this program's uninstall, if any. Reads the
+// live uninstall string the queue recorded when the item was added; null means
+// the program uninstalls itself, which is the overwhelmingly common case.
+function queueItemPlatform(item) {
+  if (!item || !window.VanishPlatforms) return null;
+  const meta = item.meta || {};
+  return window.VanishPlatforms.detectPlatform(item.uninstallString || meta.command || '');
+}
+
 function queueItemDetail(item) {
   const meta = item.meta || {};
   if (item.state === 'failed' && meta.error) return meta.error;
   if (item.state === 'failed' && item.exitCode !== null) return `The uninstaller stopped with code ${item.exitCode}`;
   if (item.state === 'rebootRequired') return 'Restart Windows to finish this one';
-  if (item.state === 'needsAttention') return 'The uninstaller did not finish on its own';
+  if (item.state === 'needsAttention') {
+    // 8ns: a Steam or Epic game has no silent uninstaller to have "not
+    // finished" - its UninstallString is the launcher. Saying the generic
+    // sentence here told the operator their uninstall stalled when nothing
+    // had, and pointed them at a Retry that could never succeed.
+    const platform = queueItemPlatform(item);
+    if (platform) return window.VanishPlatforms.platformMessage(platform);
+    return 'The uninstaller did not finish on its own';
+  }
   if (item.state === 'done') {
     const rp = meta.restorePoint ? `restore point ${meta.restorePoint}` : '';
     return [rp, meta.durationMs ? `${Math.round(meta.durationMs / 1000)}s` : ''].filter(Boolean).join(' - ') || 'Uninstalled';
