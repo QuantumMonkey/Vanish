@@ -1097,32 +1097,54 @@ ipcMain.handle('get-gpu-usage', async () => {
 // session's latency work if it ran eagerly).
 let gpuVendorCache = null;
 
+// The page's content lives inside a Shadow DOM custom element (<info-view>),
+// and plain innerText/outerHTML do not see inside a shadow root - so this
+// walks it explicitly. Text nodes come back as separate entries in DOM order;
+// each GPU's full descriptor (including *ACTIVE* when present) stays together
+// in one entry because it is one table cell's content.
+const GPU_PAGE_TEXT = `
+  (function walk(node, out) {
+    if (node.shadowRoot) walk(node.shadowRoot, out);
+    if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) out.push(node.textContent.trim());
+    for (const child of node.childNodes || []) walk(child, out);
+    return out;
+  })(document.documentElement, []).join('\\n');
+`;
+
 async function fetchGpuVendorsFromChromeInternals() {
   const win = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true } });
   try {
     await win.loadURL('chrome://gpu');
-    // The page's content lives inside a Shadow DOM custom element
-    // (<info-view>) - plain innerText/outerHTML do not see inside a shadow
-    // root, so this walks it explicitly. Text nodes come back as separate
-    // array entries in DOM order; each GPU's full descriptor (including
-    // *ACTIVE* when present) stays together in one entry because it is one
-    // table cell's content.
-    const text = await win.webContents.executeJavaScript(`
-      (function walk(node, out) {
-        if (node.shadowRoot) walk(node.shadowRoot, out);
-        if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) out.push(node.textContent.trim());
-        for (const child of node.childNodes || []) walk(child, out);
-        return out;
-      })(document.documentElement, []).join('\\n');
-    `);
 
+    // chrome://gpu populates ASYNCHRONOUSLY after load. Reading it the
+    // instant loadURL resolves returns the page's placeholder - measured,
+    // verbatim: "VENDOR= 0x0000, DEVICE=0x0000, LUID={0,0}". That parses to
+    // nothing, so the vendor list came back empty, every adapter lost its
+    // name, and every GPU icon silently fell back to the generic chip.
+    //
+    // Poll for real content rather than sleeping a fixed amount: the wait is
+    // as short as the machine allows, and a slow GPU process gets the time it
+    // needs instead of a guess that is too short on exactly the hardware that
+    // matters.
+    const readGpuText = () => win.webContents.executeJavaScript(GPU_PAGE_TEXT);
+    let text = await readGpuText();
+    const deadline = Date.now() + 8000;
+    while (Date.now() < deadline && !/VENDOR=\s*0x(?!0000\b)[0-9a-fA-F]+/.test(text)) {
+      await new Promise((r) => setTimeout(r, 250));
+      text = await readGpuText();
+    }
     const results = [];
     for (const line of text.split('\n')) {
       if (!line.includes('VENDOR=')) continue;
       const m = line.match(/VENDOR=\s*0x([0-9a-fA-F]+),\s*DEVICE=0x([0-9a-fA-F]+)\s*\[([^\]]*)\].*?LUID=\{(-?\d+),\s*(-?\d+)\}/);
       if (!m) continue;
       const vendorId = parseInt(m[1], 16);
-      if (vendorId === 0x1414) continue; // Microsoft Basic Render Driver - not a real GPU
+      // The Microsoft Basic Render Driver used to be dropped here as "not a
+      // real GPU". It is not a real GPU, and it IS a real adapter: the GPU
+      // Engine counters report work against its LUID, so dropping it from the
+      // name map did not hide it - it just left it anonymous wherever it
+      // appeared. Kept, with vendor null so it gets the neutral chip rather
+      // than a card maker's logo.
       results.push({
         luidHigh: parseInt(m[4], 10),
         luidLow: parseInt(m[5], 10),

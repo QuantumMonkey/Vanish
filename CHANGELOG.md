@@ -8,6 +8,69 @@ full decision rules.
 
 ---
 
+## [0.5.3] - 2026-08-13
+
+### Fixed -- the GPU column named the wrong card (`02f`)
+
+Reported by screenshot, Vanish beside Windows Task Manager: Windows showed the
+NVIDIA RTX 3080 doing the work, Vanish showed one pill reading "GPU 0: 20%" and
+gave dota2 a **red AMD logo**.
+
+The raw counters on that machine:
+
+| LUID | phys | load | adapter |
+| --- | --- | --- | --- |
+| `0x0000ed1f` | `phys_0` | 29.3% | AMD Radeon(TM) Graphics |
+| `0x0000fa2a` | `phys_0` | 0.0% | Microsoft Basic Render Driver |
+| `0x0000fa8e` | `phys_0` | 19.3% | NVIDIA GeForce RTX 3080 Laptop GPU |
+
+Three adapters, **all reporting `phys_0`**. `phys_N` is the physical index
+within an adapter's own group, not a global GPU ordinal, so on an ordinary
+machine it is 0 for everything. Keying on it merged all three cards into one
+bucket called "GPU 0", summed their percentages, and gave the merged result
+whichever LUID happened to arrive first. AMD sorted first, so every process got
+an AMD logo no matter which card did the work.
+
+The code had already worked this out and then did the opposite. Its own comment
+reads: *"phys_N is an ordinal into whichever adapters happen to have an active
+engine RIGHT NOW, not a stable identity ... the LUID IS the stable per-boot
+adapter identity"* -- and then every collection was keyed by `physIdx`.
+
+Everything joins on the LUID now. `physIndex` is still reported because it is
+real, but as an attribute rather than a name.
+
+**This mattered more than a cosmetic mislabel.** It was a confident wrong
+answer about something the user can check against Task Manager in five seconds
+-- the same fault `c0y` exists to prevent, and a worse version of it, because a
+guessed install date at least admits to being a date.
+
+### Fixed -- the vendor lookup raced the page it read
+
+`chrome://gpu` populates asynchronously, and the vendor fetch read it the
+instant `loadURL` resolved. The placeholder it got back, verbatim:
+`VENDOR= 0x0000, DEVICE=0x0000, LUID={0,0}`. That parses to nothing, so the
+vendor list came back empty, every adapter lost its name, and every GPU icon
+fell back to the generic chip with no error anywhere.
+
+It polls for real content now, with an 8-second ceiling, rather than sleeping a
+fixed amount -- the wait is as short as the machine allows, and slow hardware
+gets the time it needs instead of a guess that is too short on exactly the
+machines that need it most.
+
+### Changed -- adapters are named, and the unnameable say so
+
+The summary pills read `AMD Radeon: 10%`, `NVIDIA GeForce RTX 3080: 64%` rather
+than three identical "GPU 0" labels, with the full descriptor in the tooltip.
+
+The Microsoft Basic Render Driver used to be dropped from the vendor map as
+"not a real GPU". It is not a real GPU, and it **is** a real adapter -- the
+counters report work against its LUID -- so dropping it never hid it, it just
+left it anonymous. It is named now, with the neutral chip rather than a card
+maker's logo. An adapter Vanish genuinely cannot identify says
+"Unrecognised adapter" instead of inventing an ordinal that reads like a name.
+
+---
+
 ## [0.5.2] - 2026-08-13
 
 ### Fixed -- de-elevation actually de-elevates (`9vp`)

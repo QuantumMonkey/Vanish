@@ -433,14 +433,23 @@ function gpuTotal(pid) {
 // resolution per process. It resolves nothing new and guesses nothing - an
 // adapter whose LUID does not match a known card keeps the neutral chip icon
 // and its ordinal, exactly as the pill does.
-function gpuAdapterMark(physIdx) {
-  const a = (gpuAdapterUsage || []).find((x) => x.physIndex === physIdx);
+// The join key is the ADAPTER KEY (its LUID), not phys_N. Measured on a
+// hybrid laptop: three adapters - AMD, NVIDIA and the Basic Render Driver -
+// ALL reported phys_0, because phys_N is an index within an adapter group
+// rather than a global GPU ordinal. Joining on it merged every card into one
+// and labelled the merged result with whichever LUID sorted first, which is
+// how a process running on the NVIDIA card came to wear a red AMD logo.
+function gpuAdapterMark(adapterKey) {
+  const a = (gpuAdapterUsage || []).find((x) => x.adapterKey === adapterKey);
   const vendorMatch = a && (gpuVendorInfo || []).find(
     (v) => v.luidHigh === a.luidHigh && v.luidLow === a.luidLow
   );
   const vendor = vendorMatch ? vendorMatch.vendor : null;
   const icon = vendor === 'amd' ? 'fa-amd' : vendor === 'nvidia' ? 'fa-nvidia' : 'fa-microchip';
-  const label = vendorMatch ? vendorMatch.name : `GPU ${physIdx}`;
+  // No match means the adapter is real (the counters reported it) but Vanish
+  // could not name it. Say that, rather than inventing an ordinal that is not
+  // unique and reads like an identity.
+  const label = vendorMatch ? vendorMatch.name : `Unrecognised adapter (LUID ${adapterKey})`;
   return { icon, label, vendor };
 }
 
@@ -458,8 +467,8 @@ function gpuCellHtml(pid) {
     if (adapters) {
       const entries = Object.entries(adapters).sort((a, b) => b[1] - a[1]);
       if (entries.length > 0) {
-        const [topIdx] = entries[0];
-        const m = gpuAdapterMark(Number(topIdx));
+        const [topKey] = entries[0];
+        const m = gpuAdapterMark(topKey);
         // A process using more than one adapter is NOT reduced to one - the
         // busier is shown and the count says there is more, rather than
         // quietly picking a winner.
@@ -621,13 +630,30 @@ function renderGpuAdapterSummary() {
       const icon = vendorMatch && vendorMatch.vendor === 'amd' ? 'fa-amd'
         : vendorMatch && vendorMatch.vendor === 'nvidia' ? 'fa-nvidia'
         : 'fa-microchip';
-      const title = vendorMatch ? ` title="${esc(vendorMatch.name)}"` : '';
+      // "GPU 0" was never a name. phys_N is not unique, so on this machine
+      // three different cards all rendered as "GPU 0" - the label carried no
+      // information and actively misled. Use what the adapter is actually
+      // called, with the full descriptor in the tooltip.
+      const label = vendorMatch ? gpuShortName(vendorMatch.name) : 'Unrecognised adapter';
+      const title = vendorMatch ? vendorMatch.name : `No vendor record for LUID ${a.adapterKey}`;
       return `
-        <span class="gpu-adapter-pill${a.percent > 0 ? ' is-active' : ''}"${title}>
-           <i class="fa-solid ${icon}"></i> GPU ${esc(a.physIndex)}: ${esc(a.percent.toFixed(0))}%
+        <span class="gpu-adapter-pill${a.percent > 0 ? ' is-active' : ''}" title="${esc(title)}">
+           <i class="fa-solid ${icon}"></i> ${esc(label)}: ${esc(a.percent.toFixed(0))}%
          </span>`;
     })
     .join('');
+}
+
+// "NVIDIA GeForce RTX 3080 Laptop GPU" is the honest name and too long for a
+// pill sitting above a table. Keep the part that identifies the card and drop
+// the marketing furniture; the full string stays in the tooltip.
+function gpuShortName(name) {
+  return String(name)
+    .replace(/\(TM\)|\(R\)|\(C\)/gi, '')
+    .replace(/\s+(Laptop\s+)?GPU$/i, '')
+    .replace(/\s+Graphics$/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 async function sampleProcesses() {

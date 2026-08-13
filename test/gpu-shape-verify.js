@@ -106,12 +106,43 @@ if (payload) {
       Object.values(v.adapters).every((n) => typeof n === 'number' && n >= 0 && n <= 100));
     assert(adaptersNumeric, 'every per-adapter figure is a percentage');
 
-    // The renderer resolves the busier adapter by joining this index against
-    // byAdapter's physIndex. If the two ever stop agreeing, the row falls back
-    // to a generic chip and silently stops naming the card.
-    const known = new Set((payload.byAdapter || []).map((a) => String(a.physIndex)));
+    // The renderer resolves the busier adapter by joining on adapterKey, which
+    // is the LUID. If the two sides ever stop agreeing the row falls back to a
+    // generic chip and silently stops naming the card.
+    const known = new Set((payload.byAdapter || []).map((a) => String(a.adapterKey)));
     const joinable = entries.every(([, v]) => Object.keys(v.adapters).every((k) => known.has(k)));
-    assert(joinable, 'every adapter index in byPid also appears in byAdapter (the renderer joins on it)');
+    assert(joinable, 'every adapter key in byPid also appears in byAdapter (the renderer joins on it)');
+  }
+
+  // --- The identity has to actually identify -------------------------------
+  //
+  // phys_N is NOT unique. Measured on a hybrid laptop: AMD, NVIDIA and the
+  // Basic Render Driver all reported phys_0. Keying on it merged three cards
+  // into one bucket labelled "GPU 0" and gave the merged result whichever LUID
+  // sorted first, so a process on the NVIDIA card wore a red AMD logo. These
+  // assertions exist so that identity can never quietly go back to an ordinal.
+  console.log('');
+  console.log('Adapters are identified by LUID, not by an ordinal');
+
+  const adapters = payload.byAdapter || [];
+  if (adapters.length === 0) {
+    console.log('  NOTE  No adapters reported at sample time - nothing to check here.');
+  } else {
+    assert(adapters.every((a) => typeof a.adapterKey === 'string' && a.adapterKey.length > 0),
+      'every adapter carries an adapterKey');
+    const keys = adapters.map((a) => a.adapterKey);
+    assert(new Set(keys).size === keys.length,
+      `adapterKey is unique across adapters (${keys.join(', ')})`);
+    assert(adapters.every((a) => a.adapterKey === `${a.luidHigh}_${a.luidLow}`),
+      'the adapterKey IS the LUID, not something derived from position');
+    // Not a failure - most machines have one adapter - but on a hybrid laptop
+    // this is the exact collision that caused the bug, so say when it is present.
+    const physValues = adapters.map((a) => a.physIndex);
+    if (adapters.length > 1 && new Set(physValues).size < physValues.length) {
+      console.log(`  NOTE  Confirmed on this machine: ${adapters.length} adapters share`);
+      console.log(`        physIndex values [${physValues.join(', ')}] - the ordinal really is`);
+      console.log('        not an identity, and the LUID keying is load-bearing.');
+    }
   }
 }
 

@@ -3610,8 +3610,32 @@ function Get-GpuUsageByProcess {
         $luidLow   = [Convert]::ToUInt32($Matches[3], 16)
         $physIdx   = [int]$Matches[4]
 
-        if (-not $luidByAdapter.ContainsKey($physIdx)) {
-            $luidByAdapter[$physIdx] = @{ high = $luidHigh; low = $luidLow }
+        # THE KEY IS THE LUID, not phys_N. The comment above has said since
+        # aaw that the LUID is the stable adapter identity - and then every
+        # collection below was keyed by $physIdx anyway, which quietly undid
+        # the whole point.
+        #
+        # Measured on the operator's hybrid laptop 2026-08-13, three adapters,
+        # ALL OF THEM REPORTING phys_0:
+        #
+        #   luid 0x0000ed1f  phys_0  29.3%   AMD Radeon(TM) Graphics
+        #   luid 0x0000fa2a  phys_0   0.0%   Microsoft Basic Render Driver
+        #   luid 0x0000fa8e  phys_0  19.3%   NVIDIA GeForce RTX 3080 Laptop
+        #
+        # phys_N is the physical index WITHIN an adapter's own group, not a
+        # global GPU ordinal, so on a normal machine it is 0 for everything.
+        # Keying on it merged all three cards into one bucket called "GPU 0",
+        # summed their percentages together, and kept whichever LUID happened
+        # to arrive first as the identity of the merged result. That is why
+        # the operator saw dota2 running on the NVIDIA card labelled with a
+        # red AMD logo: the AMD adapter simply sorted first.
+        #
+        # Worse than a wrong label - it is a confident wrong label, which is
+        # the exact fault c0y exists to prevent.
+        $adapterKey = "{0}_{1}" -f $luidHigh, $luidLow
+
+        if (-not $luidByAdapter.ContainsKey($adapterKey)) {
+            $luidByAdapter[$adapterKey] = @{ high = $luidHigh; low = $luidLow; phys = $physIdx }
         }
 
         if ($sample.CookedValue -le 0) { continue }
@@ -3626,13 +3650,13 @@ function Get-GpuUsageByProcess {
             $byPid[$procId] = @{ total = 0.0; adapters = @{} }
         }
         $byPid[$procId].total += $sample.CookedValue
-        if (-not $byPid[$procId].adapters.ContainsKey($physIdx)) {
-            $byPid[$procId].adapters[$physIdx] = 0.0
+        if (-not $byPid[$procId].adapters.ContainsKey($adapterKey)) {
+            $byPid[$procId].adapters[$adapterKey] = 0.0
         }
-        $byPid[$procId].adapters[$physIdx] += $sample.CookedValue
+        $byPid[$procId].adapters[$adapterKey] += $sample.CookedValue
 
-        if (-not $byAdapter.ContainsKey($physIdx)) { $byAdapter[$physIdx] = 0.0 }
-        $byAdapter[$physIdx] += $sample.CookedValue
+        if (-not $byAdapter.ContainsKey($adapterKey)) { $byAdapter[$adapterKey] = 0.0 }
+        $byAdapter[$adapterKey] += $sample.CookedValue
     }
 
     # aaw follow-up: this projection was left behind when the accumulator
@@ -3659,17 +3683,22 @@ function Get-GpuUsageByProcess {
         }
     }
 
-    # Every phys_N seen this sample gets an entry, even at 0% - a LUID with no
+    # Every ADAPTER seen this sample gets an entry, even at 0% - a card with no
     # current engine activity is still a real, present adapter the caller may
     # want to show as idle rather than silently dropped.
-    $allPhys = @($luidByAdapter.Keys) + @($byAdapter.Keys) | Sort-Object -Unique
-    $adapterResult = @($allPhys | ForEach-Object {
+    #
+    # adapterKey is what the caller joins on now. physIndex is still reported
+    # because it is real, but it is an attribute of the adapter rather than its
+    # name, and it is NOT unique - see the parse loop above.
+    $allAdapters = @($luidByAdapter.Keys) + @($byAdapter.Keys) | Sort-Object -Unique
+    $adapterResult = @($allAdapters | ForEach-Object {
         $luid = $luidByAdapter[$_]
         @{
-            physIndex = $_
-            percent   = if ($byAdapter.ContainsKey($_)) { [Math]::Round([Math]::Min(100, $byAdapter[$_]), 1) } else { 0.0 }
-            luidHigh  = if ($luid) { $luid.high } else { $null }
-            luidLow   = if ($luid) { $luid.low } else { $null }
+            adapterKey = $_
+            physIndex  = if ($luid) { $luid.phys } else { $null }
+            percent    = if ($byAdapter.ContainsKey($_)) { [Math]::Round([Math]::Min(100, $byAdapter[$_]), 1) } else { 0.0 }
+            luidHigh   = if ($luid) { $luid.high } else { $null }
+            luidLow    = if ($luid) { $luid.low } else { $null }
         }
     })
 
