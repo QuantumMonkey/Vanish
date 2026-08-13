@@ -253,6 +253,77 @@ Test-ArgvRoundTrip @('C:\one two\a', 'C:\three four\b') 'multiple spaced argumen
 $plain = Invoke-Engine "relaunch-argv-probe" @{ argList = @('D:\quickhelp\vanish-uninstaller') }
 Assert-True ($plain.commandLine -eq 'D:\quickhelp\vanish-uninstaller') 'a path needing no quoting is passed through untouched'
 
+
+# Scratch space for the read-only checks below. Deliberately separate from the
+# elevated section's $work, which is not created until after the tier gate.
+$roWork = Join-Path $env:TEMP "vanish-readonly-verify"
+if (Test-Path -LiteralPath $roWork) { Remove-Item -LiteralPath $roWork -Recurse -Force -ErrorAction SilentlyContinue }
+$null = New-Item -ItemType Directory -Path $roWork -Force
+try {
+
+    # ==================================================================
+    # 1td/vhm: the read-only surfaces added for zrw and bu2.
+    #
+    # measure-paths takes a caller-supplied path LIST, which is a new shape for
+    # this engine - every prior command took a single validated target. It is
+    # read-only by construction (enumeration and .Length, never a read of
+    # contents), but "read-only" is a claim worth regressing rather than
+    # asserting, because the cost of being wrong about it is the whole Audit
+    # Mode promise.
+    # ==================================================================
+    Write-Host ""
+    Write-Host "1td - the snapshot and measurement surfaces are read-only" -ForegroundColor Cyan
+
+    $secCanary = Join-Path $roWork "measure-canary.txt"
+    Set-Content -LiteralPath $secCanary -Value "intact" -Encoding UTF8
+    $secDir = Join-Path $roWork "measure-dir"
+    New-Item -ItemType Directory -Path $secDir -Force | Out-Null
+    Set-Content -LiteralPath (Join-Path $secDir "a.txt") -Value "0123456789" -Encoding UTF8
+
+    $m = Invoke-Engine "measure-paths" @{ paths = @($secDir) }
+    Assert-True ($m.success -eq $true)                        "measure-paths returns a result for a real directory"
+    Assert-True ($m.results[0].sizeBytes -ge 10)              "and measures its bytes"
+    Assert-True ((Get-Content -LiteralPath $secCanary -Raw).Trim() -eq "intact") "measure-paths changed nothing on disk"
+
+    # A path that does not exist must be reported, never invented as zero. A
+    # folder shown as "0 B" that is actually missing is a number a user acts on.
+    $gone = Invoke-Engine "measure-paths" @{ paths = @((Join-Path $roWork "no-such-dir")) }
+    Assert-True ($null -eq $gone.results[0].sizeBytes)        "a missing path reports a null size, not 0 bytes"
+    Assert-True ([string]$gone.results[0].error -ne "")       "and states why"
+
+    # Command injection through the path list. Parameters cross as base64 JSON
+    # precisely so no caller value is interpolated into a command string; this
+    # proves it for the new surface rather than assuming it carried over.
+    $injCanary = Join-Path $roWork "inject-canary.txt"
+    $payload = '"; Set-Content -LiteralPath "' + $injCanary + '" -Value pwned; "'
+    $inj = Invoke-Engine "measure-paths" @{ paths = @($payload) }
+    Assert-True ($inj.success -eq $true)                      "an injection-shaped path is handled as data"
+    Start-Sleep -Milliseconds 200
+    Assert-True (-not (Test-Path -LiteralPath $injCanary))    "no shell executed the injected payload - the canary is absent"
+
+    $none = Invoke-Engine "measure-paths" @{ paths = @() }
+    Assert-True ($none.success -eq $true)                     "an empty path list is handled, not thrown"
+
+    $snap = Invoke-Engine "install-snapshot" @{}
+    Assert-True ($snap.success -eq $true)                     "install-snapshot runs unelevated - it is an audit question"
+    Assert-True (@($snap.dirs).Count -gt 0)                   "and returns real directories"
+    Assert-True ((Get-Content -LiteralPath $secCanary -Raw).Trim() -eq "intact") "install-snapshot changed nothing on disk"
+
+    # Static guarantee: the new engine commands must not have acquired a shell
+    # or a write path either.
+    $scannerLines = @(Get-Content -LiteralPath (Join-Path $root "scanner.ps1") | Where-Object { $_ -notmatch '^\s*#' })
+    $scannerCode = $scannerLines -join ([char]10)
+    $measureBody = ""
+    if ($scannerCode -match '(?s)function Measure-Paths.*?\r?\n\}') { $measureBody = $Matches[0] }
+    Assert-True ($measureBody -ne "")                         "Measure-Paths was found for inspection"
+    Assert-True ($measureBody -notmatch 'Invoke-Expression|Start-Process|cmd\.exe') "Measure-Paths executes nothing - it only enumerates"
+    Assert-True ($measureBody -notmatch 'Remove-Item|Set-Content|Out-File|New-Item')  "Measure-Paths writes nothing"
+
+}
+finally {
+    if (Test-Path -LiteralPath $roWork) { Remove-Item -LiteralPath $roWork -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 if (-not $isAdmin) {
     Write-Host ""
     Write-Host "The remaining tests exercise elevated code paths. Re-run from an elevated shell." -ForegroundColor Yellow
@@ -540,6 +611,7 @@ try {
     Assert-True ($mainCode -notmatch 'exec\s*\(')             "main.js has no exec() call site"
     Assert-True ($mainCode -notmatch '\bexecSync\b')          "main.js has no execSync() call site"
     Assert-True ($mainCode -notmatch 'require\([''"]node:child_process[''"]\)[^\r\n]*\bexec\b') "main.js does not import exec from child_process"
+
 }
 finally {
     if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue }
