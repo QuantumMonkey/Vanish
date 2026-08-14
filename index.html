@@ -1000,10 +1000,28 @@
                 not have an exception.
               </p>
               <p>
-                What that promise does not require is silence on the wire: Network Activity's Ping tile
-                sends a single ICMP echo, and only when you tap it - never automatically, never on a
-                timer. It is the one thing Vanish can send, it carries nothing about you, and it is
-                explained again the first time you tap it.
+                What that promise does not require is silence on the wire. There are exactly
+                <strong>two</strong> things Vanish can put on the network, both in Network Activity,
+                both only when you tap them, neither ever automatic or on a timer, and each agreed to
+                separately the first time:
+              </p>
+              <ul class="about-list">
+                <li>
+                  <strong>Ping</strong> - a single ICMP echo to the address shown, normally your own
+                  router. It carries nothing about you.
+                </li>
+                <li>
+                  <strong>Measure line speed</strong> - about 25 MB down and 5 MB up against
+                  speed.cloudflare.com, to answer how fast the connection actually is. There is no way
+                  to learn that without using the connection. Cloudflare sees this PC's IP address and
+                  a few seconds of traffic; the data transferred is random bytes one way and discarded
+                  the other, so it carries nothing of yours. The result is shown and never saved,
+                  logged or sent anywhere.
+                </li>
+              </ul>
+              <p>
+                Accepting one does not accept the other, and neither is on until you say so. Everything
+                else in the app only reads what is already on this PC.
               </p>
             </div>
             <div class="about-card">

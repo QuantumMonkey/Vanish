@@ -2366,6 +2366,95 @@ function Get-NetworkActivity {
 # tool is running on every tap), no retries, no continuous mode. The caller
 # supplies the destination; the renderer defaults it to the adapter's own
 # gatewayAddress (see Get-NetworkActivity above) and lets the user edit it.
+# INV-4 EXCEPTION NUMBER TWO, and it is a bigger one than the ping.
+#
+# Operator decision 2026-08-14, after being shown the trade explicitly: the
+# rate tiles show what is crossing the wire right now, and they cannot answer
+# "how fast is my connection", because the only way to learn that is to
+# saturate the line against a remote server. Link speed is not the answer
+# either - it is the negotiated rate to the router, 866.7 Mbps on this machine
+# against a few KB/s of actual traffic.
+#
+# WHAT LEAVES THIS MACHINE, stated plainly because the user is asked to
+# approve exactly this: an HTTPS request to speed.cloudflare.com, which sees
+# this machine's IP address and a few seconds of traffic. No account, no
+# identifier, nothing about the machine or its software. The payload is
+# incompressible random bytes in one direction and discarded bytes in the
+# other - it carries no user data because it carries no data at all.
+#
+# WHAT THIS FUNCTION MUST NEVER BECOME: automatic. There is no timer, no
+# retry, no caller anywhere except an explicit click behind a consent gate
+# the user has to accept once, by name. test/network-verify.ps1 enforces the
+# same shape it already enforces for the ping: the outbound call exists in
+# exactly one place, and that place is this function. A narrower invariant
+# that is still enforced beats one that was silently deleted.
+#
+# The result is returned and never stored, never logged to the oplog, and
+# never sent anywhere.
+function Invoke-NetworkSpeedTest {
+    param([object]$p)
+
+    # Bounded on purpose. Big enough to be meaningful on a fast link, small
+    # enough that nobody is surprised by their data allowance. A user on a
+    # metered connection is the reason this is opt-in in the first place.
+    $downBytes = 25000000
+    $upBytes   = 5000000
+    if ($p -and $p.downBytes) {
+        $parsed = 0
+        if ([int]::TryParse([string]$p.downBytes, [ref]$parsed) -and $parsed -ge 1000000 -and $parsed -le 100000000) { $downBytes = $parsed }
+    }
+
+    $result = @{
+        success        = $false
+        downBytesPerSecond = $null
+        upBytesPerSecond   = $null
+        downBytes      = $downBytes
+        upBytes        = $upBytes
+        endpoint       = 'speed.cloudflare.com'
+        error          = $null
+    }
+
+    # TLS 1.2 is not the default in Windows PowerShell 5.1 and Cloudflare
+    # will refuse the handshake without it.
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+
+    try {
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+        $down = Invoke-WebRequest -Uri "https://speed.cloudflare.com/__down?bytes=$downBytes" `
+            -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        $sw.Stop()
+        $got = 0
+        if ($down.RawContentLength -gt 0) { $got = [long]$down.RawContentLength }
+        elseif ($down.Content) { $got = [long]$down.Content.Length }
+        $secs = [Math]::Max($sw.Elapsed.TotalSeconds, 0.001)
+        $result.downBytesPerSecond = [long]([Math]::Round($got / $secs))
+        $result.downBytes = $got
+    } catch {
+        $result.error = "Download test failed: $($_.Exception.Message)"
+        return $result
+    }
+
+    try {
+        # Random bytes rather than zeroes: a compressible payload measures the
+        # compression, not the link.
+        $buf = New-Object byte[] $upBytes
+        (New-Object Random).NextBytes($buf)
+        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+        $null = Invoke-WebRequest -Uri "https://speed.cloudflare.com/__up" -Method Post -Body $buf `
+            -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+        $sw2.Stop()
+        $secs2 = [Math]::Max($sw2.Elapsed.TotalSeconds, 0.001)
+        $result.upBytesPerSecond = [long]([Math]::Round($upBytes / $secs2))
+    } catch {
+        # A failed upload does not invalidate a good download figure. Report
+        # what was measured and say which half is missing.
+        $result.error = "Upload test failed: $($_.Exception.Message)"
+    }
+
+    $result.success = ($null -ne $result.downBytesPerSecond)
+    return $result
+}
+
 function Invoke-NetworkPing {
     param([object]$p)
 
@@ -6311,6 +6400,9 @@ if ($Action) {
         }
         "get-listeners" {
             Get-ListenerReport | ConvertTo-Json -Depth 6
+        }
+        "network-speedtest" {
+            Invoke-NetworkSpeedTest -p $Params | ConvertTo-Json -Depth 4 -Compress
         }
         default {
             @{ success = $false; error = "Unknown action '$Action'" } | ConvertTo-Json

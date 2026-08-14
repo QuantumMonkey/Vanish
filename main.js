@@ -1164,6 +1164,24 @@ async function fetchGpuVendorsFromChromeInternals() {
 // from the network" is exactly the question they are in Audit Mode to ask.
 // Gating it behind elevation would hide the finding from the people most
 // likely to want it.
+// INV-4 exception two. The consent is checked HERE as well as in the
+// renderer, so a bug in the UI cannot put traffic on the wire that the user
+// never agreed to. The renderer gate is for explaining; this one is the lock.
+ipcMain.handle('network-speedtest', async () => {
+  const settings = store.readSettings();
+  if (settings.speedTestConsentGiven !== true) {
+    return {
+      success: false,
+      error: 'The speed test has not been agreed to on this machine, so nothing was sent.',
+    };
+  }
+  try {
+    return await runPowerShell('network-speedtest', {});
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
 ipcMain.handle('get-listeners', async () => {
   try {
     return await runPowerShell('get-listeners', {});

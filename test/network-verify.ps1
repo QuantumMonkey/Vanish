@@ -48,13 +48,19 @@ $engineText = Get-Content $scanner -Raw
 # Test-Connection is deliberately NOT in this list any more - it is no
 # longer an outright ban, it is scoped below. Everything else stays a flat
 # ban with no exception.
+# Invoke-WebRequest left this list 2026-08-14 for the SECOND scoped
+# exception - the connection speed test, authorised by the operator after
+# being shown the trade. It is not a free pass: it is scoped below exactly
+# the way Test-Connection is, and the assertions there are stricter than a
+# flat ban would be, because a flat ban is trivially satisfied by using a
+# different API.
 $netCalls = @(
-    'Invoke-WebRequest', 'Invoke-RestMethod', 'System.Net.WebClient',
+    'Invoke-RestMethod', 'System.Net.WebClient',
     'Net.Sockets.TcpClient', 'Test-NetConnection',
     'System.Net.NetworkInformation.Ping'
 )
 $found = @($netCalls | Where-Object { $engineText -match [regex]::Escape($_) })
-Assert-True ($found.Count -eq 0) "the engine contains no outbound network call outside the scoped ping exception ($($found -join ', '))"
+Assert-True ($found.Count -eq 0) "the engine contains no outbound network call outside the two scoped exceptions ($($found -join ', '))"
 
 # Test-NetConnection specifically stays fully banned - it is a different,
 # heavier reachability probe than the single ICMP echo kp0 approved, and
@@ -87,6 +93,38 @@ if ($pingChunks.Count -eq 1) {
     $inPingFunction = ([regex]::Matches($pingChunks[0], [regex]::Escape('Test-Connection'))).Count
     Assert-True ($inPingFunction -eq 1) "the one Test-Connection call lives inside Invoke-NetworkPing, not scattered elsewhere"
 }
+
+# --- Exception two: the connection speed test --------------------------
+#
+# Same shape as the ping, same reasoning. The operator authorised traffic to
+# speed.cloudflare.com to answer "how fast is my connection", which cannot be
+# answered without using the connection. What is enforced here is that the
+# permission stays the size it was granted:
+#
+#   - the outbound call exists in exactly two places, both inside the one
+#     function that IS the speed test (down and up)
+#   - it goes to the endpoint that was named and no other
+#   - the consent is checked in main.js as well, so a UI bug cannot put
+#     traffic on the wire the user never agreed to
+#
+# Adding a third outbound call still means changing an assertion here.
+$webCallCount = ([regex]::Matches($codeText, [regex]::Escape('Invoke-WebRequest'))).Count
+Assert-True ($webCallCount -eq 2) "Invoke-WebRequest appears exactly twice in the engine's code - the download and the upload ($webCallCount found)"
+
+$speedChunks = @($functionChunks | Where-Object { $_ -match '^Invoke-NetworkSpeedTest\b' })
+Assert-True ($speedChunks.Count -eq 1) "Invoke-NetworkSpeedTest is defined exactly once"
+if ($speedChunks.Count -eq 1) {
+    $inSpeed = ([regex]::Matches($speedChunks[0], [regex]::Escape('Invoke-WebRequest'))).Count
+    Assert-True ($inSpeed -eq 2) "both web calls live inside Invoke-NetworkSpeedTest, not scattered elsewhere"
+    $hosts = @([regex]::Matches($speedChunks[0], 'https://([a-zA-Z0-9\.\-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    Assert-True ($hosts.Count -eq 1 -and $hosts[0] -eq 'speed.cloudflare.com') "it talks to speed.cloudflare.com and nowhere else ($($hosts -join ', '))"
+}
+
+# The lock, not the explanation. The renderer gate tells the user what will
+# happen; this one makes a UI bug incapable of skipping it.
+$mainText = Get-Content (Join-Path $root 'main.js') -Raw
+Assert-True ($mainText -match 'speedTestConsentGiven !== true') "main.js refuses the speed test unless consent is recorded, independently of the UI"
+Assert-True ($mainText -notmatch "setInterval[^)]*network-speedtest") 'nothing schedules the speed test'
 
 # ======================================================================
 # The read itself

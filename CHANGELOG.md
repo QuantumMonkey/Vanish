@@ -8,6 +8,63 @@ full decision rules.
 
 ---
 
+## [0.6.3] - 2026-08-14
+
+### Added -- measure how fast the connection actually is
+
+The rate tiles say what is crossing the wire right now. They cannot answer
+"how fast is my connection", and neither can the link rate -- that is the
+negotiated speed to the router, 866.7 Mbps on the machine this was built
+against, while the line delivered 10.2 Mbps. Those numbers have nothing to do
+with each other, and until now Vanish had no way to say so with evidence.
+
+A **Measure line speed** tile now downloads about 25 MB from
+speed.cloudflare.com and uploads about 5 MB back, and times both.
+
+**This is the second thing Vanish can put on the network, and it is a bigger
+one than the first.** It is off until agreed to, by a consent separate from the
+ping's -- a single ICMP echo to your own router and a 30 MB transfer to a
+company in another country are not the same act, and one checkbox covering both
+would be consent by sleight of hand.
+
+The dialog names the endpoint, the payload size, and the consequence, because
+"this may use data" is not consent to 30 MB. What Cloudflare sees: this PC's IP
+address and a few seconds of traffic -- no account, no identifier, nothing about
+the machine. The bytes are random one way and discarded the other, so they
+carry nothing of yours. The result is shown and never saved, logged or sent.
+
+The measurement is honest about its own limits: anything else using the network
+at the time, **including this PC**, makes it read lower, and the tile says so.
+
+### Changed -- the privacy claim was about to become false, and was fixed first
+
+The ping consent dialog said *"This is the only network traffic Vanish ever
+sends."* Adding a speed test would have made that a lie the app tells while
+asking for permission. Both it and the About page now name **two** exceptions,
+state that accepting one does not accept the other, and note that neither ever
+runs automatically or on a timer.
+
+A privacy claim that quietly stops being true is worse than one that was never
+made.
+
+### The guard was widened deliberately, not removed
+
+`test/network-verify.ps1` greps the engine for outbound-call APIs and fails if
+it finds one. `Invoke-WebRequest` left that ban list -- and picked up stricter
+assertions than the flat ban it replaced, since a flat ban is trivially
+satisfied by reaching for a different API:
+
+* it appears **exactly twice**, and both live inside `Invoke-NetworkSpeedTest`
+* the only host it may contact is `speed.cloudflare.com`
+* `main.js` refuses the request unless consent is recorded, **independently of
+  the renderer** -- the UI gate explains, this one locks
+* nothing schedules it
+
+Adding a third outbound call still means changing an assertion by hand. The
+suite went from 41 checks to 47.
+
+---
+
 ## [0.6.2] - 2026-08-14
 
 ### Fixed -- a BitTorrent client looked idle while saturating the link

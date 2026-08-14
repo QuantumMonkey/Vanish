@@ -343,6 +343,7 @@ function renderNetworkActivity(net) {
            </div>
          </div>
          <div id="net-ping-tile-container">${pingTileHtml()}</div>
+         <div id="net-speed-tile-container">${speedTileHtml()}</div>
        </div>`
     : '';
 
@@ -466,6 +467,7 @@ function renderNetworkActivity(net) {
   wireNetworkPeerToggles();
   wireNetworkKillButtons(top);
   wirePingTile();
+  wireSpeedTile();
   renderNetworkHold();
   // Audit Mode leaves the Stop buttons visible and inert with the reason,
   // like every other destructive control in the app (REQ-04).
@@ -527,6 +529,114 @@ function wireNetworkKillButtons(items) {
       }
     });
   });
+}
+
+// INV-4 exception two, and the tile exists to make the distinction the rate
+// tiles cannot: "Downloading now" is what is crossing the wire, this is how
+// fast the line can actually go. The operator asked for the Ookla number and
+// chose Cloudflare as the endpoint after being shown what it costs.
+let speedState = { status: 'idle', result: null };
+
+function speedRate(bytesPerSecond) {
+  if (!bytesPerSecond) return null;
+  // Mbps, because that is the unit every ISP and every speed test quotes.
+  // Showing MB/s here would be technically fine and would not match the
+  // number on their broadband bill, which is what they are checking against.
+  const mbps = (bytesPerSecond * 8) / 1000000;
+  return `${mbps >= 100 ? Math.round(mbps) : mbps.toFixed(1)} Mbps`;
+}
+
+function speedTileHtml() {
+  if (speedState.status === 'running') {
+    return `<div class="net-rate-tile is-action">
+        <i class="fa-solid fa-spinner fa-spin net-rate-icon"></i>
+        <div class="net-rate-text">
+          <div class="net-rate-value">Measuring...</div>
+          <div class="net-rate-label">about 20 seconds</div>
+        </div>
+      </div>`;
+  }
+  const r = speedState.result;
+  if (r && r.success) {
+    const down = speedRate(r.downBytesPerSecond);
+    const up = speedRate(r.upBytesPerSecond);
+    return `<div class="net-rate-tile is-action" id="net-speed-tile" role="button" tabindex="0"
+        title="Measured against ${esc(r.endpoint)}. This is what the connection managed at that moment - anything else using the network at the time, including this PC, makes it read lower. Tap to measure again.">
+        <i class="fa-solid fa-gauge-high net-rate-icon"></i>
+        <div class="net-rate-text">
+          <div class="net-rate-value">${esc(down || '-')}${up ? ` &middot; ${esc(up)} up` : ''}</div>
+          <div class="net-rate-label">Line speed, measured</div>
+        </div>
+      </div>`;
+  }
+  if (r && r.error) {
+    return `<div class="net-rate-tile is-action" id="net-speed-tile" role="button" tabindex="0" title="${esc(r.error)}">
+        <i class="fa-solid fa-gauge-high net-rate-icon"></i>
+        <div class="net-rate-text">
+          <div class="net-rate-value">Could not measure</div>
+          <div class="net-rate-label">tap to try again</div>
+        </div>
+      </div>`;
+  }
+  return `<div class="net-rate-tile is-action" id="net-speed-tile" role="button" tabindex="0"
+      title="Measures how fast this connection can actually go, by transferring data to and from Cloudflare. Nothing is sent until you agree to it.">
+      <i class="fa-solid fa-gauge-high net-rate-icon"></i>
+      <div class="net-rate-text">
+        <div class="net-rate-value">Measure</div>
+        <div class="net-rate-label">line speed</div>
+      </div>
+    </div>`;
+}
+
+function reRenderSpeedTile() {
+  const host = document.getElementById('net-speed-tile-container');
+  if (!host) return;
+  host.innerHTML = speedTileHtml();
+  wireSpeedTile();
+}
+
+function wireSpeedTile() {
+  const tile = document.getElementById('net-speed-tile');
+  if (!tile) return;
+  tile.addEventListener('click', runSpeedTest);
+  tile.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); runSpeedTest(); } });
+}
+
+// Nothing here runs on a timer, on load, or on refresh. The only caller is a
+// click, and the first click has to get through the consent below.
+async function runSpeedTest() {
+  if (speedState.status === 'running') return;
+
+  if (!appSettings.speedTestConsentGiven) {
+    // Named endpoint, named payload size, named consequence. A consent
+    // dialog that says "this may use data" is not consent to 30MB.
+    const ok = await confirmDialog({
+      title: 'Measure your connection speed?',
+      body:
+        'There is no way to find out how fast a connection is without using it. Vanish will download '
+        + 'about 25 MB from speed.cloudflare.com and upload about 5 MB back, then time both.\n\n'
+        + 'What Cloudflare sees: this machine\u2019s IP address and a few seconds of traffic. No account, no '
+        + 'identifier, and nothing about this PC or what is installed on it - the data transferred is '
+        + 'random bytes in one direction and discarded in the other, so it carries nothing of yours.\n\n'
+        + 'About 30 MB will count against your data allowance. If you are on a metered or capped '
+        + 'connection, that matters, and it is the reason this is off until you say otherwise.\n\n'
+        + 'The result is shown here and nowhere else. It is not saved, not logged, and not sent anywhere.',
+      confirmLabel: 'Measure it',
+    });
+    if (!ok) return;
+    await saveSettings({ speedTestConsentGiven: true });
+  }
+
+  speedState = { status: 'running', result: null };
+  reRenderSpeedTile();
+  let res;
+  try {
+    res = await window.api.networkSpeedTest();
+  } catch (err) {
+    res = { success: false, error: err.message };
+  }
+  speedState = { status: 'idle', result: res };
+  reRenderSpeedTile();
 }
 
 function wireNetworkPeerToggles() {
@@ -682,7 +792,13 @@ async function runPing() {
           ? ' - your own router, on this network, not anywhere on the internet - '
           : ' ') +
         'and read whether it replies and how fast. ' +
-        'This is the only network traffic Vanish ever sends - everything else in the app only reads ' +
+        // This used to read "the only network traffic Vanish ever sends".
+        // The speed test made that false, and a privacy claim that quietly
+        // stops being true is worse than one that was never made. There are
+        // two now; both are opt-in, both need a separate agreement, and
+        // neither ever runs on a timer.
+        'Vanish sends network traffic in exactly two places, and this is one of them - the other is the ' +
+        'connection speed test, which is agreed to separately. Everything else in the app only reads ' +
         'information already on this PC. You can change the destination with the pencil icon, and nothing ' +
         'is ever sent unless you tap this tile.',
       confirmLabel: 'Send it'

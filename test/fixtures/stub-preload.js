@@ -157,6 +157,10 @@ contextBridge.exposeInMainWorld('api', {
     signalPercent: null, signalNote: null, updateTransfers: 0, bitsJobs: 0, elevated: false
   }),
   networkPing: stub('networkPing', { success: true, destination: '192.168.1.1', roundTripMs: 12 }),
+  networkSpeedTest: stub('networkSpeedTest', {
+    success: true, downBytesPerSecond: 1279548, upBytesPerSecond: 5449907,
+    downBytes: 25000000, upBytes: 5000000, endpoint: 'speed.cloudflare.com', error: null,
+  }),
   // ddx. The default payload is deliberately the shape that motivated the
   // feature rather than a tidy one: a SYSTEM service listening on every
   // interface, validly signed, belonging to software the user does not use -

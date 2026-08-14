@@ -3245,3 +3245,7 @@ input:checked + .slider:before {
   cursor: help;
   white-space: nowrap;
 }
+/* The speed tile is the one tile that DOES something, so it reads as clickable
+   where the others read as readouts. */
+.net-rate-tile.is-action { cursor: pointer; }
+.net-rate-tile.is-action:hover { background: rgba(255, 255, 255, 0.06); }
