@@ -263,25 +263,53 @@ try {
     # Recorded here rather than done quietly: this is the one thing in this
     # script that changes a setting the operator did not create, and it is
     # reversible with a single documented command, printed below.
+    # Resolved from the LISTENING PORT, not from a service name. The process
+    # is called rpdsvc.exe and the service is called "RealTimes Desktop
+    # Service", so a hardcoded name of rpdsvc matched nothing and would have
+    # reported "not installed" while the listener carried on running.
+    # There is also a second RealPlayer service (RealPlayerUpdateSvc) which is
+    # deliberately NOT touched: the operator named the one that listens, and
+    # quietly reconfiguring a service they did not ask about is not mine to do.
     try {
-        $svc = Get-CimInstance -Query "SELECT Name, StartMode, State, StartName FROM Win32_Service WHERE Name='rpdsvc'" -ErrorAction Stop
+        $ownerPid = $null
+        foreach ($line in (& netstat.exe -ano 2>$null)) {
+            $t = ([string]$line).Trim()
+            if ($t -notmatch '^TCP\s+\S*:20121\s') { continue }
+            $cols = @($t -split '\s+' | Where-Object { $_ })
+            if ($cols.Count -ge 5 -and $cols[3] -eq 'LISTENING') { $ownerPid = [int]$cols[4]; break }
+        }
+
+        $svc = $null
+        if ($ownerPid) {
+            $svc = Get-CimInstance -Query "SELECT Name, DisplayName, ProcessId, StartMode, State, StartName FROM Win32_Service WHERE ProcessId = $ownerPid" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
         if (-not $svc) {
-            Note 'rpdsvc is not installed on this machine - nothing to do.'
-            $script:results['rpdsvc'] = 'not installed'
+            # Fall back to the name, in case it is installed but not running.
+            $svc = Get-CimInstance -Query "SELECT Name, DisplayName, ProcessId, StartMode, State, StartName FROM Win32_Service WHERE Name='RealTimes Desktop Service'" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+
+        if (-not $svc) {
+            Note 'No service is listening on port 20121 and RealTimes Desktop Service is not installed - nothing to do.'
+            $script:results['rpdsvc'] = 'not found'
         } else {
+            $svcName = [string]$svc.Name
+            Say ("  resolved: port 20121 is held by PID {0}, service '{1}'" -f $ownerPid, $svcName)
             Say ("  before: StartMode={0}  State={1}  Account={2}" -f $svc.StartMode, $svc.State, $svc.StartName)
             $script:results['rpdsvc-before'] = ("StartMode={0}; State={1}" -f $svc.StartMode, $svc.State)
 
             if ($svc.State -eq 'Running') {
-                Stop-Service -Name rpdsvc -Force -ErrorAction Stop
+                Stop-Service -Name $svcName -Force -ErrorAction Stop
                 Start-Sleep -Milliseconds 800
             }
-            & sc.exe config rpdsvc start= demand | Out-Null
+            # The service name contains spaces, so it has to be quoted for
+            # sc.exe - unquoted, sc silently takes the first word.
+            & sc.exe config "$svcName" start= demand | Out-Null
 
-            $after = Get-CimInstance -Query "SELECT Name, StartMode, State FROM Win32_Service WHERE Name='rpdsvc'" -ErrorAction Stop
+            $escaped = $svcName -replace "'", "''"
+            $after = Get-CimInstance -Query "SELECT Name, StartMode, State FROM Win32_Service WHERE Name='$escaped'" -ErrorAction Stop
             Say ("  after:  StartMode={0}  State={1}" -f $after.StartMode, $after.State)
-            Check ($after.StartMode -eq 'Manual') "rpdsvc no longer starts on its own (StartMode=$($after.StartMode))"
-            Check ($after.State -ne 'Running') "rpdsvc is stopped (State=$($after.State))"
+            Check ($after.StartMode -eq 'Manual') "$svcName no longer starts on its own (StartMode=$($after.StartMode))"
+            Check ($after.State -ne 'Running') "$svcName is stopped (State=$($after.State))"
             $script:results['rpdsvc-after'] = ("StartMode={0}; State={1}" -f $after.StartMode, $after.State)
 
             # The listener was the reason this came up at all - confirm it is
@@ -291,8 +319,16 @@ try {
 
             Say ''
             Say '  To undo this at any time:' 'Yellow'
-            Say '    sc.exe config rpdsvc start= auto' 'Yellow'
-            Say '    Start-Service rpdsvc' 'Yellow'
+            Say ("    sc.exe config ""{0}"" start= auto" -f $svcName) 'Yellow'
+            Say ("    Start-Service ""{0}""" -f $svcName) 'Yellow'
+
+            # Named, not touched.
+            $other = Get-CimInstance -Query "SELECT Name, DisplayName, StartMode, State FROM Win32_Service WHERE Name='RealPlayerUpdateSvc'" -ErrorAction SilentlyContinue
+            if ($other) {
+                Say ''
+                Note ("Also present and NOT changed: {0} ({1}, {2}). It does not listen on" -f $other.Name, $other.StartMode, $other.State)
+                Note 'anything, and you asked about the one that does. Say the word if you want it Manual too.'
+            }
         }
     } catch {
         Check $false "rpdsvc change failed: $($_.Exception.Message)"
