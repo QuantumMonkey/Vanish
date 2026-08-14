@@ -8,6 +8,86 @@ full decision rules.
 
 ---
 
+## [0.6.5] - 2026-08-14
+
+### Added -- click a column header, choose which values to show
+
+Excel-style column filters, on every table in the app that has a header row:
+
+* **All Programs** -- Publisher and Type
+* **Task Manager** -- Process and Indicators
+* **Health Advisor's startup table** -- Source and Status
+
+A funnel appears on those headers only. Clicking one lists the distinct values
+actually present in the current data with a count each, and unchecking a value
+hides its rows. Nothing here is a hardcoded list of values, so a filter cannot
+drift out of sync with what the engine returns -- and the checklist offers the
+words the CELLS show, so Type reads "Windows App" rather than the "UWP" behind
+it and Source reads "Task" rather than "TaskScheduler".
+
+CPU, GPU, Memory, Disk I/O and PID deliberately have **no** funnel. A checklist
+of distinct values is meaningless for a continuous number -- what those columns
+want is a threshold, which is a different control, and putting it behind the same
+icon would misrepresent both.
+
+Four decisions in `renderer/column-filter.js` are load-bearing, and each is the
+version that fails towards showing too much rather than too little:
+
+* **The state is the set of HIDDEN values, never the set of shown ones.** These
+  tables are fed live data. Under "shown value" semantics a process that started
+  after the filter was set would be withheld by a filter that has never heard of
+  it. Hiding something new is the failure this app cannot afford; showing
+  something new is merely untidy.
+* **The checklist is built from the view's whole pool, not from the rows that
+  survive the filters.** An option list that shrinks as you uncheck things is a
+  trap with no way out: the value just hidden would disappear from the only
+  control that could bring it back.
+* **A row carrying several values survives while ANY of them is shown.** A
+  process with two indicators stays visible when one of them is hidden and
+  leaves only when both are. Equality would silently under-report exactly the
+  processes carrying the most warnings. Rows with no value at all get one
+  synthetic "None" bucket, so they can be filtered deliberately instead of being
+  unconditionally present.
+* **Nothing is persisted.** A filter the user forgot they set, restored quietly
+  on the next launch, is the 2026-08-05 silent-search bug with a delay on it.
+
+Every hidden row stays accounted for. The row-count caption now names the columns
+doing the hiding ("Showing 12 of 158 programs - filtered by Publisher, Type"),
+each active filter also appears as a removable chip above the table, and an
+emptied table says which filter emptied it rather than the generic "nothing
+matches". Task Manager and the startup table had no caption row at all before
+this, which mattered most in Task Manager: it re-samples every two seconds, so a
+filtered list was indistinguishable from a machine that had gone quiet. On the
+startup table the section's count badge still states the machine's real total,
+which is exactly why the filtered table needed a caption of its own.
+
+### Fixed -- a live selection no longer silences the filter caption
+
+`updateBulkSelectUI` tested for a search term and the type toggle, so with only a
+column filter active the bulk-selection caption dropped the filter sentence --
+the 2026-08-05 bug walking back in through a door that did not exist when the
+rule was written. Found by asserting the RULE (any active filter keeps saying so
+while a selection is live) instead of the two filters that happened to exist at
+the time.
+
+### Added -- 81 assertions, and one icon that would have painted nothing
+
+`test/column-filter-verify.js` drives all three tables through the real DOM: the
+two-indicator row, a value that appears in the data after the filter was set, the
+checklist that must not shrink, the caption and chip and empty-state wording, the
+startup table's action indices surviving a filter (they index the FULL item list,
+so filtering has to drop rows without renumbering the survivors), the interaction
+with 5rz's multi-select, popover dismissal, and a check that no filter
+interaction wrote to settings.
+
+The icon suite caught the other one immediately: `fa-filter` did not exist in the
+vendored set, and an undefined glyph in this app does not throw -- it paints a
+blank 1em square. Added on the same 24x24 grid as the rest.
+
+Tests: **838 passing, 0 failing** (was 757).
+
+---
+
 ## [0.6.4] - 2026-08-14
 
 ### Fixed -- the speed test shipped yesterday was wrong by about 20x

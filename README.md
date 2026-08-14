@@ -58,7 +58,7 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Hold background transfers — caps Windows Update's background downloading and pauses running background transfers, with every changed setting written to disk before it is touched, and released automatically if Vanish closes or crashes while a hold is on | [scanner.ps1](scanner.ps1) `Invoke-NetworkHoldApply` |
 | Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services — with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
 | Software redundancy detection: 14 category clusters (browsers, PDF readers, AV tools…) flagging duplicate installs | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
-| Search, type filter, and sort (name/size/date) over the full app inventory | [renderer.js](renderer.js) `filterAndRenderApps` |
+| Search, type filter, sort (name/size/date), and column filters -- click a header, pick which Publishers or Types to show -- over the full app inventory | [renderer/core.js](renderer/core.js) `filterAndRenderApps`, [renderer/column-filter.js](renderer/column-filter.js) |
 
 ### Watch an install, and see what it left behind
 

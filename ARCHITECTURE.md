@@ -11,7 +11,7 @@ Four layers, strict one-way privilege escalation: the sandboxed renderer can onl
 ```mermaid
 graph LR
     subgraph Renderer["Electron Renderer — sandboxed"]
-        UI["renderer/*.js<br/>seven feature modules<br/>UI state, wizard, panels"]
+        UI["renderer/*.js<br/>eight feature modules<br/>UI state, wizard, panels"]
     end
     subgraph Bridge["Preload"]
         API["preload.js<br/>contextBridge: window.api"]
@@ -44,13 +44,14 @@ graph LR
 
 ## 1b. Renderer modules and the pure core
 
-The renderer is seven **classic scripts**, not ES modules and not a bundle.
+The renderer is eight **classic scripts**, not ES modules and not a bundle.
 Top-level `let`/`const`/`function` in classic scripts share one global lexical
 environment, so these files reference each other directly; the order in
 `index.html` is for reading order, not resolution.
 
 | File | Owns |
 | --- | --- |
+| [renderer/column-filter.js](renderer/column-filter.js) | The shared column-filter control used by All Programs, Task Manager and the startup table: distinct-value checklists, chips, and the hidden-value state every caption reads |
 | [renderer/core.js](renderer/core.js) | Module state, `esc`/`toast`, the tier guards (`guardFullMode`, `guardProtected`), the All Programs table with filters and multi-select, tab routing |
 | [renderer/settings-about.js](renderer/settings-about.js) | Settings and About panels |
 | [renderer/wizard.js](renderer/wizard.js) | The uninstall wizard state machine |

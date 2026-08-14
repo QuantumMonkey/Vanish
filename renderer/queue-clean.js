@@ -88,7 +88,14 @@ function updateBulkSelectUI() {
   // While a filter is active the hidden caption's sentence rides along here -
   // a selection must not be the reason a user stops being told that 158 of
   // their programs are currently out of view.
-  const isFiltered = filterText.trim() !== '' || filterType !== 'all';
+  // 5b0: the column filters belong in this test too, and leaving them out was
+  // the 2026-08-05 bug walking back in through a new door - caught by asserting
+  // the RULE (any active filter keeps saying so while a selection is live)
+  // rather than the two filters that existed when the rule was written.
+  const isFiltered =
+    filterText.trim() !== '' ||
+    filterType !== 'all' ||
+    activeColumnFilterKeys(APP_COLUMN_FILTERS).length > 0;
   const filterNote = isFiltered ? (document.getElementById('filter-status-text')?.textContent || '') : '';
   if (text) text.textContent = filterNote ? `${count} selected - ${filterNote}` : `${count} selected`;
   // The button says how many it will act on, so a bulk action can never be

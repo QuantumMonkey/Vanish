@@ -3249,3 +3249,186 @@ input:checked + .slider:before {
    where the others read as readouts. */
 .net-rate-tile.is-action { cursor: pointer; }
 .net-rate-tile.is-action:hover { background: rgba(255, 255, 255, 0.06); }
+
+/* ==========================================================================
+   COLUMN FILTERS (bd vanish-uninstaller-5b0)
+   ========================================================================== */
+
+/* The funnel. Small and dim until it is actually doing something: a header row
+   of six bright icons reads as six unread notifications. */
+.column-filter-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-left: 5px;
+  font-size: 9.5px;
+  line-height: 1;
+  color: var(--text-muted);
+  opacity: 0.55;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.column-filter-btn:hover {
+  opacity: 1;
+  color: var(--text-white);
+}
+/* An active filter is a claim about what the table is NOT showing, so the icon
+   states it in the primary colour instead of staying decorative. */
+.column-filter-btn.is-active {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+/* Parented to body, not to the header: .apps-table th is sticky with its own
+   stacking context, and a popover inside it gets clipped by the table's scroll
+   box. z-index sits above the sticky headers (2) and the queue panel (60) and
+   below every modal overlay (100+) - a filter must never cover a confirmation. */
+.column-filter-pop {
+  position: fixed;
+  z-index: 90;
+  width: 260px;
+  max-height: 60vh;
+  display: none;
+  flex-direction: column;
+  background: hsla(222, 42%, 8%, 0.97);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--border-glass-active);
+  border-radius: 12px;
+  box-shadow: 0 18px 50px hsla(222, 60%, 2%, 0.6);
+  overflow: hidden;
+  font-family: var(--font-body);
+}
+.column-filter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-white);
+  border-bottom: 1px solid var(--border-glass);
+}
+.column-filter-close {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.column-filter-close:hover { color: var(--text-white); }
+.column-filter-note {
+  padding: 8px 12px 0;
+  font-size: 11px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+.column-filter-search {
+  margin: 10px 12px 0;
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  color: var(--text-white);
+  font-size: 12px;
+}
+.column-filter-search:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+.column-filter-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.column-filter-actions button {
+  flex: 1;
+  padding: 4px 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-glass);
+  border-radius: 6px;
+  color: var(--text-gray);
+  font-size: 11px;
+  cursor: pointer;
+}
+.column-filter-actions button:hover {
+  color: var(--text-white);
+  border-color: var(--border-glass-active);
+}
+.column-filter-list {
+  overflow-y: auto;
+  padding: 0 6px 10px;
+}
+.column-filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-gray);
+  cursor: pointer;
+}
+.column-filter-option:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-white);
+}
+.column-filter-option input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--color-primary);
+  cursor: pointer;
+}
+/* A value can be a 60-character publisher string. The count is the one part
+   that must never be what gets pushed out of the box. */
+.column-filter-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.column-filter-count {
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chips: the always-visible second copy of the filter state. Same primary
+   colour as .filter-status-caption.filtered, because they are the same claim. */
+.column-filter-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#apps-filter-chips { padding: 0 32px 8px; }
+.column-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--color-primary-glow);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 999px;
+  color: var(--color-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.column-filter-chip:hover { background: rgba(59, 130, 246, 0.22); }
+
+/* Task Manager and the startup table had no caption row at all before this.
+   Padding matches each table's own gutter rather than being shared: 20px in
+   Task Manager (the GPU pills above it) and flush in the audit section. */
+.table-filter-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 11.5px;
+  color: var(--color-primary);
+}
+#process-filter-bar { padding: 0 20px 8px; }
+#startup-filter-bar { padding: 0 0 8px; }

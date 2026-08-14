@@ -223,6 +223,14 @@
           </div>
         </div>
 
+        <!-- 5b0: active column filters, as removable chips. In normal flow and
+             OUTSIDE .apps-workspace on purpose: that workspace is a flex row
+             holding the table beside the details panel, so a chip row added
+             inside it would become a third column. The two captions above are
+             absolutely positioned and already fight over one slot; this does
+             not join that fight. -->
+        <div class="column-filter-chips" id="apps-filter-chips" style="display: none;"></div>
+
         <!-- Apps Workspace -->
         <div class="apps-workspace">
           
@@ -413,6 +421,14 @@
               <!-- 7oo.4 / Rule 24: state the limit of this surface rather than
                    letting a table imply it can change things. -->
               <div class="panel-inline-note" id="audit-startup-note"></div>
+              <!-- 5b0: the count badge beside this section's title keeps saying
+                   how many startup entries exist in total, which is correct and
+                   is exactly why a filtered table needs its own caption here. -->
+              <div class="table-filter-bar" id="startup-filter-bar" style="display: none;">
+                <span id="startup-filter-caption"></span>
+                <div class="column-filter-chips" id="startup-filter-chips" style="display: none;"></div>
+                <button class="btn-clear-filters-inline" id="btn-clear-startup-filters">Clear</button>
+              </div>
               <div id="audit-startup-table-wrap" style="overflow-x: auto;">
                 <table class="apps-table" id="audit-startup-table">
                   <thead>
@@ -550,6 +566,16 @@
           started since the last measurement shows &ldquo;-&rdquo; until the next one, not 0%. The percentage adds up
           that program's work across all of the GPU's engines (3D, video, copy), so it is a rough measure of how busy
           it is keeping the card, and will not always match Task Manager's own figure exactly.
+        </div>
+
+        <!-- 5b0: this table had no row-count caption at all, so a filtered
+             process list was indistinguishable from a quiet machine. It states
+             both filters - the search box and any column filter - because
+             either one alone can be the reason a row is missing. -->
+        <div class="table-filter-bar" id="process-filter-bar" style="display: none;">
+          <span id="process-filter-caption"></span>
+          <div class="column-filter-chips" id="process-filter-chips" style="display: none;"></div>
+          <button class="btn-clear-filters-inline" id="btn-clear-process-filters">Clear</button>
         </div>
 
         <div class="process-workspace">
@@ -1382,6 +1408,11 @@
   <!-- The renderer, split by feature. Classic scripts sharing one global
        lexical environment, so load order is for human reading order rather
        than for resolution. -->
+  <!-- 5b0: loaded ahead of the views that register columns with it. Every one
+       of those registrations happens inside an init function called later, so
+       order is not strictly required - it is here so the shared helper reads
+       as a dependency of the views rather than a sibling of them. -->
+  <script src="renderer/column-filter.js"></script>
   <script src="renderer/core.js"></script>
   <script src="renderer/settings-about.js"></script>
   <script src="renderer/wizard.js"></script>

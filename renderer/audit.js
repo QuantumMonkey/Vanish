@@ -18,6 +18,18 @@ let auditLoaded = false;
 // actually looking at rather than to whatever the DOM can be re-parsed into.
 let startupItems = [];
 
+// 5b0: the payload the startup table was last drawn from, so a column filter
+// can re-render it without re-running getStartupItems() - that is a PowerShell
+// round trip, and making a checkbox click cost a second and a half of it would
+// be its own bug.
+let lastStartupPayload = null;
+let startupFilterUiWired = false;
+
+// Source and Status only. Both are small closed sets, which is what makes a
+// distinct-value checklist the right control; Command is free text with no
+// repeated values, and Action is a column of buttons.
+const STARTUP_COLUMN_FILTERS = ['startup.source', 'startup.status'];
+
 async function loadAuditData(force = false) {
   if (auditLoaded && !force) return;
 
@@ -1060,6 +1072,67 @@ function startupClassLabel(item) {
   return STARTUP_CLASS_LABELS[item.classification] || 'Vanish has no opinion';
 }
 
+// 5b0: the words the Source and Status cells display, each in one place, so the
+// column filters offer exactly what the table shows. Same trap as All Programs'
+// Type column: filtering on item.source would offer "TaskScheduler" for a cell
+// that reads "Task".
+function startupSourceLabel(item) {
+  return item.source === 'TaskScheduler' ? 'Task' : item.source;
+}
+
+function startupStatusLabel(item) {
+  if (item.exeExists === false) return 'Broken';
+  return item.enabled ? 'Active' : 'Inactive';
+}
+
+function wireStartupColumnFilters() {
+  // Registered from the render, not from a setup pass: audit.js has no setup
+  // function of its own - loadAuditData is its entry point. registerColumnFilter
+  // is idempotent about the funnel it attaches; the Clear button is wired once.
+  const rerender = () => {
+    if (lastStartupPayload) renderStartupTable(lastStartupPayload);
+  };
+  registerColumnFilter({
+    key: 'startup.source',
+    label: 'Source',
+    th: '#audit-startup-table thead th:nth-child(2)',
+    getPool: () => startupItems,
+    getValues: (item) => [startupSourceLabel(item)],
+    onChange: rerender
+  });
+  registerColumnFilter({
+    key: 'startup.status',
+    label: 'Status',
+    th: '#audit-startup-table thead th:nth-child(3)',
+    getPool: () => startupItems,
+    getValues: (item) => [startupStatusLabel(item)],
+    onChange: rerender
+  });
+
+  if (startupFilterUiWired) return;
+  startupFilterUiWired = true;
+  const clearBtn = document.getElementById('btn-clear-startup-filters');
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      clearColumnFilters(STARTUP_COLUMN_FILTERS);
+      rerender();
+    });
+  }
+}
+
+// The count badge beside this section's title states the machine's TOTAL, which
+// is correct and is exactly why a filtered table needs its own caption.
+function updateStartupFilterStatus(shown, total) {
+  const bar = document.getElementById('startup-filter-bar');
+  const caption = document.getElementById('startup-filter-caption');
+  if (!bar || !caption) return;
+  const columns = columnFilterSummary(STARTUP_COLUMN_FILTERS);
+  bar.style.display = columns ? '' : 'none';
+  renderColumnFilterChips('startup-filter-chips', STARTUP_COLUMN_FILTERS);
+  if (!columns) return;
+  caption.textContent = `Showing ${shown} of ${total} startup entries - filtered by ${columns}`;
+}
+
 function renderStartupTable(startup) {
   const tbody      = document.getElementById('audit-startup-tbody');
   const countBadge = document.getElementById('audit-startup-count');
@@ -1088,8 +1161,11 @@ function renderStartupTable(startup) {
   // Keep the rows so the click handlers can find their item by index rather
   // than re-deriving it from the DOM.
   startupItems = items;
+  lastStartupPayload = startup;
+  wireStartupColumnFilters();
 
   if (items.length === 0) {
+    updateStartupFilterStatus(0, 0);
     tbody.innerHTML = `
       <tr>
         <td colspan="5" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
@@ -1108,14 +1184,12 @@ function renderStartupTable(startup) {
     const sourceClass = item.source === 'Registry' ? 'registry'
                       : item.source === 'TaskScheduler' ? 'task'
                       : 'service';
-    const sourceLabel = item.source === 'TaskScheduler' ? 'Task' : item.source;
+    const sourceLabel = startupSourceLabel(item);
 
     const dotClass = item.exeExists === false ? 'orphan'
                    : item.enabled ? 'active'
                    : 'passive';
-    const statusLabel = item.exeExists === false ? 'Broken'
-                      : item.enabled ? 'Active'
-                      : 'Inactive';
+    const statusLabel = startupStatusLabel(item);
 
     const cmdShort = (item.command || '').length > 80
       ? (item.command || '').slice(0, 80) + '...'
@@ -1171,11 +1245,19 @@ function renderStartupTable(startup) {
   // The split itself. Anything not classified as necessary is VISIBLE -
   // including everything Vanish has no opinion about. Hiding what it cannot
   // explain is how a cleaner ends up disabling something that mattered.
+  // 5b0: the index stays the index into the FULL items array even when a column
+  // filter hides rows - startupItems[] and every action handler are keyed on it,
+  // so filtering has to drop rows without renumbering the survivors.
   const actionable = [];
   const necessary = [];
+  let shown = 0;
   items.forEach((item, index) => {
+    if (!columnFilterAllowsAll(STARTUP_COLUMN_FILTERS, item)) return;
+    shown += 1;
     (item.group === 'necessary' ? necessary : actionable).push([item, index]);
   });
+
+  updateStartupFilterStatus(shown, items.length);
 
   // "Your system depends on these" - never "trusted", never "safe". The claim
   // is about the cost of switching it off, not about the software being good.
@@ -1194,10 +1276,17 @@ function renderStartupTable(startup) {
        </tr>`
     : '';
 
-  tbody.innerHTML =
-    actionable.map(([item, index]) => rowHtml(item, index)).join('')
-    + groupRow
-    + necessary.map(([item, index]) => rowHtml(item, index)).join('');
+  // 5b0: a filter that hides everything must not look like a PC with nothing
+  // starting up. Those two states mean completely different things, and the
+  // reassuring one ("Nothing extra starts with Windows on this PC") belongs only
+  // to a genuinely empty list.
+  tbody.innerHTML = shown === 0
+    ? `<tr><td colspan="5" style="text-align:center; padding:24px; color:var(--text-gray); font-size:13px;">
+         No startup entries match the ${esc(columnFilterSummary(STARTUP_COLUMN_FILTERS))} filter.
+       </td></tr>`
+    : actionable.map(([item, index]) => rowHtml(item, index)).join('')
+      + groupRow
+      + necessary.map(([item, index]) => rowHtml(item, index)).join('');
 
   // Collapsed by default, which is the whole request - a long undifferentiated
   // list reads as "all of this is suspicious".

@@ -40,6 +40,7 @@ $suites = @(
     @{ Name = "De-elevation mechanism (9vp)";   Kind = "ps";       Path = "test\deelevation-mechanism-verify.ps1" },
     @{ Name = "Listener panel (ddx)";          Kind = "electron"; Path = "test/listeners-verify.js" },
     @{ Name = "Startup grouping (tda)";        Kind = "electron"; Path = "test/startup-groups-verify.js" },
+    @{ Name = "Column filters (5b0)";          Kind = "electron"; Path = "test/column-filter-verify.js" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
     @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" }
 )

@@ -792,6 +792,20 @@ function updateDashboardStats() {
   if (featuresBadge) featuresBadge.textContent = featuresLoaded ? windowsFeatures.length : '?';
 }
 
+// 5b0: the Type column's filter offers the values the CELLS carry, not the raw
+// app.type strings behind them - a checklist offering "UWP" while the table
+// reads "Windows App" is a filter for something the user cannot see anywhere.
+// One helper, called by the cell and by the filter, so the two cannot drift.
+function appTypeLabel(app) {
+  if (!app) return 'Desktop';
+  if (app.type === 'UWP') return 'Windows App';
+  if (app.type === 'Feature') return 'Feature';
+  return 'Desktop';
+}
+
+// The column filters this view owns; also the display order of their chips.
+const APP_COLUMN_FILTERS = ['apps.publisher', 'apps.type'];
+
 // Filter and Sort Handler
 function filterAndRenderApps() {
   let filtered = visibleApps().filter(app => {
@@ -808,7 +822,11 @@ function filterAndRenderApps() {
       matchesType = app.type === 'UWP';
     }
     
-    return matchesSearch && matchesType;
+    // 5b0: AND with the column filters. The Type toggle in the header and the
+    // Type column filter can both be set at once, and the caption then names
+    // both - two filters quietly overriding one another would be worse than
+    // two that each admit themselves.
+    return matchesSearch && matchesType && columnFilterAllowsAll(APP_COLUMN_FILTERS, app);
   });
   
   // Apply sorting
@@ -849,9 +867,11 @@ function updateFilterStatus(shownCount) {
   const clearBtn = document.getElementById('btn-clear-filters');
   if (!row || !text || !clearBtn) return;
 
-  const isFiltered = filterText.trim() !== '' || filterType !== 'all';
+  const columnFiltered = activeColumnFilterKeys(APP_COLUMN_FILTERS).length > 0;
+  const isFiltered = filterText.trim() !== '' || filterType !== 'all' || columnFiltered;
   row.classList.toggle('filtered', isFiltered);
   clearBtn.style.display = isFiltered ? '' : 'none';
+  renderColumnFilterChips('apps-filter-chips', APP_COLUMN_FILTERS);
 
   const pool = visibleApps().length;
   // Every split is a filter, and a filter has to admit itself. The whole reason
@@ -865,12 +885,17 @@ function updateFilterStatus(shownCount) {
   if (showFeatures) notes.push(`including ${windowsFeatures.length} Windows feature${windowsFeatures.length === 1 ? '' : 's'}`);
   const suffix = notes.length ? ` (${notes.join(', ')})` : '';
 
+  // 5b0: name the columns, do not merely admit that something is filtered.
+  // "12 of 158" with no stated cause is how a user concludes the scan lost
+  // their programs.
+  const byColumns = columnFiltered ? ` - filtered by ${columnFilterSummary(APP_COLUMN_FILTERS)}` : '';
+
   if (!isFiltered) {
     text.textContent = allApps.length === 0
       ? 'Finding installed programs...'
       : `Showing all ${pool} programs${suffix}`;
   } else {
-    text.textContent = `Showing ${shownCount} of ${pool} programs${suffix}`;
+    text.textContent = `Showing ${shownCount} of ${pool} programs${suffix}${byColumns}`;
   }
 
   // 5rz: this row and the bulk-selection row share one slot, so while a
@@ -903,14 +928,29 @@ function renderTable(apps) {
   lastRenderedApps = apps;
 
   if (apps.length === 0) {
+    // 5b0: an empty table has to say WHICH filter emptied it. "No programs match
+    // your search" while the search box is empty and a column filter is doing
+    // the hiding is the same lie the caption row above was added to stop.
+    const columns = columnFilterSummary(APP_COLUMN_FILTERS);
+    const searching = filterText.trim() !== '' || filterType !== 'all';
+    const reason = columns && searching
+      ? `No programs match your search and the ${columns} filter.`
+      : columns
+        ? `No programs match the ${columns} filter.`
+        : 'No programs match your search.';
     elements.appsTbody.innerHTML = `
       <tr>
         <td colspan="5" style="text-align: center; padding: 48px; color: var(--text-gray);">
           <i class="fa-solid fa-folder-open" style="font-size: 24px; margin-bottom: 12px;"></i>
-          <div>No programs match your search.</div>
+          <div>${esc(reason)}</div>
+          ${columns || searching
+            ? '<button class="btn-clear-filters-inline" id="btn-empty-clear-filters" style="margin-top: 10px;">Clear filters</button>'
+            : ''}
         </td>
       </tr>
     `;
+    const emptyClear = document.getElementById('btn-empty-clear-filters');
+    if (emptyClear) emptyClear.addEventListener('click', () => clearAppFilters());
     updateBulkSelectUI();
     return;
   }
@@ -944,9 +984,7 @@ function renderTable(apps) {
         </div>
       </td>
       <td>
-        <span class="badge-type ${esc(app.type.toLowerCase())}">${
-          app.type === 'UWP' ? 'Windows App' : app.type === 'Feature' ? 'Feature' : 'Desktop'
-        }</span>
+        <span class="badge-type ${esc(app.type.toLowerCase())}">${esc(appTypeLabel(app))}</span>
       </td>
       <td style="color: var(--text-gray); font-size: 13px;"${dateProv.inferred ? ` title="${esc(dateProv.note)}"` : ''}>${esc(dateStr)}${dateProv.inferred ? '<span class="inferred-mark" aria-label="approximate">~</span>' : ''}</td>
       <td style="color: var(--text-gray); font-size: 13px; font-weight: 500;">${esc(sizeStr)}</td>
@@ -1097,6 +1135,30 @@ function setupFilters() {
 
   document.getElementById('btn-clear-filters').addEventListener('click', () => clearAppFilters());
 
+  // 5b0: two column filters on this table. Publisher hangs off the NAME header
+  // because that is the column publishers are rendered in (under each name) -
+  // it has no header of its own, and giving it one would spend a column of
+  // width repeating text already on screen. getPool is visibleApps(), so the
+  // checklist covers every program this view could show including the ones the
+  // current filters hide; see decision 2 in renderer/column-filter.js.
+  registerColumnFilter({
+    key: 'apps.publisher',
+    label: 'Publisher',
+    th: '#all-apps-table thead th:nth-child(2)',
+    note: 'Publishers are listed under each program name, in this column.',
+    getPool: () => visibleApps(),
+    getValues: (app) => [app.publisher],
+    onChange: () => filterAndRenderApps()
+  });
+  registerColumnFilter({
+    key: 'apps.type',
+    label: 'Type',
+    th: '#all-apps-table thead th:nth-child(3)',
+    getPool: () => visibleApps(),
+    getValues: (app) => [appTypeLabel(app)],
+    onChange: () => filterAndRenderApps()
+  });
+
   // 5rz: the three bulk-select controls live with the other list controls on
   // purpose - select-all and clear-selection both act on the list AS CURRENTLY
   // FILTERED AND SORTED, which is exactly what the rest of this function is
@@ -1132,6 +1194,10 @@ function setupFilters() {
 function clearAppFilters() {
   filterText = '';
   filterType = 'all';
+  // Every filter this view has, the column ones included. A Clear that left a
+  // funnel set would be the third variant of "a filter that says nothing about
+  // itself" this table has had to fix.
+  clearColumnFilters(APP_COLUMN_FILTERS);
   elements.searchBar.value = '';
   document.querySelectorAll('#type-toggle .toggle-btn').forEach((btn) => {
     btn.classList.toggle('active', btn.getAttribute('data-type') === 'all');

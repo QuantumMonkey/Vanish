@@ -85,6 +85,10 @@
 
 .fa-eye { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E"); }
 
+/* 5b0: the column-filter funnel. One closed outline on the same 24x24 grid, so
+   it reads as a sibling of the sort arrows rather than a pasted-in glyph. */
+.fa-filter { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 5h16l-6.5 7.5v6.2l-3-1.8v-4.4z'/%3E%3C/svg%3E"); }
+
 .fa-folder-open { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 10.5V6a2 2 0 0 1 2-2h3.6l2 2.4h5.4a2 2 0 0 1 2 2v2.1'/%3E%3Cpath d='M2.5 10.5h19l-2.3 8.6a1 1 0 0 1-1 .9H5.8a1 1 0 0 1-1-.9z'/%3E%3C/svg%3E"); }
 
 .fa-gears { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='6.4'/%3E%3Ccircle cx='12' cy='12' r='2.5'/%3E%3Cpath d='M12 5.6V3'/%3E%3Cpath d='M12 18.4V21'/%3E%3Cpath d='M5.6 12H3'/%3E%3Cpath d='M18.4 12H21'/%3E%3Cpath d='M16.5 7.5l1.8-1.8'/%3E%3Cpath d='M5.7 18.3l1.8-1.8'/%3E%3Cpath d='M7.5 7.5L5.7 5.7'/%3E%3Cpath d='M18.3 18.3l-1.8-1.8'/%3E%3C/svg%3E"); }

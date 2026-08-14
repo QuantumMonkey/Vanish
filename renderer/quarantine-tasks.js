@@ -502,11 +502,53 @@ const PROCESS_SORTERS = {
   io: (a, b) => a.ioBytesPerSec - b.ioBytesPerSec
 };
 
+// 5b0: Task Manager's two filterable columns. Indicators is the operator's
+// explicit ask and the multi-valued one; Process is the long tail (twenty
+// chrome.exe rows collapse to one option with a count of 20). CPU, GPU, Memory
+// and Disk I/O are deliberately NOT here - a checklist of distinct continuous
+// values is meaningless, what those columns want is a threshold, and hiding a
+// different control behind the same funnel icon would misrepresent both.
+const PROCESS_COLUMN_FILTERS = ['process.name', 'process.indicators'];
+
 function setupProcessTab() {
   document.getElementById('process-search').addEventListener('input', (e) => {
     processFilter = e.target.value.toLowerCase();
     renderProcessTable();
   });
+
+  // The funnel sits inside a header that already sorts on click, so its own
+  // handler stops the event - see registerColumnFilter. Indicators filters on
+  // the SHORT LABELS the chips in the cells carry, not the raw indicator kinds,
+  // for the same reason Type does in All Programs: a filter has to offer the
+  // words that are actually on screen.
+  registerColumnFilter({
+    key: 'process.name',
+    label: 'Process',
+    th: '.process-table thead th[data-sort="name"]',
+    getPool: () => processes,
+    getValues: (p) => [p.name],
+    onChange: () => renderProcessTable()
+  });
+  registerColumnFilter({
+    key: 'process.indicators',
+    label: 'Indicators',
+    th: '.process-table thead th:last-child',
+    note: 'A program carrying two indicators stays visible while either one is shown.',
+    getPool: () => processes,
+    getValues: (p) => (p.indicators || []).map((i) => indicatorShortLabel(i.kind)),
+    onChange: () => renderProcessTable()
+  });
+
+  const clearProcessFilters = document.getElementById('btn-clear-process-filters');
+  if (clearProcessFilters) {
+    clearProcessFilters.addEventListener('click', () => {
+      processFilter = '';
+      const search = document.getElementById('process-search');
+      if (search) search.value = '';
+      clearColumnFilters(PROCESS_COLUMN_FILTERS);
+      renderProcessTable();
+    });
+  }
 
   document.querySelectorAll('.process-table th[data-sort]').forEach((th) => {
     th.addEventListener('click', () => {
@@ -687,6 +729,7 @@ function renderProcessTable() {
       (p) => p.name.toLowerCase().includes(processFilter) || String(p.pid).includes(processFilter)
     );
   }
+  rows = rows.filter((p) => columnFilterAllowsAll(PROCESS_COLUMN_FILTERS, p));
 
   const sorter = PROCESS_SORTERS[processSort.key] || PROCESS_SORTERS.cpu;
   rows = rows.slice().sort((a, b) => (processSort.asc ? sorter(a, b) : sorter(b, a)));
@@ -697,8 +740,16 @@ function renderProcessTable() {
     th.classList.toggle('asc', isSorted && processSort.asc);
   });
 
+  updateProcessFilterStatus(rows.length, processes.length);
+
   if (rows.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" class="table-state">Nothing running matches that filter.</td></tr>`;
+    // Which filter, and named. This table re-samples every two seconds, so an
+    // empty list here reads as "nothing is running" unless it says otherwise.
+    const columns = columnFilterSummary(PROCESS_COLUMN_FILTERS);
+    const reason = columns
+      ? `Nothing running matches the ${columns} filter${processFilter ? ' and that search' : ''}.`
+      : 'Nothing running matches that filter.';
+    tbody.innerHTML = `<tr><td colspan="7" class="table-state">${esc(reason)}</td></tr>`;
     return;
   }
 
@@ -736,6 +787,29 @@ function renderProcessTable() {
       renderProcessDetails(processes.find((p) => p.pid === selectedPid));
     });
   });
+}
+
+// 5b0: this table shipped with no row-count caption at all, which matters more
+// here than anywhere else in the app - it re-samples every two seconds, so a
+// filtered list is indistinguishable from a machine that went quiet. States the
+// search box AND the column filters, because either alone can be the reason a
+// process is missing.
+function updateProcessFilterStatus(shown, pool) {
+  const bar = document.getElementById('process-filter-bar');
+  const caption = document.getElementById('process-filter-caption');
+  if (!bar || !caption) return;
+
+  const columns = columnFilterSummary(PROCESS_COLUMN_FILTERS);
+  const isFiltered = processFilter !== '' || columns !== '';
+  bar.style.display = isFiltered ? '' : 'none';
+  renderColumnFilterChips('process-filter-chips', PROCESS_COLUMN_FILTERS);
+  if (!isFiltered) return;
+
+  const parts = [];
+  if (processFilter !== '') parts.push('your search');
+  if (columns) parts.push(columns);
+  caption.textContent =
+    `Showing ${shown} of ${pool} running programs - filtered by ${parts.join(' and ')}`;
 }
 
 function indicatorShortLabel(kind) {
