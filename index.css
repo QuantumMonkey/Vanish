@@ -3200,3 +3200,41 @@ input:checked + .slider:before {
   white-space: nowrap;
 }
 .listener-more { color: var(--text-muted); cursor: help; }
+
+/* tda: the split between what a person can act on and what the machine depends
+   on. The collapsed group is a quiet row, not a warning - "necessary" here
+   means "do not touch this without knowing what you are doing", which is a
+   different and more honest claim than "this is good software". */
+.startup-group-row td { padding: 6px 0 !important; background: transparent !important; }
+.startup-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--border-glass);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text-gray);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+}
+.startup-group-toggle:hover { color: var(--text-white); background: rgba(255, 255, 255, 0.06); }
+.startup-group-toggle i { font-size: 10px; }
+.startup-group-hint {
+  margin-left: auto;
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+/* The reason lives in the title attribute; this is the short form. Muted on
+   purpose - it is context, not a verdict. */
+.startup-why {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-top: 2px;
+  cursor: help;
+}

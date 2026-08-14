@@ -829,6 +829,24 @@ function renderDiskBars(disks, error) {
   }).join('');
 }
 
+// The label a row wears, and the words are load-bearing. NEVER "trusted",
+// NEVER "safe" - both would be claims about the software rather than about
+// the consequences of switching it off, and neither is a claim Vanish can
+// support. "No opinion" is stated outright rather than left blank, because a
+// blank reads as approval.
+const STARTUP_CLASS_LABELS = {
+  system: 'Part of Windows',
+  security: 'Security software',
+  managed: 'Set by policy',
+  orphaned: 'Broken - points at nothing',
+  'known-publisher': 'Publisher confirmed',
+  'no-opinion': 'Vanish has no opinion',
+};
+
+function startupClassLabel(item) {
+  return STARTUP_CLASS_LABELS[item.classification] || 'Vanish has no opinion';
+}
+
 function renderStartupTable(startup) {
   const tbody      = document.getElementById('audit-startup-tbody');
   const countBadge = document.getElementById('audit-startup-count');
@@ -869,7 +887,11 @@ function renderStartupTable(startup) {
     return;
   }
 
-  tbody.innerHTML = items.map((item, index) => {
+  // tda: one row builder, called twice - once for the group a person can act
+  // on, once for the group the machine depends on. The INDEX stays the index
+  // into the full items array, because that is what the action handlers and
+  // startupItems[] are keyed on; splitting the display must not renumber it.
+  const rowHtml = (item, index) => {
     const sourceClass = item.source === 'Registry' ? 'registry'
                       : item.source === 'TaskScheduler' ? 'task'
                       : 'service';
@@ -916,8 +938,11 @@ function renderStartupTable(startup) {
       : `<span style="font-size:11.5px; color: var(--text-muted);">Managed by Windows</span>`;
 
     return `
-      <tr class="app-row${item.exeExists === false ? ' is-orphan' : ''}">
-        <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(item.name)}</td>
+      <tr class="app-row${item.exeExists === false ? ' is-orphan' : ''}${item.group === 'necessary' ? ' is-necessary' : ''}">
+        <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">
+          ${esc(item.name)}
+          ${item.groupReason ? `<div class="startup-why" title="${esc(item.groupReason)}">${esc(startupClassLabel(item))}</div>` : ''}
+        </td>
         <td><span class="source-badge ${esc(sourceClass)}">${esc(sourceLabel)}</span></td>
         <td>
           <span class="status-dot ${esc(dotClass)}"></span>
@@ -928,7 +953,52 @@ function renderStartupTable(startup) {
       </tr>
       ${suggestionRow}
     `;
-  }).join('');
+  };
+
+  // The split itself. Anything not classified as necessary is VISIBLE -
+  // including everything Vanish has no opinion about. Hiding what it cannot
+  // explain is how a cleaner ends up disabling something that mattered.
+  const actionable = [];
+  const necessary = [];
+  items.forEach((item, index) => {
+    (item.group === 'necessary' ? necessary : actionable).push([item, index]);
+  });
+
+  // "Your system depends on these" - never "trusted", never "safe". The claim
+  // is about the cost of switching it off, not about the software being good.
+  // A monitoring agent on a work laptop belongs in this group precisely
+  // because disabling it is a disciplinary event, not because it is benign.
+  const groupRow = necessary.length
+    ? `<tr class="startup-group-row">
+         <td colspan="5">
+           <button type="button" class="startup-group-toggle" id="startup-necessary-toggle"
+                   aria-expanded="false" aria-controls="startup-necessary-rows">
+             <i class="fa-solid fa-chevron-right"></i>
+             <span>${necessary.length} more your system depends on</span>
+             <span class="startup-group-hint">shown separately so the list above is only things you can act on</span>
+           </button>
+         </td>
+       </tr>`
+    : '';
+
+  tbody.innerHTML =
+    actionable.map(([item, index]) => rowHtml(item, index)).join('')
+    + groupRow
+    + necessary.map(([item, index]) => rowHtml(item, index)).join('');
+
+  // Collapsed by default, which is the whole request - a long undifferentiated
+  // list reads as "all of this is suspicious".
+  const necessaryRows = [...tbody.querySelectorAll('tr.is-necessary')];
+  necessaryRows.forEach((tr) => { tr.style.display = 'none'; });
+  const toggle = document.getElementById('startup-necessary-toggle');
+  if (toggle) {
+    toggle.addEventListener('click', () => {
+      const nowOpen = toggle.getAttribute('aria-expanded') !== 'true';
+      toggle.setAttribute('aria-expanded', String(nowOpen));
+      toggle.querySelector('i').className = nowOpen ? 'fa-solid fa-chevron-down' : 'fa-solid fa-chevron-right';
+      necessaryRows.forEach((tr) => { tr.style.display = nowOpen ? '' : 'none'; });
+    });
+  }
 
   tbody.querySelectorAll('.startup-action-btn').forEach((btn) => {
     btn.addEventListener('click', () =>

@@ -1481,6 +1481,170 @@ function Resolve-StartupExecutable {
 }
 
 # 7. Startup Item Enumerator (Registry Run keys + Task Scheduler + Auto-start Services)
+# tda: split what a person can act on from what the machine depends on.
+#
+# Operator, 2026-08-13: "could you categorize startup items as killable and
+# necessary? that way necessary things could be hidden behind a collapsible
+# section and not seen as a massive list." A long undifferentiated list reads
+# as "all of this is suspicious", which is the opposite of what this app is
+# for.
+#
+# RULE 6 AMENDMENT, authorised by the operator 2026-08-13 and SCOPED TO
+# GROUPING ONLY. Rule 6 forbids a trusted-publisher allowlist. One is used
+# here, for deciding which visual group an entry lands in, and it may never be
+# consulted to permit or block a removal anywhere else in the app. See
+# docs/promptgate.md.
+#
+# THE WORDING IS PART OF THE CONTRACT. "Necessary" here means "do not touch
+# this without knowing what you are doing" - NOT "this is good software", and
+# never the words "trusted" or "safe". The operator named the case that makes
+# the distinction matter: on a corporate machine the monitoring agent is
+# exactly the thing an employee should not disable, not because it is benign,
+# but because disabling it is a disciplinary event and may break compliance.
+#
+# AND THE COUNTEREXAMPLE THAT KEEPS IT HONEST: RealPlayer's service runs as
+# LocalSystem with auto-start, and would score "necessary" on the LocalSystem
+# signal alone - while being software the operator does not use, listening on
+# every interface (see ddx). So LocalSystem is a WEAK signal here and is never
+# sufficient by itself; it only corroborates a publisher we already matched.
+#
+# BINDING: anything unclassifiable goes in the VISIBLE group with an explicit
+# no-opinion label. Hiding what we cannot explain is how a cleaner ends up
+# disabling something that mattered.
+
+# Deliberately not called "trusted". Matching only decides which group an
+# entry is drawn in.
+$script:StartupSystemPublishers = @(
+    'Microsoft Corporation',
+    'Microsoft Windows',
+    'Microsoft Windows Hardware Compatibility Publisher'
+)
+$script:StartupSecurityPublishers = @(
+    'ESET', 'Kaspersky', 'Bitdefender', 'Avast', 'AVG', 'NortonLifeLock', 'Gen Digital',
+    'Symantec', 'McAfee', 'Malwarebytes', 'Sophos', 'Trend Micro', 'F-Secure',
+    'Webroot', 'Avira', 'CrowdStrike', 'SentinelOne', 'Carbon Black', 'Cylance',
+    'VMware Carbon Black', 'Check Point', 'Palo Alto Networks'
+)
+
+function Get-MachineIsManaged {
+    # Cached: this is asked once per startup item otherwise.
+    if ($null -ne $script:MachineIsManaged) { return $script:MachineIsManaged }
+    $managed = $false
+    try {
+        $managed = [bool](Get-CimInstance -Query "SELECT PartOfDomain FROM Win32_ComputerSystem" -ErrorAction Stop).PartOfDomain
+    } catch { $managed = $false }
+    if (-not $managed) {
+        # MDM enrolment without a domain join - the modern corporate shape.
+        #
+        # THE OBVIOUS CHECK IS WRONG. A first version treated any non-zero
+        # EnrollmentType as enrolment. Measured on an ordinary personal
+        # machine: THIRTY-FOUR keys under Enrollments, most of them
+        # EnrollmentType=1 with no provider, plus Windows' own internal
+        # "Local Authority" / "Cloud Authority" / "Deploy Authority" records.
+        # Every one of them read as "this is a corporate machine".
+        #
+        # That was not a cosmetic error. It made the machine look managed,
+        # which swept RealPlayer's three startup entries into the collapsed
+        # "necessary" group and told the operator they were put there by
+        # whoever administers the PC - about software they had just asked to
+        # get rid of. Precisely inverted.
+        #
+        # A real MDM enrolment names its provider and who it enrolled.
+        try {
+            $enrolments = Get-ChildItem 'HKLM:\SOFTWARE\Microsoft\Enrollments' -ErrorAction Stop
+            foreach ($e in $enrolments) {
+                $p = Get-ItemProperty -LiteralPath $e.PSPath -ErrorAction SilentlyContinue
+                if (-not $p) { continue }
+                $provider = [string]$p.ProviderID
+                if ([string]::IsNullOrWhiteSpace($provider)) { continue }
+                # Windows' own bookkeeping, not an MDM authority.
+                if ($provider -in @('Local Authority', 'Cloud Authority', 'Deploy Authority')) { continue }
+                $hasSubject = -not [string]::IsNullOrWhiteSpace([string]$p.UPN)
+                $hasService = -not [string]::IsNullOrWhiteSpace([string]$p.DiscoveryServiceFullURL)
+                if ($hasSubject -or $hasService) { $managed = $true; break }
+            }
+        } catch { }
+    }
+    $script:MachineIsManaged = $managed
+    return $managed
+}
+
+function Add-StartupClassification {
+    param([object]$Items)
+
+    $windir = [string]$env:SystemRoot
+    $managedMachine = Get-MachineIsManaged
+
+    foreach ($item in $Items) {
+        $group = 'actionable'
+        $classification = 'no-opinion'
+        $reason = 'Vanish has no opinion about this one. It is shown here rather than hidden, because hiding what it cannot explain is how a cleaner removes something that mattered.'
+
+        $exePath = [string]$item.exePath
+        $signer = $null
+        $sigStatus = 'not-checked'
+        if ($exePath -and $item.exeExists -eq $true) {
+            $sig = Get-BinarySignature -Path $exePath
+            $sigStatus = [string]$sig.status
+            if ($sig.status -eq 'Valid') { $signer = [string]$sig.signer }
+        }
+
+        $underWindows = $false
+        if ($exePath -and $windir) { $underWindows = $exePath.StartsWith($windir, [StringComparison]::OrdinalIgnoreCase) }
+        $underPolicies = ([string]$item.managePath -match '\\Policies\\')
+
+        if ($item.exeExists -eq $false) {
+            # The clearest actionable case there is, and it is already detected.
+            $group = 'actionable'
+            $classification = 'orphaned'
+            $reason = 'Points at a file that is not there any more, so it does nothing at startup except fail.'
+        }
+        elseif ($signer -and ($script:StartupSystemPublishers | Where-Object { $signer -like "$_*" })) {
+            $group = 'necessary'
+            $classification = 'system'
+            $reason = "Windows itself put this here (signed by $signer). Your system depends on it."
+        }
+        elseif ($signer -and ($script:StartupSecurityPublishers | Where-Object { $signer -like "*$_*" })) {
+            $group = 'necessary'
+            $classification = 'security'
+            $reason = "Part of your security software ($signer). Turning it off leaves the machine unprotected."
+        }
+        elseif ($underPolicies) {
+            # The case the operator singled out. NOT a claim that the software
+            # is benign - the opposite, in fact: it is a claim that switching
+            # it off is not the user's call to make.
+            #
+            # EVIDENCE ONLY. An earlier version also matched "the machine looks
+            # managed AND this is an HKLM entry", which is a proxy rather than
+            # evidence: on a genuinely managed machine it would sweep every
+            # machine-wide startup entry into the hidden group, ordinary
+            # third-party software included. Being under a Policies key is a
+            # fact about THIS entry. "The machine is managed" is a fact about
+            # the machine and says nothing about who put this particular
+            # program in Run.
+            $group = 'necessary'
+            $classification = 'managed'
+            $reason = 'This was put here by policy rather than by you. Turning it off may breach your workplace policy, and it will probably come back at the next policy refresh.'
+        }
+        elseif ($underWindows -and $signer) {
+            $group = 'necessary'
+            $classification = 'system'
+            $reason = "Lives in your Windows folder and is signed by $signer."
+        }
+        elseif ($signer) {
+            $group = 'actionable'
+            $classification = 'known-publisher'
+            $reason = "Signed by $signer. That confirms who wrote it, not that you need it at startup."
+        }
+
+        $item | Add-Member -NotePropertyName group          -NotePropertyValue $group          -Force
+        $item | Add-Member -NotePropertyName classification -NotePropertyValue $classification -Force
+        $item | Add-Member -NotePropertyName groupReason    -NotePropertyValue $reason         -Force
+        $item | Add-Member -NotePropertyName signer         -NotePropertyValue $signer         -Force
+        $item | Add-Member -NotePropertyName signatureStatus -NotePropertyValue $sigStatus     -Force
+    }
+}
+
 function Get-StartupItems {
     $items = [System.Collections.Generic.List[PSCustomObject]]::new()
 
@@ -1623,6 +1787,8 @@ function Get-StartupItems {
         $item | Add-Member -NotePropertyName actionLabel -NotePropertyValue $actionLabel -Force
     }
 
+    Add-StartupClassification $items
+
     # @() around the pipeline is load-bearing, not style. Where-Object returns a
     # bare object when exactly one item matches, and .Count on that serialises
     # as null - so a machine with precisely one orphaned startup item reported
@@ -1632,6 +1798,8 @@ function Get-StartupItems {
         items          = $items
         total          = @($items).Count
         orphans        = @($items | Where-Object { $_.exeExists -eq $false }).Count
+        necessaryCount = @($items | Where-Object { $_.group -eq 'necessary' }).Count
+        actionableCount = @($items | Where-Object { $_.group -ne 'necessary' }).Count
         detectionOnly  = $false
         detectionNote  = 'Every change here is reversible: registry entries and services are saved to quarantine before they are touched, and a disabled task is re-enabled from the same button.'
     }

@@ -8,6 +8,82 @@ full decision rules.
 
 ---
 
+## [0.6.1] - 2026-08-14
+
+### Added -- startup items split into what you can act on and what the machine needs (`tda`)
+
+Operator, 2026-08-13: *"could you categorize startup items as killable and
+necessary? that way necessary things could be hidden behind a collapsible
+section and not seen as a massive list."*
+
+Forty-one entries in one undifferentiated list reads as "all of this is
+suspicious", which is the opposite of what this app is for. The list now leads
+with the entries a person can actually act on; the rest collapse behind a row
+that states its own count.
+
+On the machine this was built against that is 23 visible and 18 collapsed.
+
+**This is the first place in Vanish allowed a publisher allowlist, and the
+permission is deliberately narrow.** Rule 6 forbids one; the operator
+authorised an amendment scoped to *which visual group an entry is drawn in*
+and nothing else. It may never be consulted to permit or block a removal.
+`test/startup-groups-verify.js` asserts the list is referenced only where it is
+defined and used -- if that count changes, the amendment has quietly widened.
+
+**The wording carries the whole design.** "Necessary" means *do not touch this
+without knowing what you are doing*. The words "trusted" and "safe" appear
+nowhere and are asserted against, because both would be claims about the
+software rather than about what happens if you switch it off. The case that
+makes the distinction matter is the operator's own: on a corporate machine the
+monitoring agent belongs in the collapsed group **precisely because disabling
+it is a disciplinary event**, not because it is benign.
+
+Anything Vanish cannot classify stays **visible**, labelled "Vanish has no
+opinion" rather than left blank -- a blank reads as approval, and hiding what it
+cannot explain is how a cleaner ends up disabling something that mattered.
+
+**The first implementation got this wrong in the most instructive way.** It
+treated any non-zero `EnrollmentType` under `HKLM\SOFTWARE\Microsoft\Enrollments`
+as MDM enrolment. Measured on an ordinary personal machine: **34 such keys**,
+mostly `EnrollmentType=1` with no provider, plus Windows' own "Local Authority"
+and "Cloud Authority" bookkeeping. Every one of them read as "this is a
+corporate machine" -- which then swept all three RealPlayer startup entries into
+the hidden group and told the operator they were placed by whoever administers
+the PC. About software they had just asked to get rid of. Precisely inverted.
+
+Two fixes: MDM detection now requires a real provider plus a subject or a
+discovery URL, and -- more importantly -- `managed` now requires the entry to
+sit under a **Policies key**. "The machine looks managed" is a fact about the
+machine and says nothing about who put *this particular program* in Run.
+Evidence about the entry, not a proxy.
+
+The counterexample is kept in the code and the tests: RealPlayer runs as
+LocalSystem with auto-start and would score "necessary" on that signal alone,
+so LocalSystem is treated as a **weak** signal that never decides anything by
+itself.
+
+### Fixed -- the elevated confirmation runner lost every parameter
+
+Its first real run reported four separate engine failures. It was one harness
+bug: the Windows command-line parser strips double quotes, so `scanner.ps1`
+received `{valueName:...}` instead of JSON and every parameter arrived empty.
+
+Two assertions in that run are worth recording because they *passed*:
+
+* The network-hold revert checks reported success while nothing had ever been
+  applied -- "the value is GONE after release" is trivially true when nothing
+  set it. They are now skipped, loudly, unless the apply succeeded. An
+  assertion that reads green in exactly the situation you need it to read red
+  is worse than no assertion.
+* `phase4-ipc-verify`'s byte-for-byte check compared a restored file against a
+  hardcoded 4096 bytes. The file is 4098 -- `Set-Content` appends a line
+  terminator -- so it had never been true, and it would have **passed** if the
+  vault had truncated the file to exactly 4096, which is the one outcome it
+  existed to catch. It now hashes the file before the purge and compares
+  against that. The vault itself was never at fault.
+
+---
+
 ## [0.6.0] - 2026-08-14
 
 ### Added -- what can be reached from outside (`ddx`)

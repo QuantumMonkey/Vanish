@@ -69,6 +69,50 @@ The following are permanently out of scope for Vanish:
 
 Do not re-add these features. If a future contributor proposes them, this rule is the rejection reason.
 
+**Amendment, authorised by the operator 2026-08-13, SCOPED TO ONE SURFACE.**
+Rule 6 has always been read as also forbidding a trusted-publisher allowlist,
+on the grounds that Vanish does not get to vouch for software. That reading
+still holds everywhere except one place.
+
+The Health Advisor startup list (`tda`) may consult a publisher list **to
+decide which of two visual groups an entry is drawn in, and for nothing
+else.** It may never be consulted to permit, block, recommend or discourage a
+removal, here or anywhere. `test/startup-groups-verify.js` asserts the list is
+referenced only where it is defined and used; if that count changes, the
+amendment has quietly widened and the change should be refused.
+
+Why it was granted: an undifferentiated list of forty startup entries reads as
+"all of this is suspicious", which is the opposite of what this app is for.
+
+Two constraints came with it, and they are the interesting part:
+
+1. **The grouping claim is about consequences, not quality.** "Necessary"
+   means *do not touch this without knowing what you are doing*. The words
+   "trusted" and "safe" are forbidden in this surface and asserted against,
+   because both would be claims about the software rather than about what
+   happens if you switch it off.
+2. **The case that makes the distinction matter** is the operator's own:
+   *"this is not useful in personal cases, but is necessary for
+   corporate/enterprise machines where they install legalised spyware to
+   monitor their employee's activities."* On a managed machine the monitoring
+   agent belongs in the collapsed group **precisely because disabling it is a
+   disciplinary event**, not because it is benign. A design that conflated
+   those two would be lying to the person it is trying to help.
+
+And the counterexample that keeps it honest: RealPlayer runs as LocalSystem
+with auto-start and would score "necessary" on that signal alone -- while
+being software the operator had just asked to get rid of, listening on every
+interface (`ddx`). LocalSystem is therefore a **weak** signal in this
+classifier and is never sufficient on its own. The first implementation hid
+all three RealPlayer entries behind "your organisation put this here", via a
+"the machine looks managed, and this is a machine-wide entry" proxy. That
+proxy is gone: `managed` now requires the entry to sit under a Policies key,
+which is evidence about *that entry* rather than about the machine.
+
+Anything unclassifiable goes in the **visible** group with an explicit
+"Vanish has no opinion" label. Hiding what it cannot explain is how a cleaner
+ends up disabling something that mattered.
+
 ---
 
 ### Rule 7 — Behavioral heuristics: passive, local, display-only
