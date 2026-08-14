@@ -103,10 +103,39 @@ app.whenReady().then(async () => {
   console.log('');
   console.log('FLOW-01 elevation offer (shown automatically on an unelevated start)');
 
+  // AMENDED 2026-08-14. This block used to assert the opposite - that the
+  // offer appears by itself on an unelevated launch. The operator:
+  //
+  //   "opening vanish shouldnt immediately throw this dialog in my face,
+  //    thats what the banner and button are for. let the user choose to go
+  //    into admin mode, when needed by choice, gating or necessity."
+  //
+  // So the contract is now the reverse, and it is a stricter one: the app
+  // must be usable the instant it opens, AND the offer must still be reachable
+  // both ways it is meant to be.
   const overlayActive = await win.webContents.executeJavaScript(
     `document.getElementById('elevation-modal-overlay').classList.contains('active')`
   );
-  assert(overlayActive === true, 'the offer appears by itself on an unelevated launch');
+  assert(overlayActive === false, 'the offer does NOT open by itself on an unelevated launch');
+  await assertClickable(win, '.nav-item[data-tab="quarantine"]', 'the app is usable immediately - nothing is covering the sidebar');
+  await assertClickable(win, '#btn-banner-elevate', 'CHOICE: the banner button is there and clickable from the first frame');
+
+  // GATING: a blocked Full Mode action is the moment elevation is actually
+  // necessary, so that is where the offer appears.
+  const gated = await win.webContents.executeJavaScript(`(() => {
+    const before = document.getElementById('elevation-modal-overlay').classList.contains('active');
+    const allowed = guardFullMode();
+    const after = document.getElementById('elevation-modal-overlay').classList.contains('active');
+    return { before, allowed, after };
+  })()`);
+  assert(gated.allowed === false, 'a Full Mode action is still refused in Audit Mode');
+  assert(gated.before === false && gated.after === true, 'GATING: being refused opens the offer, rather than only complaining');
+
+  // The overlay fades in, and pointer-events arrive with the transition. The
+  // old version of this block hit-tested a modal that had been open since
+  // launch and was long settled; opening it on demand needs the wait, or the
+  // hit-test lands on the panel behind the button and reports a false block.
+  await wait(500);
   await assertClickable(win, '#btn-elevate-now', 'the "Restart as administrator" button is actually clickable');
   await assertClickable(win, '#btn-stay-audit', 'the "Continue in Audit Mode" button is actually clickable');
 
@@ -118,7 +147,6 @@ app.whenReady().then(async () => {
   );
   assert(dismissed, 'declining dismisses the dialog');
   await assertClickable(win, '.nav-item[data-tab="quarantine"]', 'the app is usable after declining (sidebar reachable)');
-  await assertClickable(win, '#btn-banner-elevate', 'the banner elevate button is clickable in Audit Mode');
 
   // --- Application list renders every engine output shape -----------------
   // renderTable/loadApplications never see the DOM test, only the IPC/engine

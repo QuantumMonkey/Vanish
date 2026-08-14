@@ -361,13 +361,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   // was already 'full' from a prior run.
   syncSettingsPanel();
   await loadApplications();
-  await maybeOfferElevation();
+  // Wire the buttons; do NOT open anything. The offer opens from the banner
+  // or from a blocked action, never from having started the app.
+  wireElevationOffer();
 
-  // First-launch guided tour. Skipped (not just delayed) if the elevation
-  // offer is showing on this same launch - two full-screen overlays
-  // stacking on the very first frame is worse than needing to find "Take
-  // the tour" in Settings once. hasSeenTour stays false in that case, so a
-  // later launch that doesn't offer elevation still gets it automatically.
+  // The tour no longer has to dodge the elevation modal, because the modal no
+  // longer opens on launch. The check is kept anyway: it costs nothing and it
+  // is still true that two full-screen overlays on the first frame is worse
+  // than finding "Take the tour" in Settings once.
   if (!appSettings.hasSeenTour) {
     const elevationShowing = document.getElementById('elevation-modal-overlay').classList.contains('active');
     if (!elevationShowing) startTour();
@@ -472,19 +473,37 @@ function applyTierLocks() {
   });
 }
 
-// FLOW-01: the one-time offer. Declining leaves a working Audit Mode session.
-async function maybeOfferElevation() {
-  if (!tierState.offerElevation || isAdmin) return;
+// FLOW-01, amended 2026-08-14 on operator instruction:
+//
+//   "opening vanish shouldnt immediately throw this dialog in my face, thats
+//    what the banner and button are for. let the user choose to go into admin
+//    mode, when needed by choice, gating or necessity."
+//
+// So the offer no longer appears on launch. It is not gone - it appears at
+// the three moments it is actually relevant:
+//
+//   CHOICE     the Audit Mode banner and its button, always visible
+//   GATING     guardFullMode(), when a Full Mode action is actually blocked
+//   NECESSITY  the same, since that IS the moment of necessity
+//
+// A modal that opens before the user has asked for anything is not consent,
+// it is a toll gate. The banner says the same thing without stopping them.
+function wireElevationOffer() {
   const overlay = document.getElementById('elevation-modal-overlay');
-  overlay.classList.add('active');
-
+  if (!overlay) return;
   document.getElementById('btn-stay-audit').onclick = async () => {
     overlay.classList.remove('active');
     await window.api.dismissElevationOffer();
-    toast('Staying in Audit Mode. You can still list and scan everything.', 'info');
   };
   document.getElementById('btn-elevate-now').onclick = () => requestElevation(overlay);
   document.getElementById('btn-banner-elevate').onclick = () => requestElevation(null);
+}
+
+// Opened by gating, never by starting the app.
+function showElevationOffer() {
+  if (isAdmin) return;
+  const overlay = document.getElementById('elevation-modal-overlay');
+  if (overlay) overlay.classList.add('active');
 }
 
 async function requestElevation(overlay) {
@@ -604,9 +623,13 @@ function guardProtected() {
 }
 
 // Reused by every destructive UI path so a locked control can never act.
+// The gate is also the offer. Refusing an action and then making the user go
+// find the banner themselves is the worst of both: it interrupts, and it does
+// not help. This is the moment elevation is genuinely necessary, so this is
+// where it is offered.
 function guardFullMode() {
   if (isAdmin) return true;
-  toast(tierState.bannerText || 'Vanish is in Audit Mode. Restart it as administrator to uninstall and clean up.', 'warn');
+  showElevationOffer();
   return false;
 }
 
