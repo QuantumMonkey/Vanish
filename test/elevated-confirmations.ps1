@@ -31,8 +31,14 @@ New-Item -ItemType Directory -Path $outDir | Out-Null
 $transcript = Join-Path $outDir 'transcript.txt'
 $summaryPath = Join-Path $outDir 'summary.json'
 
+# electron.exe, not node_modules\.bin\electron.cmd: the .cmd is a batch wrapper,
+# so killing it on a timeout would leave the real Electron - and its window -
+# running, which is exactly the state the operator was left in on 2026-08-14.
+$electronExe = Join-Path $root 'node_modules\electron\dist\electron.exe'
+
 $script:pass = 0
 $script:fail = 0
+$script:lastCheck = $false
 $script:lines = @()
 $script:results = [ordered]@{}
 
@@ -45,39 +51,145 @@ function Head($text) {
     Say $text 'Cyan'
     Say ('=' * $text.Length) 'Cyan'
 }
+# Sets $script:lastCheck rather than returning it. Returning the boolean meant
+# every call site that did not consume it printed a bare "True" or "False" under
+# its own PASS/FAIL line - 32 stray lines in a transcript whose whole job is to
+# be readable by the operator who ran it.
 function Check($condition, $label) {
+    $script:lastCheck = [bool]$condition
     if ($condition) { Say "  PASS  $label" 'Green'; $script:pass++ }
     else { Say "  FAIL  $label" 'Red'; $script:fail++ }
-    return [bool]$condition
 }
 function Note($text) { Say "  NOTE  $text" 'Yellow' }
 
-# Call the engine the way main.js does.
+# Call the engine the way main.js does, which means -ParamsBase64.
 #
-# THE QUOTES HAVE TO BE ESCAPED, and the first elevated run of this script is
-# what proved it. Passing the JSON straight through, every engine call came
-# back with an empty parameter - "No value name was given", "that is not a
-# valid service name", "Nothing was captured first" - and it read like four
-# separate app bugs. It was one harness bug: the Windows command-line parser
-# strips the double quotes, so scanner.ps1 received
+# THE PARAMETER NAME WAS THE BUG, and the 2026-08-14 elevated run is what
+# exposed it. This function used to pass -ParamsJson with the double quotes
+# escaped, and a comment here confidently blamed the Windows command-line
+# parser for stripping quotes. That was wrong, and it survived a whole session
+# because it produced exactly the symptoms it predicted: "Which startup entry?
+# No value name was given", "that is not a valid service name", "Nothing was
+# captured first" - four refusals that read like four app bugs.
 #
-#   {valueName:VanishConfirmProbe,keyPath:HKCU:\\Software\\...}
+# scanner.ps1 takes -Action and -ParamsBase64. THERE IS NO -ParamsJson
+# PARAMETER. It has a local $ParamsJson variable, decoded FROM the base64, and
+# the two were conflated. Passing -ParamsJson to a script whose param block
+# does not declare it does not error: with -File, the unmatched name and its
+# value fall into $args and are ignored, so the engine ran perfectly with no
+# parameters at all and refused by name, every time.
 #
-# which ConvertFrom-Json cannot read, leaving $Params null. Reproduced against
-# an echo script rather than guessed at, because unelevated every one of these
-# actions checks the tier BEFORE the parameters and so cannot tell you which
-# of the two is wrong.
+# Proved with an echo probe carrying scanner.ps1's exact param block rather
+# than reasoned about (the previous fix was reasoned about):
+#   -ParamsJson    -> ParamsBase64='', DecodedJson='', $args = 2 leftover items
+#   -ParamsBase64  -> DecodedJson = the exact JSON, $args empty
+# The quotes had survived the command line intact all along.
 #
-# main.js does not need this: Node builds the argument vector itself rather
-# than handing a string to the shell.
+# Note what this means about the earlier failures: the tier check inside each
+# action runs BEFORE the parameter check and did not fire, which is independent
+# proof the run really was elevated and the engine really did execute.
 function Engine($action, $params) {
     $psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'scanner.ps1'), '-Action', $action)
     if ($null -ne $params) {
         $json = $params | ConvertTo-Json -Depth 6 -Compress
-        $psArgs += @('-ParamsJson', ($json -replace '"', '\"'))
+        $b64  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
+        $psArgs += @('-ParamsBase64', $b64)
     }
     $raw = & powershell.exe @psArgs 2>&1 | Out-String
     try { return $raw.Trim() | ConvertFrom-Json } catch { return [PSCustomObject]@{ success = $false; error = "unparseable: $($raw.Trim())" } }
+}
+
+# Run one Electron suite with its output STREAMED, and a deadline.
+#
+# The 2026-08-14 run stopped dead here and the operator was left watching a
+# Vanish window with nothing on the console, no way to tell whether it was
+# working, waiting for them, or hung - and no way out but to abandon the run.
+# Two causes, both fixed here rather than explained away:
+#
+#   1. `& $electron ... | Out-String` buffers EVERYTHING until the child exits.
+#      A suite that never exits therefore prints nothing, ever, including the
+#      lines it had already written. Now every line appears as it arrives.
+#   2. There was no timeout. A hung child hung the whole script behind it, so
+#      the legs after it never ran either.
+#
+# Two limits, because they mean different things: IDLE is how long the suite is
+# allowed to say nothing (a real hang is silent), HARD is the total wall clock
+# it may take even while talking. Either one being hit is reported AS A HANG,
+# distinct from a suite that ran and failed - those are not the same finding and
+# must never be collapsed into "failed".
+function Invoke-Suite($name, $relPath, $key, $idleSeconds = 90, $hardSeconds = 300) {
+    $logPath = Join-Path $outDir ("{0}.log" -f $key)
+    $errPath = Join-Path $outDir ("{0}.err.log" -f $key)
+    Set-Content -Path $logPath -Value '' -Encoding ascii
+    Set-Content -Path $errPath -Value '' -Encoding ascii
+
+    Say ''
+    Say ("--- {0} ---" -f $name)
+    Say ("    {0}  (idle limit {1}s, hard limit {2}s; live output follows)" -f $relPath, $idleSeconds, $hardSeconds)
+
+    $proc = Start-Process -FilePath $electronExe -ArgumentList (Join-Path $root $relPath) `
+        -RedirectStandardOutput $logPath -RedirectStandardError $errPath -NoNewWindow -PassThru
+
+    # FileShare::ReadWrite matters: the child holds the log open for writing, so
+    # a plain Get-Content can lose the race and throw mid-run.
+    $stream = [System.IO.File]::Open($logPath, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+    $reader = [System.IO.StreamReader]::new($stream)
+
+    $started  = Get-Date
+    $lastSeen = Get-Date
+    $lastLine = ''
+    $verdict  = 'ran'
+    try {
+        while ($true) {
+            $got = $false
+            while ($null -ne ($line = $reader.ReadLine())) {
+                if ($line.Trim()) { Say ("    {0}" -f $line.TrimEnd()); $lastLine = $line.Trim() }
+                $got = $true
+            }
+            if ($got) { $lastSeen = Get-Date }
+            if ($proc.HasExited) { break }
+            if (((Get-Date) - $lastSeen).TotalSeconds -gt $idleSeconds) { $verdict = 'idle'; break }
+            if (((Get-Date) - $started).TotalSeconds -gt $hardSeconds) { $verdict = 'hard'; break }
+            Start-Sleep -Milliseconds 400
+        }
+        if ($verdict -eq 'ran') {
+            $proc.WaitForExit()
+            while ($null -ne ($line = $reader.ReadLine())) {
+                if ($line.Trim()) { Say ("    {0}" -f $line.TrimEnd()); $lastLine = $line.Trim() }
+            }
+        }
+    } finally {
+        $reader.Dispose(); $stream.Dispose()
+    }
+
+    if ($verdict -ne 'ran') {
+        $why = if ($verdict -eq 'idle') { "said nothing for $idleSeconds seconds" } else { "exceeded its $hardSeconds second limit" }
+        Say ''
+        Say ("    HUNG: {0} {1}. Killing it so the rest of this script can run." -f $name, $why) 'Red'
+        Say ("    Last line it printed: {0}" -f $(if ($lastLine) { $lastLine } else { '(nothing at all)' })) 'Red'
+        Say '    If a Vanish window or a Windows dialog is on screen, that is what it is waiting for.' 'Yellow'
+        try { Stop-Process -Id $proc.Id -Force -ErrorAction Stop } catch { }
+        # Electron leaves helper processes behind when the parent is killed.
+        Get-Process -Name 'electron' -ErrorAction SilentlyContinue |
+            Where-Object { $_.StartTime -gt $started } |
+            ForEach-Object { try { Stop-Process -Id $_.Id -Force -ErrorAction Stop } catch { } }
+        Check $false "$name did not finish - HUNG, not failed (last line: $lastLine)"
+        $script:results[$key] = "hung after $([int]((Get-Date) - $started).TotalSeconds)s; last line: $lastLine"
+        return
+    }
+
+    $all = @(Get-Content -Path $logPath -ErrorAction SilentlyContinue)
+    $resultLine = ($all | Where-Object { $_ -match '^Result: \d+ passed, \d+ failed' } | Select-Object -Last 1)
+    if ($resultLine) {
+        Check ($resultLine -match 'Result: \d+ passed, 0 failed') "$name passed elevated ($($resultLine.Trim()))"
+        $script:results[$key] = $resultLine.Trim()
+    } else {
+        Check $false "$name produced no Result line (exit code $($proc.ExitCode))"
+        $script:results[$key] = "no result line; exit $($proc.ExitCode)"
+        $err = @(Get-Content -Path $errPath -ErrorAction SilentlyContinue | Where-Object { $_.Trim() } | Select-Object -Last 8)
+        foreach ($e in $err) { Say ("    stderr: {0}" -f $e) 'Yellow' }
+    }
+    Say ("    took {0}s" -f [int]((Get-Date) - $started).TotalSeconds)
 }
 
 $elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -132,7 +244,8 @@ try {
             Where-Object { (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match [regex]::Escape($probeRunValue) } |
             Select-Object -First 1
     }
-    if (Check ($null -ne $vaultHit) "a .reg manifest naming the value was written to the vault (entryId $($r.entryId))") {
+    Check ($null -ne $vaultHit) "a .reg manifest naming the value was written to the vault (entryId $($r.entryId))"
+    if ($script:lastCheck) {
         $regText = Get-Content $vaultHit.FullName -Raw
         Check ($regText -match [regex]::Escape($probeRunData.Replace('\','\\'))) 'the manifest carries the ORIGINAL data, so a restore can be byte-identical'
         # Restore through Windows' own importer, which is what the vault's .reg
@@ -242,42 +355,24 @@ try {
     # ======================================================================
     Head 'e7q + the two suites that have never run - elevated'
     # ======================================================================
-    $electron = Join-Path $root 'node_modules\.bin\electron.cmd'
-    foreach ($suite in @(
-        @{ Name = 'phase4-ipc-verify (e7q: Store-leftover purge + restore)'; Path = 'test/phase4-ipc-verify.js'; Key = 'e7q' },
-        @{ Name = 'vault-ipc-verify (TASK-02/03)';                          Path = 'test/vault-ipc-verify.js';  Key = 'vault-ipc' }
-    )) {
-        Say ''
-        Say ("--- {0} ---" -f $suite.Name)
-        $out = & $electron (Join-Path $root $suite.Path) 2>&1 | Out-String
-        $line = ($out -split "`r?`n" | Where-Object { $_ -match '^Result: \d+ passed, \d+ failed' } | Select-Object -Last 1)
-        if ($line) {
-            Say ("  {0}" -f $line.Trim())
-            Check ($line -match 'Result: \d+ passed, 0 failed') "$($suite.Name) passed elevated"
-            $script:results[$suite.Key] = $line.Trim()
-        } else {
-            Check $false "$($suite.Name) produced no Result line"
-            $script:results[$suite.Key] = 'no result line'
-            ($out -split "`r?`n" | Select-Object -Last 12) | ForEach-Object { if ($_.Trim()) { Say "    $_" } }
-        }
-        $out | Set-Content -Encoding ascii (Join-Path $outDir ("{0}.log" -f $suite.Key))
+    if (-not (Test-Path $electronExe)) {
+        Check $false "electron.exe not found at $electronExe - run npm install"
+    } else {
+        Invoke-Suite 'phase4-ipc-verify (e7q: Store-leftover purge + restore)' 'test/phase4-ipc-verify.js' 'e7q' 90 300
+        Invoke-Suite 'vault-ipc-verify (TASK-02/03)' 'test/vault-ipc-verify.js' 'vault-ipc' 90 300
     }
 
     # ======================================================================
     Head '9sy - real-data pass, elevated'
     # ======================================================================
-    $out = & $electron (Join-Path $root 'test/real-data-verify.js') 2>&1 | Out-String
-    $line = ($out -split "`r?`n" | Where-Object { $_ -match '^Result: \d+ passed, \d+ failed' } | Select-Object -Last 1)
-    if ($line) {
-        Say ("  {0}" -f $line.Trim())
-        Check ($line -match 'Result: \d+ passed, 0 failed') 'real-data-verify passed elevated'
-        $script:results['9sy'] = $line.Trim()
+    # A real scan of the real machine, so it gets a far longer hard limit than
+    # the IPC suites - but the same kind of idle limit, because silence still
+    # means hung no matter how long the work legitimately takes.
+    if (Test-Path $electronExe) {
+        Invoke-Suite '9sy real-data-verify (elevated)' 'test/real-data-verify.js' '9sy' 120 900
     } else {
-        Check $false 'real-data-verify produced no Result line'
-        $script:results['9sy'] = 'no result line'
-        ($out -split "`r?`n" | Select-Object -Last 20) | ForEach-Object { if ($_.Trim()) { Say "    $_" } }
+        Check $false 'real-data-verify skipped - electron.exe not found'
     }
-    $out | Set-Content -Encoding ascii (Join-Path $outDir '9sy.log')
 
     # ======================================================================
     Head 'Operator request - stop rpdsvc and set it to start on demand'

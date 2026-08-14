@@ -12,12 +12,22 @@ const { execFileSync } = require('node:child_process');
 // spawn a live UAC prompt and hang an unattended run.
 process.env.VANISH_DISABLE_AUTO_ELEVATE = '1';
 
+// No window, and none of the three Full Mode startup side effects - including
+// the auto-purge sweep against the operator's real vault. This suite passed
+// elevated on 2026-08-14 without the flag; it is set here because a diagnostic
+// that opens a window on someone's screen and touches their vault to test a
+// purge path is doing two things it was not asked to do. Every handler it
+// invokes is registered at main.js's top level and is unaffected.
+process.env.VANISH_HEADLESS_HARNESS = '1';
+
 require('../main.js');
 
 let pass = 0;
 let fail = 0;
+let lastLabel = '(nothing yet - it stopped before the first assertion)';
 
 function assert(condition, label) {
+  lastLabel = label;
   if (condition) {
     console.log(`  PASS  ${label}`);
     pass += 1;
@@ -26,6 +36,19 @@ function assert(condition, label) {
     fail += 1;
   }
 }
+
+// Same watchdog as vault-ipc-verify: a hang is an outcome to report, not a
+// silence to wait out.
+const WATCHDOG_MS = 240000;
+const watchdog = setTimeout(() => {
+  console.log('');
+  console.log(`  FAIL  timed out after ${WATCHDOG_MS / 1000}s. Last completed assertion: ${lastLabel}`);
+  console.log('        Whatever comes after that never returned.');
+  console.log('');
+  console.log(`Result: ${pass} passed, ${fail + 1} failed`);
+  app.exit(3);
+}, WATCHDOG_MS);
+watchdog.unref();
 
 async function invoke(channel, payload) {
   const handler = ipcMain._invokeHandlers.get(channel);
@@ -280,5 +303,16 @@ app.whenReady().then(async () => {
 
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
+  clearTimeout(watchdog);
   app.exit(fail > 0 ? 1 : 0);
+}).catch((err) => {
+  // A throw here used to leave the process alive with no output and no exit
+  // code, which is indistinguishable from a hang to anything waiting on it.
+  console.log('');
+  console.log(`  FAIL  threw after "${lastLabel}": ${(err && err.message) || err}`);
+  console.log(String((err && err.stack) || ''));
+  console.log('');
+  console.log(`Result: ${pass} passed, ${fail + 1} failed`);
+  clearTimeout(watchdog);
+  app.exit(1);
 });

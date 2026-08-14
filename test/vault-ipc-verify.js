@@ -17,12 +17,24 @@ const { execFileSync } = require('node:child_process');
 // spawn a live UAC prompt and hang an unattended run.
 process.env.VANISH_DISABLE_AUTO_ELEVATE = '1';
 
+// 2026-08-14: this suite used to boot main.js WITHOUT the headless flag, so it
+// opened a real Vanish window on the operator's screen and then stopped with
+// nothing on the console - indistinguishable from the app just sitting there.
+// The flag skips exactly three Full Mode startup side effects and createWindow;
+// all 37 ipcMain.handle registrations are at main.js's top level, so everything
+// this suite invokes is still there. One of the three it skips is the auto-purge
+// sweep, which main.js's own comment says a harness must never run against the
+// operator's real vault just by starting.
+process.env.VANISH_HEADLESS_HARNESS = '1';
+
 require('../main.js');
 
 let pass = 0;
 let fail = 0;
+let lastLabel = '(nothing yet - it stopped before the first assertion)';
 
 function assert(condition, label) {
+  lastLabel = label;
   if (condition) {
     console.log(`  PASS  ${label}`);
     pass += 1;
@@ -31,6 +43,21 @@ function assert(condition, label) {
     fail += 1;
   }
 }
+
+// A hang has to be a REPORTED outcome, not a silence. Whatever this suite is
+// waiting for - an engine call that never returns, a dialog nobody can click -
+// it now says which assertion it got past and exits, so the run continues and
+// the transcript names the last thing that worked.
+const WATCHDOG_MS = 240000;
+const watchdog = setTimeout(() => {
+  console.log('');
+  console.log(`  FAIL  timed out after ${WATCHDOG_MS / 1000}s. Last completed assertion: ${lastLabel}`);
+  console.log('        Whatever comes after that never returned.');
+  console.log('');
+  console.log(`Result: ${pass} passed, ${fail + 1} failed`);
+  app.exit(3);
+}, WATCHDOG_MS);
+watchdog.unref();
 
 async function invoke(channel, payload) {
   const handler = ipcMain._invokeHandlers.get(channel);
@@ -184,5 +211,17 @@ app.whenReady().then(async () => {
 
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
+  clearTimeout(watchdog);
   app.exit(fail > 0 ? 1 : 0);
+}).catch((err) => {
+  // Without this, a throw anywhere above left the process ALIVE - Electron keeps
+  // its event loop running, so there was no output, no exit code and no way to
+  // tell a crash from a hang. The wrapper waited on it forever.
+  console.log('');
+  console.log(`  FAIL  threw after "${lastLabel}": ${(err && err.message) || err}`);
+  console.log(String((err && err.stack) || ''));
+  console.log('');
+  console.log(`Result: ${pass} passed, ${fail + 1} failed`);
+  clearTimeout(watchdog);
+  app.exit(1);
 });
