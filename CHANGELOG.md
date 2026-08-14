@@ -8,6 +8,63 @@ full decision rules.
 
 ---
 
+## [0.6.4] - 2026-08-14
+
+### Fixed -- the speed test shipped yesterday was wrong by about 20x
+
+0.6.3 measured a fixed 25 MB with `Invoke-WebRequest` and timed the whole
+transfer. On the operator's line that reported **10.2 Mbps**. Measured
+properly, the same connection does **175-240 Mbps**.
+
+Two mistakes, and the first one caused the second:
+
+* It timed connection setup and TCP slow-start along with the transfer. The
+  first few hundred milliseconds are the connection ramping up, not its speed.
+* A fixed byte count means the DURATION is whatever the connection decides --
+  so it took 21 seconds, and a slow line paid the most data for the least
+  useful answer.
+
+It now reads the stream directly and stops at whichever comes first: a time
+limit (5s down, 3s up) or a byte cap (40 MB / 10 MB). It counts only what
+arrived after a 600 ms warm-up window. **6 seconds instead of 21**, and on a
+slow connection it uses far less data than before rather than more.
+
+One wrong turn worth recording: the first attempt returned 403 and the guess
+was a missing User-Agent. That was wrong -- a request with no User-Agent is
+served fine. Cloudflare caps the `bytes` parameter somewhere between 50 MB and
+100 MB, and the request had asked for 200 MB. The User-Agent stayed anyway,
+because a program making automated requests should say what it is, but its
+comment now says that rather than claiming a fix it never made.
+
+### Changed -- one tap refreshes everything
+
+Operator: *"i need them all to be unified. one tap refreshes everything."*
+
+Throughput, ping and line speed had three separate triggers, so the tiles
+showed three readings from three different moments sitting side by side. That
+looked like one measurement and was not.
+
+**Measure again** now refreshes all of them. Ping and the speed test run only
+where they have already been agreed to -- a refresh button must never be the
+thing that first puts traffic on the wire.
+
+### Changed -- the elevation prompt no longer meets you at the door
+
+Operator: *"opening vanish shouldnt immediately throw this dialog in my face,
+thats what the banner and button are for."*
+
+A modal that opens before you have asked for anything is not consent, it is a
+toll gate. It now appears at the three moments it is relevant: the banner
+button (choice), and a blocked Full Mode action (gating, necessity). Being
+refused now *offers* elevation rather than only complaining and leaving you to
+find the banner yourself.
+
+The UI suite asserted the opposite, so the contract was inverted rather than
+deleted, and the replacement is stricter: the app must be usable the instant it
+opens, and the offer must still be reachable both ways.
+
+---
+
 ## [0.6.3] - 2026-08-14
 
 ### Added -- measure how fast the connection actually is

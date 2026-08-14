@@ -614,7 +614,10 @@ async function runSpeedTest() {
       title: 'Measure your connection speed?',
       body:
         'There is no way to find out how fast a connection is without using it. Vanish will download '
-        + 'about 25 MB from speed.cloudflare.com and upload about 5 MB back, then time both.\n\n'
+        + 'from speed.cloudflare.com for about 5 seconds and upload for about 3, and time both.\n\n'
+        + 'It stops at whichever comes first: the time limit, or 40 MB down and 10 MB up. On a slow '
+        + 'connection the clock stops it early and it uses far less than that - the limit is there so a '
+        + 'fast connection cannot run away with your data, not because it always uses it.\n\n'
         + 'What Cloudflare sees: this machine\u2019s IP address and a few seconds of traffic. No account, no '
         + 'identifier, and nothing about this PC or what is installed on it - the data transferred is '
         + 'random bytes in one direction and discarded in the other, so it carries nothing of yours.\n\n'
@@ -955,10 +958,25 @@ function wireNetworkRefresh() {
       badge.textContent = 'measuring';
     }
     btn.disabled = true;
-    // Only this section re-samples. Re-running the whole Health Advisor to
-    // answer one question is the pattern 7oo.5 was about.
+    // Only this SECTION re-samples - re-running the whole Health Advisor to
+    // answer one question is the pattern 7oo.5 was about. But within the
+    // section, one tap now refreshes everything (operator, 2026-08-14: "i
+    // need them all to be unified. one tap refreshes everything").
+    //
+    // Three separate taps for throughput, ping and line speed meant three
+    // readings from three different moments sitting side by side, which is
+    // its own kind of dishonesty: the tiles looked like one measurement and
+    // were not.
     const net = await window.api.getNetworkActivity();
     renderNetworkActivity(net);
+
+    // Ping and speed test run only where they are already allowed. Neither
+    // is triggered by this button on a machine that has not agreed to it -
+    // a refresh must never be the thing that first puts traffic on the wire.
+    const followUps = [];
+    if (appSettings.pingConsentGiven && pingDestination) followUps.push(runPing());
+    if (appSettings.speedTestConsentGiven) followUps.push(runSpeedTest());
+    if (followUps.length) await Promise.all(followUps);
   });
 }
 

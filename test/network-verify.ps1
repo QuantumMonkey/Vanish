@@ -108,14 +108,29 @@ if ($pingChunks.Count -eq 1) {
 #     traffic on the wire the user never agreed to
 #
 # Adding a third outbound call still means changing an assertion here.
-$webCallCount = ([regex]::Matches($codeText, [regex]::Escape('Invoke-WebRequest'))).Count
-Assert-True ($webCallCount -eq 2) "Invoke-WebRequest appears exactly twice in the engine's code - the download and the upload ($webCallCount found)"
+# The speed test moved from Invoke-WebRequest to HttpWebRequest so it could
+# read the stream directly and stop on a timer. Same scoping, new API name -
+# and Invoke-WebRequest goes back on the banned list, because nothing uses it
+# any more and re-adding it should have to be deliberate.
+# CODE only, not comments - the same trap this file already documents for
+# Test-Connection. scanner.ps1's comment explaining why the speed test moved
+# OFF Invoke-WebRequest names it, and matching raw text failed on that
+# explanation. A test that cannot tell a call from a comment about a call is
+# not checking what it claims to check.
+Assert-True ($codeText -notmatch 'Invoke-WebRequest') 'Invoke-WebRequest is not called anywhere in the engine'
+$webCallCount = ([regex]::Matches($codeText, [regex]::Escape('HttpWebRequest'))).Count
+Assert-True ($webCallCount -eq 2) "HttpWebRequest is constructed exactly twice in the engine's code - the download and the upload ($webCallCount found)"
 
 $speedChunks = @($functionChunks | Where-Object { $_ -match '^Invoke-NetworkSpeedTest\b' })
 Assert-True ($speedChunks.Count -eq 1) "Invoke-NetworkSpeedTest is defined exactly once"
 if ($speedChunks.Count -eq 1) {
-    $inSpeed = ([regex]::Matches($speedChunks[0], [regex]::Escape('Invoke-WebRequest'))).Count
+    $inSpeed = ([regex]::Matches($speedChunks[0], [regex]::Escape('HttpWebRequest'))).Count
     Assert-True ($inSpeed -eq 2) "both web calls live inside Invoke-NetworkSpeedTest, not scattered elsewhere"
+    # Bounded in BOTH directions. A time limit alone would let a fast line
+    # pull hundreds of megabytes; a byte cap alone would let a slow line hang.
+    Assert-True ($speedChunks[0] -match '\$downSeconds\s*=\s*\d+') 'the download is time-boxed'
+    Assert-True ($speedChunks[0] -match '\$downCap\s*=\s*\d+') 'the download is also byte-capped'
+    Assert-True ($speedChunks[0] -match '\$upSeconds\s*=\s*\d+' -and $speedChunks[0] -match '\$upCap\s*=\s*\d+') 'the upload is bounded both ways too'
     $hosts = @([regex]::Matches($speedChunks[0], 'https://([a-zA-Z0-9\.\-]+)') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
     Assert-True ($hosts.Count -eq 1 -and $hosts[0] -eq 'speed.cloudflare.com') "it talks to speed.cloudflare.com and nowhere else ($($hosts -join ', '))"
 }

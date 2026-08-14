@@ -2391,60 +2391,142 @@ function Get-NetworkActivity {
 #
 # The result is returned and never stored, never logged to the oplog, and
 # never sent anywhere.
+# Identifies the app, nothing about the machine. Not required by Cloudflare -
+# a request without one is served normally - but a program making automated
+# requests should say what it is.
+$script:SpeedTestUserAgent = 'Vanish-Uninstaller/1.0 (+https://github.com/QuantumMonkey/Vanish)'
+
 function Invoke-NetworkSpeedTest {
     param([object]$p)
 
-    # Bounded on purpose. Big enough to be meaningful on a fast link, small
-    # enough that nobody is surprised by their data allowance. A user on a
-    # metered connection is the reason this is opt-in in the first place.
-    $downBytes = 25000000
-    $upBytes   = 5000000
-    if ($p -and $p.downBytes) {
-        $parsed = 0
-        if ([int]::TryParse([string]$p.downBytes, [ref]$parsed) -and $parsed -ge 1000000 -and $parsed -le 100000000) { $downBytes = $parsed }
-    }
+    # TIME-BOXED, not fixed-size, and that is the whole design.
+    #
+    # v1 downloaded a fixed 25MB with Invoke-WebRequest and took 21 seconds on
+    # the operator's line. Two things were wrong with it:
+    #
+    #   1. A fixed byte count means the DURATION is whatever the connection
+    #      decides. Slow line, long wait. It also means a slow line pays the
+    #      most data for the least useful answer.
+    #   2. It timed the whole transfer including TCP slow-start, so it
+    #      under-reported - the first few hundred milliseconds are the
+    #      connection ramping up, not its steady speed.
+    #
+    # Reading the stream directly fixes both. It stops at a time limit OR a
+    # byte cap, whichever comes first, and it only counts bytes that arrived
+    # AFTER the warm-up window. On a 10 Mbps line that is ~6MB instead of
+    # 25MB and ~5 seconds instead of 19; on a fast line the byte cap stops it
+    # early. Faster everywhere, and cheaper on exactly the connections where
+    # data costs most.
+    $downSeconds = 5
+    $upSeconds   = 3
+    $downCap     = 40000000
+    $upCap       = 10000000
+    $warmupMs    = 600
 
     $result = @{
-        success        = $false
+        success            = $false
         downBytesPerSecond = $null
         upBytesPerSecond   = $null
-        downBytes      = $downBytes
-        upBytes        = $upBytes
-        endpoint       = 'speed.cloudflare.com'
-        error          = $null
+        downBytes          = 0
+        upBytes            = 0
+        endpoint           = 'speed.cloudflare.com'
+        error              = $null
     }
 
     # TLS 1.2 is not the default in Windows PowerShell 5.1 and Cloudflare
     # will refuse the handshake without it.
     try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch { }
+    # Without this, .NET opens 2 connections per host and the request queues
+    # behind anything else in this process.
+    try { [Net.ServicePointManager]::DefaultConnectionLimit = 8 } catch { }
 
+    # --- down -------------------------------------------------------------
     try {
-        $sw = [System.Diagnostics.Stopwatch]::StartNew()
-        $down = Invoke-WebRequest -Uri "https://speed.cloudflare.com/__down?bytes=$downBytes" `
-            -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-        $sw.Stop()
-        $got = 0
-        if ($down.RawContentLength -gt 0) { $got = [long]$down.RawContentLength }
-        elseif ($down.Content) { $got = [long]$down.Content.Length }
-        $secs = [Math]::Max($sw.Elapsed.TotalSeconds, 0.001)
-        $result.downBytesPerSecond = [long]([Math]::Round($got / $secs))
-        $result.downBytes = $got
+        # Ask for a bit more than the byte cap and let the read loop stop it.
+        # NOT far more: Cloudflare refuses an oversized request outright.
+        # Measured 2026-08-14 - 25MB, 40MB and 50MB return 200; 100MB and
+        # 200MB return 403. The first version asked for 200MB and got nothing.
+        $req = [System.Net.HttpWebRequest]::Create("https://speed.cloudflare.com/__down?bytes=50000000")
+        $req.Timeout = 15000
+        $req.ReadWriteTimeout = 15000
+        # Politeness, not necessity - and the distinction is worth recording
+        # because the first guess at the 403 was a missing User-Agent, which
+        # was wrong: a request with no UA returns 200 perfectly well (tested).
+        # It is kept because a program making automated requests should say
+        # what it is. It identifies the app and nothing about the machine.
+        $req.UserAgent = $script:SpeedTestUserAgent
+        $resp = $req.GetResponse()
+        $stream = $resp.GetResponseStream()
+        try {
+            $buf = New-Object byte[] 65536
+            $total = [long]0
+            $warmBytes = [long]0
+            $warmAt = 0.0
+            $warmed = $false
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($true) {
+                $n = $stream.Read($buf, 0, $buf.Length)
+                if ($n -le 0) { break }
+                $total += $n
+                $elapsed = $sw.Elapsed.TotalSeconds
+                if (-not $warmed -and ($elapsed * 1000) -ge $warmupMs) {
+                    # Everything before this point was the connection ramping
+                    # up. Measure from here.
+                    $warmed = $true
+                    $warmBytes = $total
+                    $warmAt = $elapsed
+                }
+                if ($elapsed -ge $downSeconds) { break }
+                if ($total -ge $downCap) { break }
+            }
+            $sw.Stop()
+            $measuredBytes = if ($warmed) { $total - $warmBytes } else { $total }
+            $measuredSecs  = if ($warmed) { $sw.Elapsed.TotalSeconds - $warmAt } else { $sw.Elapsed.TotalSeconds }
+            $measuredSecs  = [Math]::Max($measuredSecs, 0.001)
+            $result.downBytes = $total
+            $result.downBytesPerSecond = [long]([Math]::Round($measuredBytes / $measuredSecs))
+        } finally {
+            try { $stream.Close() } catch { }
+            try { $resp.Close() } catch { }
+        }
     } catch {
         $result.error = "Download test failed: $($_.Exception.Message)"
         return $result
     }
 
+    # --- up ---------------------------------------------------------------
     try {
-        # Random bytes rather than zeroes: a compressible payload measures the
+        # Random bytes, not zeroes: a compressible payload measures the
         # compression, not the link.
-        $buf = New-Object byte[] $upBytes
-        (New-Object Random).NextBytes($buf)
-        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
-        $null = Invoke-WebRequest -Uri "https://speed.cloudflare.com/__up" -Method Post -Body $buf `
-            -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-        $sw2.Stop()
-        $secs2 = [Math]::Max($sw2.Elapsed.TotalSeconds, 0.001)
-        $result.upBytesPerSecond = [long]([Math]::Round($upBytes / $secs2))
+        $chunk = New-Object byte[] 262144
+        (New-Object Random).NextBytes($chunk)
+
+        $upReq = [System.Net.HttpWebRequest]::Create("https://speed.cloudflare.com/__up")
+        $upReq.Method = 'POST'
+        $upReq.Timeout = 15000
+        $upReq.ReadWriteTimeout = 15000
+        $upReq.UserAgent = $script:SpeedTestUserAgent
+        $upReq.SendChunked = $true
+        $upReq.AllowWriteStreamBuffering = $false
+        $upReq.ContentType = 'application/octet-stream'
+        $reqStream = $upReq.GetRequestStream()
+        $sent = [long]0
+        try {
+            $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+            while ($true) {
+                $reqStream.Write($chunk, 0, $chunk.Length)
+                $sent += $chunk.Length
+                if ($sw2.Elapsed.TotalSeconds -ge $upSeconds) { break }
+                if ($sent -ge $upCap) { break }
+            }
+            $sw2.Stop()
+            $secs2 = [Math]::Max($sw2.Elapsed.TotalSeconds, 0.001)
+            $result.upBytes = $sent
+            $result.upBytesPerSecond = [long]([Math]::Round($sent / $secs2))
+        } finally {
+            try { $reqStream.Close() } catch { }
+        }
+        try { $upResp = $upReq.GetResponse(); $upResp.Close() } catch { }
     } catch {
         # A failed upload does not invalidate a good download figure. Report
         # what was measured and say which half is missing.
