@@ -53,12 +53,30 @@ function Check($condition, $label) {
 function Note($text) { Say "  NOTE  $text" 'Yellow' }
 
 # Call the engine the way main.js does.
+#
+# THE QUOTES HAVE TO BE ESCAPED, and the first elevated run of this script is
+# what proved it. Passing the JSON straight through, every engine call came
+# back with an empty parameter - "No value name was given", "that is not a
+# valid service name", "Nothing was captured first" - and it read like four
+# separate app bugs. It was one harness bug: the Windows command-line parser
+# strips the double quotes, so scanner.ps1 received
+#
+#   {valueName:VanishConfirmProbe,keyPath:HKCU:\\Software\\...}
+#
+# which ConvertFrom-Json cannot read, leaving $Params null. Reproduced against
+# an echo script rather than guessed at, because unelevated every one of these
+# actions checks the tier BEFORE the parameters and so cannot tell you which
+# of the two is wrong.
+#
+# main.js does not need this: Node builds the argument vector itself rather
+# than handing a string to the shell.
 function Engine($action, $params) {
-    $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'scanner.ps1'), '-Action', $action)
+    $psArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $root 'scanner.ps1'), '-Action', $action)
     if ($null -ne $params) {
-        $args += @('-ParamsJson', ($params | ConvertTo-Json -Depth 6 -Compress))
+        $json = $params | ConvertTo-Json -Depth 6 -Compress
+        $psArgs += @('-ParamsJson', ($json -replace '"', '\"'))
     }
-    $raw = & powershell.exe @args 2>&1 | Out-String
+    $raw = & powershell.exe @psArgs 2>&1 | Out-String
     try { return $raw.Trim() | ConvertFrom-Json } catch { return [PSCustomObject]@{ success = $false; error = "unparseable: $($raw.Trim())" } }
 }
 
@@ -196,14 +214,26 @@ try {
 
         $rv = Engine 'network-hold-revert' @{ record = $cap }
         Check ($rv.success -eq $true) "hold released (error: $($rv.error))"
-        $valAfter = (Get-ItemProperty -LiteralPath $doKey -Name $doVal -ErrorAction SilentlyContinue).$doVal
-        if ($null -eq $valBefore) {
-            Check ($null -eq $valAfter) 'the value is GONE after release - revert deletes rather than zeroing'
+
+        # GUARDED ON $applied, and the first run is why. When apply failed,
+        # these two still reported PASS - "the value is GONE after release"
+        # was trivially true because nothing had ever set it. A revert
+        # assertion that passes when no hold was applied is not evidence of a
+        # working revert, it is evidence of an inert test, and it reads green
+        # in exactly the situation you most need it to read red.
+        if (-not $applied) {
+            Note 'Apply failed, so the revert assertions are SKIPPED rather than passed.'
+            Note 'They would pass vacuously - nothing was ever set to put back.'
         } else {
-            Check ($valAfter -eq $valBefore) "the value is back to what it was ($valBefore)"
-        }
-        if (-not $keyExistedBefore) {
-            Check (-not (Test-Path -LiteralPath $doKey)) 'the policy key Vanish created is removed too'
+            $valAfter = (Get-ItemProperty -LiteralPath $doKey -Name $doVal -ErrorAction SilentlyContinue).$doVal
+            if ($null -eq $valBefore) {
+                Check ($null -eq $valAfter) 'the value is GONE after release - revert deletes rather than zeroing'
+            } else {
+                Check ($valAfter -eq $valBefore) "the value is back to what it was ($valBefore)"
+            }
+            if (-not $keyExistedBefore) {
+                Check (-not (Test-Path -LiteralPath $doKey)) 'the policy key Vanish created is removed too'
+            }
         }
     }
 

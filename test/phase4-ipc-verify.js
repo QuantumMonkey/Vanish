@@ -202,6 +202,21 @@ app.whenReady().then(async () => {
       (Get-Item -LiteralPath '${UWP_DIR}').LastWriteTime = (Get-Date).AddDays(-60)
     `);
 
+    // Capture what is ACTUALLY on disk before anything touches it, rather
+    // than asserting against a constant later.
+    //
+    // The first elevated run of this suite (2026-08-14) failed here against a
+    // hardcoded 4096. The file is 4098 bytes: Set-Content appends a line
+    // terminator. So the assertion had never been true, not even before the
+    // purge - and it would have PASSED if the vault had truncated the file to
+    // exactly 4096, which is the one outcome it existed to catch. A round-trip
+    // test that compares against an assumed value instead of the real one is
+    // worse than no test.
+    const uwpBefore = {
+      length: ps(`(Get-Item -LiteralPath '${UWP_FILE}').Length`),
+      hash: ps(`(Get-FileHash -LiteralPath '${UWP_FILE}' -Algorithm SHA256).Hash`),
+    };
+
     const uwpScan = await invoke('cleaner-scan', { cleaner: 'uwp-leftovers' });
     const uwpFinding = (uwpScan.findings || []).find((f) => f.meta && f.meta.family === UWP_FAMILY);
     assert(uwpFinding != null, 'planted left-over package folder found by the scan');
@@ -221,9 +236,17 @@ app.whenReady().then(async () => {
     const uwpRestore = await invoke('vault-restore', { entryId: uwpPurge.entryId });
     assert(uwpRestore.success === true && uwpRestore.failed === 0, 'folder restore succeeded');
     assert(ps(`Test-Path -LiteralPath '${UWP_DIR}'`) === 'True', 'the folder is back where it was');
+    const uwpAfter = {
+      length: ps(`(Get-Item -LiteralPath '${UWP_FILE}').Length`),
+      hash: ps(`(Get-FileHash -LiteralPath '${UWP_FILE}' -Algorithm SHA256).Hash`),
+    };
     assert(
-      ps(`(Get-Item -LiteralPath '${UWP_FILE}').Length`) === '4096',
-      'the file inside it survived the round trip byte for byte'
+      uwpAfter.length === uwpBefore.length && uwpBefore.length !== '',
+      `the restored file is the same size as the original (${uwpBefore.length} -> ${uwpAfter.length})`
+    );
+    assert(
+      uwpAfter.hash === uwpBefore.hash && uwpBefore.hash !== '',
+      `the restored file is byte-for-byte identical (SHA256 ${String(uwpBefore.hash).slice(0, 16)}...)`
     );
 
     // A finding the engine refuses to remove must not become removable just
