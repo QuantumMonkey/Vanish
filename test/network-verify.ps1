@@ -142,7 +142,18 @@ if ($procs.Count -gt 0) {
     $fields = @($procs[0].PSObject.Properties.Name)
     $byteish = @($fields | Where-Object { $_ -match 'byte|bps|rate|bandwidth|speed' })
     Assert-True ($byteish.Count -eq 0) "no per-process field claims a byte rate ($($byteish -join ', '))"
-    Assert-True (@($procs | Where-Object { $_.connectionCount -lt 1 }).Count -eq 0) "every listed program really holds at least one connection"
+    # This used to require at least one ESTABLISHED TCP connection, which was
+    # the old contract and the old blindness: a BitTorrent client with 4
+    # established connections and 21 UDP sockets was under-reported, and a
+    # program holding only UDP sockets was not listed at all. The invariant
+    # that actually matters is that nothing is listed for no reason.
+    Assert-True (@($procs | Where-Object { $_.socketCount -lt 1 }).Count -eq 0) "every listed program really holds at least one socket"
+    Assert-True (@($procs | Where-Object { $null -eq $_.udpSocketCount }).Count -eq 0) "every listed program reports its UDP socket count"
+    # UDP and TCP are counted separately and never merged - a UDP socket is
+    # not a conversation, and one combined number would read as more certain
+    # than it is.
+    $mismatch = @($procs | Where-Object { [int]$_.socketCount -ne ([int]$_.connectionCount + [int]$_.udpSocketCount + [int]$_.otherTcpCount) })
+    Assert-True ($mismatch.Count -eq 0) "socketCount is exactly its three parts, so nothing is double-counted or lost"
     Assert-True (@($procs | Where-Object { $_.peerCount -gt $_.connectionCount }).Count -eq 0) "a program never reports more peers than connections"
 
     # Guards the $host bug: assigning to that automatic variable made every

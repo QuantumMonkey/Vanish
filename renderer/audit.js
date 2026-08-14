@@ -321,21 +321,23 @@ function renderNetworkActivity(net) {
            <i class="fa-solid fa-arrow-down net-rate-icon is-down"></i>
            <div class="net-rate-text">
              <div class="net-rate-value">${esc(rate(primary.receiveBytesPerSecond))}</div>
-             <div class="net-rate-label">Download</div>
+             <div class="net-rate-label" title="What is arriving right now, measured over the last sample. This is NOT how fast your connection can go - Vanish does not measure that, because finding out means downloading from someone else's server.">Downloading now</div>
            </div>
          </div>
          <div class="net-rate-tile">
            <i class="fa-solid fa-arrow-up net-rate-icon is-up"></i>
            <div class="net-rate-text">
              <div class="net-rate-value">${esc(rate(primary.sendBytesPerSecond))}</div>
-             <div class="net-rate-label">Upload</div>
+             <div class="net-rate-label" title="What is leaving right now, measured over the last sample. This is NOT how fast your connection can go - Vanish does not measure that, because finding out means uploading to someone else's server.">Uploading now</div>
            </div>
          </div>
          <div class="net-rate-tile is-meta">
            <i class="fa-solid fa-ethernet net-rate-icon"></i>
            <div class="net-rate-text">
              <div class="net-rate-value">${esc(primary.name)}</div>
-             <div class="net-rate-label">${primary.isWireless ? 'Wi-Fi' : 'Wired'}${
+             <div class="net-rate-label" title="${primary.linkSpeedBps ? esc('Negotiated link rate to your router: ' + formatBytes(primary.linkSpeedBps / 8, 0) + '/s. This is the speed between this PC and the router, not the speed of the internet connection behind it - those are usually very different numbers.') : ''}">${primary.isWireless ? 'Wi-Fi' : 'Wired'}${
+               primary.linkSpeedBps ? ` &middot; link ${esc(formatBytes(primary.linkSpeedBps / 8, 0))}/s` : ''
+             }${
                net.signalPercent != null ? ` &middot; signal ${esc(net.signalPercent)}%` : ''
              }</div>
            </div>
@@ -382,18 +384,33 @@ function renderNetworkActivity(net) {
         kind && p.connectionCount >= NET_NOTABLE_CONNECTION_COUNT
           ? `${esc(p.connectionCount)} <span class="net-kind-note">normal for ${esc(kind.kind)}</span>`
           : esc(p.connectionCount);
+
+      // UDP shown BESIDE the connection count, never added to it. A UDP row
+      // is a socket, not a conversation. Measured on the operator's machine:
+      // qBittorrent had 4 established TCP connections and 21 UDP sockets, so
+      // the old single number described a saturating torrent client as
+      // idle-looking. Adding them would have produced a tidier number that
+      // means less.
+      const udp = Number(p.udpSocketCount) || 0;
+      const udpLabel = udp > 0
+        ? `<span class="net-udp-note" title="UDP sockets. UDP has no connections to count - each one is an open socket that can send or receive at any time. BitTorrent, video calls and game traffic mostly use it, which is why a program can look idle here while moving a lot of data.">+${esc(udp)} UDP</span>`
+        : '';
       return `
       <tr class="app-row${peers.length ? ' net-row-expandable' : ''}" ${peers.length ? `data-peers-toggle="${rowId}"` : ''}>
         <td style="font-size: 12px; font-weight: 600; color: var(--text-white);">${esc(p.name)}</td>
         <td style="font-size: 12px; color: var(--text-gray);">${esc(p.processId)}</td>
-        <td style="font-size: 12px; color: var(--text-gray);" title="${esc(netConnectionTitle(p.name, p.connectionCount))}">${countLabel}</td>
+        <td style="font-size: 12px; color: var(--text-gray);" title="${esc(netConnectionTitle(p.name, p.connectionCount))}">${countLabel} ${udpLabel}</td>
         <td style="font-size: 12px; color: var(--text-gray);">
           ${esc(p.peerCount)}${peers.length ? ' <i class="fa-solid fa-chevron-right net-peers-chevron"></i>' : ''}
+        </td>
+        <td style="text-align: right;">
+          <button class="btn-sec btn-compact net-kill-btn" data-net-index="${i}" data-destructive="true"
+                  title="Stop this program now. Anything it has not saved is lost.">Stop</button>
         </td>
       </tr>
       ${peers.length ? `
       <tr class="net-peers-row" id="${rowId}" style="display: none;">
-        <td colspan="4">
+        <td colspan="5">
           <div class="net-peers-list">${peers.map((ip) => `<span class="net-peer-pill">${esc(ip)}</span>`).join('')}</div>
         </td>
       </tr>` : ''}`;
@@ -424,10 +441,11 @@ function renderNetworkActivity(net) {
              <table class="apps-table">
                <thead>
                  <tr>
-                   <th style="width: 40%;">Program</th>
-                   <th style="width: 15%;">ID</th>
-                   <th style="width: 22%;">Connections open</th>
-                   <th style="width: 23%;">Places connected to</th>
+                   <th style="width: 32%;">Program</th>
+                   <th style="width: 10%;">ID</th>
+                   <th style="width: 26%;">Connections open</th>
+                   <th style="width: 18%;">Places connected to</th>
+                   <th style="width: 14%; text-align: right;">Action</th>
                  </tr>
                </thead>
                <tbody>${rows}</tbody>
@@ -446,8 +464,69 @@ function renderNetworkActivity(net) {
 
   wireNetworkRefresh();
   wireNetworkPeerToggles();
+  wireNetworkKillButtons(top);
   wirePingTile();
   renderNetworkHold();
+  // Audit Mode leaves the Stop buttons visible and inert with the reason,
+  // like every other destructive control in the app (REQ-04).
+  applyTierLocks();
+}
+
+// Operator, 2026-08-14: "the network activity items need a stop process
+// button per row. safety warnings issued for reasonable activities, like
+// 'normal for so and so process' which is already shown. otherwise a generic
+// warning so people knw what they are doing."
+//
+// So the confirmation is not one fixed sentence. Where Vanish already knows
+// what the program is - the same classifyNetProgram() knowledge that puts
+// "normal for a web browser" next to a high connection count - it says so
+// BEFORE asking, because that is the fact most likely to change the answer.
+// Where it does not know, it says THAT, rather than inventing a reassurance
+// or a warning it cannot support.
+function wireNetworkKillButtons(items) {
+  document.querySelectorAll('.net-kill-btn').forEach((btn) => {
+    btn.addEventListener('click', async (event) => {
+      // The row itself expands the peer list; stopping a program is not that.
+      event.stopPropagation();
+      const idx = parseInt(btn.getAttribute('data-net-index'), 10);
+      const p = items[idx];
+      if (!p) return;
+      if (!guardFullMode()) return;
+
+      const kind = classifyNetProgram(p.name);
+      const udp = Number(p.udpSocketCount) || 0;
+      const sockets = udp > 0
+        ? `${p.connectionCount} connection(s) and ${udp} UDP socket(s)`
+        : `${p.connectionCount} connection(s)`;
+
+      const context = kind
+        ? `${p.name} is ${kind.kind}. ${kind.normal}`
+        : `Vanish does not have a description for ${p.name}. That says nothing either way about it - `
+          + 'most programs that talk to the internet keep several connections open.';
+
+      const ok = await confirmDialog({
+        title: `Stop ${p.name}?`,
+        body:
+          `${context}\n\n`
+          + `It currently has ${sockets} open.\n\n`
+          + 'Stopping it closes those immediately and ends the program. Anything it '
+          + 'has not saved is lost, and a download or upload in progress will not '
+          + 'resume by itself. This is not undoable from Quarantine - it is not a '
+          + 'removal, it just ends a running program. You can start it again yourself.',
+        confirmLabel: `Stop ${p.name}`,
+      });
+      if (!ok) return;
+
+      const res = await window.api.killProcess({ pid: p.processId, name: p.name });
+      if (res && res.success) {
+        toast(`${p.name} stopped.`, 'success');
+        // Re-sample just this section, the same way the Refresh button does.
+        renderNetworkActivity(await window.api.getNetworkActivity());
+      } else {
+        toast(`Could not stop ${p.name}: ${(res && res.error) || 'no reason given'}`, 'error', 8000);
+      }
+    });
+  });
 }
 
 function wireNetworkPeerToggles() {

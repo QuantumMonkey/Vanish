@@ -8,6 +8,63 @@ full decision rules.
 
 ---
 
+## [0.6.2] - 2026-08-14
+
+### Fixed -- a BitTorrent client looked idle while saturating the link
+
+Operator: *"the network says idle when i am using the bittorent protocol."*
+
+Measured on their running qBittorrent:
+
+| What | Count |
+| --- | --- |
+| TCP ESTABLISHED (all Vanish counted) | 4 |
+| TCP, every state | 15 |
+| UDP sockets | 21 |
+
+BitTorrent moves most of its data over uTP, which is UDP, and finds peers over
+UDP DHT. Counting only established TCP described a client moving real traffic
+as a near-idle process with four connections, and sorting on that number put it
+below a browser tab.
+
+UDP sockets and non-established TCP are now counted and shown. They are
+**reported separately and never added into the connection count** -- a UDP row
+is a socket, not a conversation, and "37 connections" would be a tidier number
+that means less. The list now sorts on total sockets.
+
+### Added -- a Stop button on each network row
+
+Elevation-gated like every other destructive control, and visible-but-inert in
+Audit Mode with the reason rather than hidden.
+
+The confirmation is not one fixed sentence. Where Vanish already knows what the
+program is -- the same knowledge that prints "normal for a web browser" beside a
+high connection count -- it says so **before** asking, because that is the fact
+most likely to change the answer. Where it does not know, it says that outright
+rather than inventing either a reassurance or a warning. Every dialog states
+what is actually lost: unsaved work, transfers that will not resume, and that
+this is not a removal and Quarantine cannot undo it.
+
+### Changed -- the rate tiles say what they actually measure
+
+They read **Downloading now** and **Uploading now**. They were labelled
+"Download" and "Upload", which a reasonable person reads as *how fast my
+connection is* -- and they are not that. They are what crossed the wire during
+the last sample.
+
+The negotiated link rate to the router is now shown as its own separate figure,
+because stating it explicitly is what stops the throughput number being read as
+capacity. On the machine this was built against those are 866.7 Mbps (link) and
+a few KB/s (actual) -- numbers with nothing to do with each other.
+
+**Vanish still does not measure connection capacity, and this release does not
+pretend to.** Finding out how fast a connection can go means saturating it
+against someone else's server, which is outbound network I/O to a third party --
+the one thing this app promises not to do without asking. That is a decision
+for the operator, not a default.
+
+---
+
 ## [0.6.1] - 2026-08-14
 
 ### Added -- startup items split into what you can act on and what the machine needs (`tda`)

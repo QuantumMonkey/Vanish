@@ -3238,3 +3238,10 @@ input:checked + .slider:before {
   margin-top: 2px;
   cursor: help;
 }
+/* UDP shown beside the connection count, never folded into it. */
+.net-udp-note {
+  font-size: 10px;
+  color: var(--text-muted);
+  cursor: help;
+  white-space: nowrap;
+}

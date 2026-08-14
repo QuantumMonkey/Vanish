@@ -1879,6 +1879,21 @@ function Get-NetAdapterSnapshot {
 # Established TCP connections by owning process. netstat is used over
 # Get-NetTCPConnection purely for start-up cost; the PID column is the same
 # data. UDP is skipped: an endpoint being open says nothing about traffic.
+# Counts what a process has OPEN, and it has to count more than established
+# TCP - measured 2026-08-14 on the operator's running qBittorrent:
+#
+#   TCP ESTABLISHED (all this used to count):   4
+#   TCP, every state:                          15
+#   UDP sockets:                               21
+#
+# BitTorrent moves most of its data over uTP, which is UDP, and finds peers
+# over UDP DHT. Counting only established TCP showed a client saturating the
+# link as a near-idle process with four connections - "the network says idle
+# when i am using the bittorrent protocol" (operator, same day).
+#
+# UDP is connectionless, so a UDP row is a SOCKET rather than a conversation.
+# The two are counted separately and never added together into one number,
+# because "36 connections" would be a tidier lie than "4 connections".
 function Get-NetConnectionsByProcess {
     $byPid = @{}
     $output = @()
@@ -1886,14 +1901,38 @@ function Get-NetConnectionsByProcess {
 
     foreach ($line in $output) {
         $text = ([string]$line).Trim()
-        if (-not $text.StartsWith('TCP')) { continue }
+        $isTcp = $text.StartsWith('TCP')
+        $isUdp = $text.StartsWith('UDP')
+        if (-not ($isTcp -or $isUdp)) { continue }
         $parts = @($text -split '\s+' | Where-Object { $_ })
+
+        # UDP rows have no state column, so the PID sits one place earlier.
+        if ($isUdp) {
+            if ($parts.Count -lt 4) { continue }
+            $udpPid = 0
+            if (-not [int]::TryParse($parts[3], [ref]$udpPid)) { continue }
+            if ($udpPid -le 0) { continue }
+            if (-not $byPid.ContainsKey($udpPid)) {
+                $byPid[$udpPid] = @{ connections = 0; peers = @{}; udpSockets = 0; tcpOther = 0 }
+            }
+            $byPid[$udpPid].udpSockets++
+            continue
+        }
+
         if ($parts.Count -lt 5) { continue }
-        if ($parts[3] -ne 'ESTABLISHED') { continue }
 
         $procId = 0
         if (-not [int]::TryParse($parts[4], [ref]$procId)) { continue }
         if ($procId -le 0) { continue }
+
+        if ($parts[3] -ne 'ESTABLISHED') {
+            # Half-open, closing, or listening. Real sockets, not conversations.
+            if (-not $byPid.ContainsKey($procId)) {
+                $byPid[$procId] = @{ connections = 0; peers = @{}; udpSockets = 0; tcpOther = 0 }
+            }
+            $byPid[$procId].tcpOther++
+            continue
+        }
 
         $remote = [string]$parts[2]
         # Strip the port: the count of distinct peers is the useful shape, and
@@ -1908,7 +1947,7 @@ function Get-NetConnectionsByProcess {
         $peer = $remote.Substring(0, [Math]::Max($remote.LastIndexOf(':'), 0))
 
         if (-not $byPid.ContainsKey($procId)) {
-            $byPid[$procId] = @{ connections = 0; peers = @{} }
+            $byPid[$procId] = @{ connections = 0; peers = @{}; udpSockets = 0; tcpOther = 0 }
         }
         $byPid[$procId].connections++
         if ($peer) { $byPid[$procId].peers[$peer] = $true }
@@ -2258,6 +2297,15 @@ function Get-NetworkActivity {
                 name            = if ($names.ContainsKey([int]$procId)) { [string]$names[[int]$procId] } else { "PID $procId" }
                 connectionCount = [int]$entry.connections
                 peerCount       = [int]$entry.peers.Count
+                # Reported SEPARATELY and never folded into connectionCount.
+                # A UDP row is a socket, not a conversation, so adding them
+                # together would produce a tidier number that means less. What
+                # it buys is the case that prompted it: a BitTorrent client
+                # with 4 established TCP connections and 21 UDP sockets is not
+                # idle, and used to look it.
+                udpSocketCount  = [int]$entry.udpSockets
+                otherTcpCount   = [int]$entry.tcpOther
+                socketCount     = [int]$entry.connections + [int]$entry.udpSockets + [int]$entry.tcpOther
                 # Operator report: "is that cumbersome, would it help decide
                 # if the behaviour is risky." The IP list was always collected
                 # (see the peers hashtable above) - only its Count was ever
@@ -2271,7 +2319,9 @@ function Get-NetworkActivity {
             })
         }
     }
-    $processes = @($processes | Sort-Object -Property @{ Expression = { $_.connectionCount } } -Descending)
+    # Sorted by TOTAL sockets, not established TCP. Sorting on established
+    # alone is what put a saturating torrent client below a browser tab.
+    $processes = @($processes | Sort-Object -Property @{ Expression = { $_.socketCount } } -Descending)
 
     # The verdict. A weak wireless link outranks everything else: whatever the
     # processes are doing, the link itself is the constraint and suppressing an
