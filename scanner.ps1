@@ -2199,7 +2199,7 @@ function Get-NetworkActivity {
 
     $seconds = [double]$sampleMs / 1000
     $adapters = [System.Collections.Generic.List[object]]::new()
-    $gatewayBytesPerSecond = 0.0
+    $gatewayBytesPerSecond = [long]0
 
     foreach ($key in $second.Keys) {
         if (-not $first.ContainsKey($key)) { continue }
@@ -2212,7 +2212,18 @@ function Get-NetworkActivity {
         $txDelta = [Math]::Max(0, $a.tx - $b.tx)
         $bps = ($rxDelta + $txDelta) / $seconds
 
-        if ($a.hasGateway) { $gatewayBytesPerSecond += $bps }
+        # 6d7: accumulate the ROUNDED per-adapter figure, not the raw one.
+        # The headline used to be Round(sum of raw), while each row shows
+        # Round(raw) - and Round(a) + Round(b) is not Round(a + b). On a
+        # machine with two gateway adapters up (a docked laptop on Ethernet
+        # and Wi-Fi both) the headline could therefore disagree with the sum
+        # of the rows the user can see, by up to half a byte per adapter.
+        # Small, but it is the panel contradicting itself, and bfh.1's whole
+        # claim is that the headline is honest about which adapters it counts.
+        # This machine has one gateway adapter, so the old form happened to be
+        # exact here and the defect was invisible.
+        $adapterBps = [long][Math]::Round($bps)
+        if ($a.hasGateway) { $gatewayBytesPerSecond += $adapterBps }
 
         $adapters.Add(@{
             name              = $a.name
@@ -2224,7 +2235,7 @@ function Get-NetworkActivity {
             linkSpeedBps      = $a.speedBps
             receiveBytesPerSecond  = [long][Math]::Round($rxDelta / $seconds)
             sendBytesPerSecond     = [long][Math]::Round($txDelta / $seconds)
-            totalBytesPerSecond    = [long][Math]::Round($bps)
+            totalBytesPerSecond    = $adapterBps
         })
     }
 
@@ -2340,7 +2351,7 @@ function Get-NetworkActivity {
         sampleMs               = $sampleMs
         adapters               = @($adapters)
         processes              = @($processes)
-        totalBytesPerSecond    = [long][Math]::Round($gatewayBytesPerSecond)
+        totalBytesPerSecond    = $gatewayBytesPerSecond
         busyThresholdBytesPerSecond = $script:NetBusyBytesPerSecond
         signalPercent          = $signalPercent
         signalNote             = $signalNote
@@ -5837,6 +5848,37 @@ function Measure-Paths {
         }
         if (-not (Test-Path -LiteralPath $target)) {
             $results.Add([PSCustomObject]@{ path = $target; sizeBytes = $null; error = 'No longer on disk' })
+            continue
+        }
+        # qof: a FILE is not a folder, and the walk below cannot tell. A
+        # DirectoryInfo constructs happily over a file path, EnumerateFiles()
+        # then throws, the per-directory catch counts one skipped dir, and the
+        # loop ends having measured nothing. The old answer for a 2KB file was
+        # sizeBytes 0 with error null - a NUMBER, and a wrong one, from the
+        # function whose own contract above says a wrong number is worse than
+        # no number and that unmeasured things come back null with a reason.
+        # Measure the file instead; it is one property read. Latent today
+        # (every caller passes directories) which is why it was filed rather
+        # than hot-fixed - but 0 bytes is the c0y failure, an inference
+        # rendered with the confidence of a measurement.
+        if (Test-Path -LiteralPath $target -PathType Leaf) {
+            try {
+                $fi = New-Object System.IO.FileInfo -ArgumentList $target
+                $results.Add([PSCustomObject]@{
+                    path        = $target
+                    sizeBytes   = [long]$fi.Length
+                    fileCount   = 1
+                    skippedDirs = 0
+                    partial     = $false
+                    timedOut    = $false
+                    error       = $null
+                })
+            } catch {
+                $results.Add([PSCustomObject]@{
+                    path = $target; sizeBytes = $null
+                    error = 'Not measured - the file could not be read'
+                })
+            }
             continue
         }
         # A manual stack walk rather than Directory::EnumerateFiles with

@@ -279,6 +279,77 @@ console.log('======================');
   assert(b.results.length === 1, 'malformed recorded entries are skipped rather than taking the scan down');
 }
 
+// --- qof: the engine side of "never a false zero" -------------------------
+//
+// Everything above tests lib/attribution.js, which is where the never-report-0
+// rule is enforced for the JS half. The rule has an engine half too, and that
+// is where it was being broken: Measure-Paths walked every target as a
+// directory, so a FILE came back sizeBytes 0 / error null - a number, and a
+// wrong one, from the function whose own header says a wrong number is worse
+// than no number.
+//
+// Latent when found (main.js's only caller passes install-snapshot directories),
+// so this asserts the contract rather than a live path: a real engine run
+// against a real file, a real directory and a path that is not there.
+{
+  const { spawnSync } = require('child_process');
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+
+  const engine = path.join(__dirname, '..', 'scanner.ps1');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vanish-qof-'));
+  const filePath = path.join(root, 'one-file.txt');
+  const dirPath = path.join(root, 'sub');
+  fs.writeFileSync(filePath, 'x'.repeat(2114));
+  fs.mkdirSync(dirPath);
+  fs.writeFileSync(path.join(dirPath, 'a.bin'), 'y'.repeat(100));
+  fs.writeFileSync(path.join(dirPath, 'b.bin'), 'z'.repeat(23));
+  const missing = path.join(root, 'not-here.txt');
+
+  const params = JSON.stringify({ paths: [filePath, dirPath, missing] });
+  const b64 = Buffer.from(params, 'utf8').toString('base64');
+  const run = spawnSync(
+    'powershell.exe',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', engine, '-Action', 'measure-paths', '-ParamsBase64', b64],
+    { encoding: 'utf8', windowsHide: true }
+  );
+
+  let payload = null;
+  try {
+    payload = JSON.parse((run.stdout || '').trim());
+  } catch (err) {
+    payload = null;
+  }
+
+  assert(payload && payload.success === true, 'measure-paths answers at all when called the way main.js calls it');
+
+  const got = payload ? Object.fromEntries(payload.results.map((r) => [r.path, r])) : {};
+
+  assert(
+    got[filePath] && got[filePath].sizeBytes === 2114,
+    'a FILE target reports its real byte length, not the 0 a directory walk produces over it (qof)'
+  );
+  assert(
+    got[filePath] && got[filePath].fileCount === 1 && got[filePath].skippedDirs === 0,
+    'and counts itself as one file with nothing skipped, rather than one unreadable directory'
+  );
+  assert(
+    got[filePath] && got[filePath].partial === false && got[filePath].error === null,
+    'a measured file is not partial - partial=true was the only signal the old 0 was wrong, and nothing rendered it'
+  );
+  assert(
+    got[dirPath] && got[dirPath].sizeBytes === 123 && got[dirPath].fileCount === 2,
+    'a directory still walks its children - the file branch must not swallow the folder case'
+  );
+  assert(
+    got[missing] && got[missing].sizeBytes === null && /disk/i.test(got[missing].error || ''),
+    'a path that is gone still comes back null with a reason, never 0'
+  );
+
+  fs.rmSync(root, { recursive: true, force: true });
+}
+
 console.log('');
 console.log(`Result: ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

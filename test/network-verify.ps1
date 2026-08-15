@@ -158,7 +158,39 @@ Write-Host ("  (verdict '{0}', {1} adapter(s), {2} program(s), {3}s)" -f $net.ve
 # A short sample must be honoured, or a caller asking for a quick read gets a
 # long one - and the harness above would be measuring the default, not this.
 Assert-True ($net.sampleMs -eq 400) "the requested sample window is used"
-Assert-True ($sw.Elapsed.TotalSeconds -lt 8) "the whole read stays well under the time a person will wait"
+
+# The engine must actually SLEEP the window it was asked for. This is the
+# tight half of the timing check and it is deterministic: a read that returns
+# faster than its own sample window did not sample anything, it guessed.
+Assert-True ($sw.Elapsed.TotalMilliseconds -ge 400) "the read takes at least its own sample window - a faster answer would not be a measurement"
+
+# 6d7: the loose half, and it is deliberately loose. This USED to assert
+# '< 8 seconds' as a performance target, and it was the assertion that flaked
+# a batch run to 837/1 while passing 51/0 alone.
+#
+# MEASURED on the operator's machine 2026-08-16, sampleMs = 400:
+#   bare powershell.exe start          0.75s
+#   check-admin (spawn + parse only)   1.45s
+#   get-network-activity, cold         7.6s
+#   get-network-activity, warm         2.4 - 2.9s
+#
+# So the wall clock here is dominated by process start and the FIRST CIM call
+# of a fresh process, not by the read - a 3x spread on an idle machine, and a
+# batch run puts load on top of that. An 8 second ceiling over that
+# distribution is a coin toss, and a suite that fails one run in N teaches
+# everyone to re-run until green, which is how a real regression gets waved
+# through.
+#
+# This is therefore a HANG guard with a stated tolerance, not a performance
+# target: 30 seconds is far outside anything measured and only a read that has
+# actually stopped responding reaches it. The performance signal is not
+# discarded - it is reported as a WARN below, so a read that gets slower is
+# visible in the transcript before it becomes a failure.
+$elapsed = $sw.Elapsed.TotalSeconds
+Assert-True ($elapsed -lt 30) "the read answers rather than hanging (wall clock includes process start and first-CIM cost; tolerance 30s, measured 2.4-7.6s)"
+if ($elapsed -ge 8) {
+    Write-Host ("  WARN  the read took {0}s - above the 8s a person will happily wait, though not a failure (6d7)" -f [math]::Round($elapsed, 1)) -ForegroundColor Yellow
+}
 
 # Anything out of range falls back to the shipped default rather than sleeping
 # for however long the caller asked.

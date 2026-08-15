@@ -6,6 +6,16 @@
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# 6d7: every suite writes its full output to disk, unconditionally and before
+# anything is parsed out of it. The batch run that reported 837 passed / 1
+# failed could not be diagnosed at all: the FAIL line scrolled past inside a
+# 28-suite run, the Summary block kept only the counts, and re-running the
+# suite alone passed 51/0. A failure you cannot name is a failure everyone
+# learns to re-run instead of read.
+$logDir = Join-Path $PSScriptRoot "logs"
+if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
+Get-ChildItem -LiteralPath $logDir -Filter *.log -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
 Write-Host ""
@@ -64,19 +74,27 @@ foreach ($suite in $suites) {
         }
     }
 
+    # On disk BEFORE anything is parsed out of it, so a suite that printed its
+    # findings and then died still leaves them behind to read.
+    $slug    = ((($suite.Name -replace '[^A-Za-z0-9]+', '-').Trim('-'))).ToLower()
+    $logPath = Join-Path $logDir ("{0}.log" -f $slug)
+    $output | Out-File -FilePath $logPath -Encoding utf8
+
+    $failLines = @($output | Select-String -Pattern '^\s*FAIL\b' | ForEach-Object { $_.Line.Trim() })
+    $warnLines = @($output | Select-String -Pattern '^\s*WARN\b' | ForEach-Object { $_.Line.Trim() })
+
     $summary = ($output | Select-String -Pattern '^Result: (\d+) passed, (\d+) failed' | Select-Object -Last 1)
     if ($summary) {
         $passed = [int]$summary.Matches[0].Groups[1].Value
         $failed = [int]$summary.Matches[0].Groups[2].Value
-        $results += @{ Name = $suite.Name; Passed = $passed; Failed = $failed; Ran = $true }
+        $results += @{ Name = $suite.Name; Passed = $passed; Failed = $failed; Ran = $true; FailLines = $failLines; WarnLines = $warnLines; Log = $logPath }
         $colour = if ($failed -gt 0) { "Red" } else { "Green" }
         Write-Host ("  {0} passed, {1} failed" -f $passed, $failed) -ForegroundColor $colour
-        if ($failed -gt 0) {
-            $output | Select-String -Pattern '^\s+FAIL' | ForEach-Object { Write-Host ("  " + $_.Line) -ForegroundColor Red }
-        }
+        foreach ($w in $warnLines) { Write-Host ("  " + $w) -ForegroundColor Yellow }
+        foreach ($f in $failLines) { Write-Host ("  " + $f) -ForegroundColor Red }
     } else {
-        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false }
-        Write-Host "  did not report a result (needs Full Mode, or it crashed)" -ForegroundColor DarkYellow
+        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; FailLines = $failLines; WarnLines = $warnLines; Log = $logPath }
+        Write-Host ("  did not report a result (needs Full Mode, or it crashed) - full output: {0}" -f $logPath) -ForegroundColor DarkYellow
     }
 }
 
@@ -100,7 +118,33 @@ foreach ($r in $results) {
 
 Write-Host ""
 Write-Host ("  TOTAL: {0} passed, {1} failed" -f $totalPassed, $totalFailed) -ForegroundColor $(if ($totalFailed -gt 0) { "Red" } else { "Green" })
+
+# 6d7: the counts alone are not a finding. A batch run that reports one
+# failure out of 838 has to name WHICH assertion, here, at the bottom, where
+# the reader already is - not 3000 scrolled lines up.
+$withFailures = @($results | Where-Object { $_.FailLines -and $_.FailLines.Count -gt 0 })
+if ($withFailures.Count -gt 0) {
+    Write-Host ""
+    Write-Host " Failures, named" -ForegroundColor Red
+    Write-Host " ---------------" -ForegroundColor Red
+    foreach ($r in $withFailures) {
+        Write-Host ("  {0}" -f $r.Name) -ForegroundColor Red
+        foreach ($f in $r.FailLines) { Write-Host ("      " + $f) -ForegroundColor Red }
+        Write-Host ("      full output: {0}" -f $r.Log) -ForegroundColor DarkGray
+    }
+}
+
+$withWarnings = @($results | Where-Object { $_.WarnLines -and $_.WarnLines.Count -gt 0 })
+if ($withWarnings.Count -gt 0) {
+    Write-Host ""
+    Write-Host " Warnings (not failures)" -ForegroundColor Yellow
+    foreach ($r in $withWarnings) {
+        foreach ($w in $r.WarnLines) { Write-Host ("  {0}: {1}" -f $r.Name, $w) -ForegroundColor Yellow }
+    }
+}
+
 Write-Host ""
+Write-Host ("Every suite's full output: {0}" -f $logDir) -ForegroundColor DarkGray
 Write-Host "Rule 10 reminder: passing here is 'In Progress', not 'Complete'." -ForegroundColor DarkGray
 Write-Host "Complete requires a clean Windows 10 (1607+) and Windows 11 VM pass (TASK-17)." -ForegroundColor DarkGray
 
