@@ -8,6 +8,65 @@ full decision rules.
 
 ---
 
+## [0.6.6] - 2026-08-16
+
+### Fixed -- two numbers that were wrong, and a test suite that could not say which
+
+**A file measured as 0 bytes.** `measure-paths` walked every target as a
+directory, so handing it a file produced `sizeBytes: 0` with `error: null` -- a
+number, and a wrong one, from the function whose own contract is that anything
+it could not measure comes back `null` with a reason. It now reports a file's
+real length, or `null` and a reason if it cannot be read.
+
+This was latent: nothing in the app passes a file path today, because the only
+caller measures install-snapshot directories. It is listed anyway because it is
+the same failure the install-date fix (0.5.x) was about -- an inference
+rendered with the confidence of a measurement -- and the rule it broke was
+enforced by a comment rather than by a test. It is now enforced by six
+assertions that call the engine the way the app does.
+
+**The network headline could disagree with the rows under it.** The total
+summed unrounded per-adapter rates while each adapter row displays a rounded
+one, and rounding two numbers separately does not give you the rounding of
+their sum. On a machine with two adapters carrying a gateway at once -- a
+docked laptop on Ethernet and Wi-Fi together -- the headline figure would not
+match the numbers it is a total of. Machines with a single gateway adapter,
+which is most of them, were never affected.
+
+### Changed -- the test suite names its failures
+
+A batch run that reported one failure out of 838 could not say which assertion
+failed. The line had scrolled past inside a 28-suite run, the summary kept only
+the counts, and re-running the suite alone passed. That teaches everyone to
+re-run until green, which is how a real regression gets waved through.
+
+Every suite now writes its full output to `test/logs/` before anything is
+parsed out of it, so a suite that prints its findings and then dies still
+leaves them behind. Failing and warning lines are repeated under the total, in
+a block that names the suite, the assertion and the log file.
+
+The flaky assertion itself was a wall-clock limit of 8 seconds on a network
+read. Measured on the development machine, that read takes 2.4-2.9 seconds warm
+and 7.6 cold, because the clock includes process start and the first system
+query of a fresh process -- so the limit was a coin toss before any load was
+added. It is now a hang guard that states its tolerance, paired with a
+deterministic check that the read takes at least its own sample window (a
+faster answer would not be a measurement) and a warning, not a failure, above
+the old 8 seconds so a slowdown stays visible.
+
+Suite: 845 passed, 0 failed.
+
+### Fixed -- the sandbox could not start
+
+The verification sandbox mapped the repository from its old location on disk.
+Windows Sandbox refuses to start when a mapped host folder does not exist, so
+the route used for the manual acceptance checks was quietly dead. Added
+`test/sandbox/start-sandbox.ps1`, which resolves the checkout and the host's
+Node install at run time and generates the configuration, so moving the
+repository cannot break it again.
+
+---
+
 ## [0.6.5] - 2026-08-14
 
 ### Added -- click a column header, choose which values to show

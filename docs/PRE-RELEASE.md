@@ -193,6 +193,34 @@ Phase 0 settles what that flakiness actually was.
 - [ ] `69a` cannot go in that runner: it tests the UAC branch itself and needs
       an UNELEVATED start. `1qp` needs a clean VM.
 
+#### 0.6.6 -- 2026-08-16
+
+- [x] `npm test` 845 passed, 0 failed (838 before).
+- [x] `qof` and `6d7` fixed and closed; `bkn` re-proved and closed; `17z`
+      decided (leave both Type controls).
+- [x] **The repository moved** from `D:\quickhelp projects\vanish-uninstaller`
+      to `D:\quickhelp\vanish-uninstaller`. The space that had been breaking
+      `Start-Process` argument handling for two sessions is gone from the path,
+      which HIDES that trap rather than removing it -- any clone into a spaced
+      path still hits it, and the sandbox mapping deliberately keeps a space
+      (`Desktop\test folder\...`) as `69a` coverage. The quoting stays and the
+      comments explaining it have been corrected to say so.
+- [x] `0kp` filed and fixed: the sandbox `.wsb` still mapped the OLD path, so
+      Windows Sandbox -- the acceptance route for `1qp` and all of Phase 3 --
+      refused to start and nothing said why. `test\sandbox\start-sandbox.ps1`
+      now resolves the checkout at run time.
+- [x] `h55` design pass done and recorded in the issue. It found that the
+      "known locked items" list **has no source on disk**: the oplog records
+      only counts of failed items, and a purge where everything was locked
+      writes nothing at all. Implementation is held on one operator decision,
+      named in the issue -- it needs a new persisted record of failed-delete
+      paths, which is a privacy-shaped call rather than a UI one.
+- [ ] **The elevated run is STILL outstanding.** Attempted 2026-08-16; the UAC
+      prompt went unanswered and the launch was cancelled, so `dmu`, `e7q`,
+      `bfh.2`, `9sy` and `dvc` are all still open on the same single run. The
+      runner itself is verified ready: it refuses cleanly unelevated (exit 2)
+      and resolves the new repo path correctly.
+
 - [ ] **Superseded note kept for the record:** 0.5 did not claim
       it.** The theme is "elevation you can trust" and what shipped is
       elevation that cannot lie to you about what happened -- detection, not
