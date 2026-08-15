@@ -127,7 +127,23 @@ function Invoke-Suite($name, $relPath, $key, $idleSeconds = 90, $hardSeconds = 3
     Say ("--- {0} ---" -f $name)
     Say ("    {0}  (idle limit {1}s, hard limit {2}s; live output follows)" -f $relPath, $idleSeconds, $hardSeconds)
 
-    $proc = Start-Process -FilePath $electronExe -ArgumentList (Join-Path $root $relPath) `
+    # THE QUOTES ARE NOT OPTIONAL. This repo lives at "D:\quickhelp projects\",
+    # and -ArgumentList builds a COMMAND LINE, not an argument vector: one
+    # element containing a space arrives at the child as two arguments. Electron
+    # then reports 'Unable to find Electron app at D:\quickhelp' and pops a modal
+    # error box that nothing on the console explains. The old code used the call
+    # operator (& $electron $path), which quotes for you - switching to
+    # Start-Process for -PassThru and -RedirectStandardOutput moved that
+    # responsibility here, and the first version of this line did not take it.
+    # Same trap scanner.ps1 documents for relaunch-elevated. Verified against
+    # this path, not assumed.
+    $suitePath = Join-Path $root $relPath
+    if (-not (Test-Path -LiteralPath $suitePath)) {
+        Check $false "$name - suite file not found at $suitePath"
+        $script:results[$key] = 'suite file missing'
+        return
+    }
+    $proc = Start-Process -FilePath $electronExe -ArgumentList ('"{0}"' -f $suitePath) `
         -RedirectStandardOutput $logPath -RedirectStandardError $errPath -NoNewWindow -PassThru
 
     # FileShare::ReadWrite matters: the child holds the log open for writing, so
@@ -139,6 +155,7 @@ function Invoke-Suite($name, $relPath, $key, $idleSeconds = 90, $hardSeconds = 3
     $lastSeen = Get-Date
     $lastLine = ''
     $verdict  = 'ran'
+    $nextBeat = 15
     try {
         while ($true) {
             $got = $false
@@ -146,9 +163,21 @@ function Invoke-Suite($name, $relPath, $key, $idleSeconds = 90, $hardSeconds = 3
                 if ($line.Trim()) { Say ("    {0}" -f $line.TrimEnd()); $lastLine = $line.Trim() }
                 $got = $true
             }
-            if ($got) { $lastSeen = Get-Date }
+            if ($got) { $lastSeen = Get-Date; $nextBeat = 15 }
             if ($proc.HasExited) { break }
-            if (((Get-Date) - $lastSeen).TotalSeconds -gt $idleSeconds) { $verdict = 'idle'; break }
+
+            # A heartbeat while it is silent, because "nothing on screen" was the
+            # actual complaint and a suite can legitimately be quiet for a minute
+            # (real-data-verify scans the whole machine). This says how long the
+            # silence has lasted and how long is left before it counts as hung,
+            # so waiting is a decision the operator can make with numbers.
+            $idle = ((Get-Date) - $lastSeen).TotalSeconds
+            if ($idle -ge $nextBeat) {
+                Say ("    ... still running, quiet for {0}s of the {1}s idle limit (PID {2})" -f [int]$idle, $idleSeconds, $proc.Id) 'DarkGray'
+                $nextBeat = [int]$idle + 15
+            }
+
+            if ($idle -gt $idleSeconds) { $verdict = 'idle'; break }
             if (((Get-Date) - $started).TotalSeconds -gt $hardSeconds) { $verdict = 'hard'; break }
             Start-Sleep -Milliseconds 400
         }
@@ -177,6 +206,13 @@ function Invoke-Suite($name, $relPath, $key, $idleSeconds = 90, $hardSeconds = 3
         $script:results[$key] = "hung after $([int]((Get-Date) - $started).TotalSeconds)s; last line: $lastLine"
         return
     }
+
+    # Refresh first: a Start-Process -PassThru object does not populate ExitCode
+    # until it is refreshed, so this reported an empty exit code - a diagnostic
+    # printing a blank where a number belongs is worse than not printing it.
+    try { $proc.Refresh() } catch { }
+    $exitCode = try { $proc.ExitCode } catch { $null }
+    if ($null -eq $exitCode) { $exitCode = '(not reported)' }
 
     $all = @(Get-Content -Path $logPath -ErrorAction SilentlyContinue)
     $resultLine = ($all | Where-Object { $_ -match '^Result: \d+ passed, \d+ failed' } | Select-Object -Last 1)
