@@ -1,9 +1,25 @@
 # Sandbox verification checklist
 
 Runs inside Windows Sandbox (fresh Windows 11 image every launch, discarded
-on close, no risk to the host). Launch by double-clicking
-`test\sandbox\vanish-sandbox.wsb` on the host. The sandbox auto-runs
-`npm test` and opens this file.
+on close, no risk to the host). Launch it from the host with:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File test\sandbox\start-sandbox.ps1
+```
+
+The sandbox auto-runs `npm test` and opens this file.
+
+Use the script rather than double-clicking `vanish-sandbox.wsb` (0kp). A `.wsb`
+stores absolute host paths, so the checked-in copy goes stale the moment the
+checkout moves -- and it did, from `D:\quickhelp projects\vanish-uninstaller`
+to `D:\quickhelp\vanish-uninstaller`, which left the sandbox silently unable to
+start. `start-sandbox.ps1` resolves the repo root and your host's Node install
+at run time and generates the config; add `-GenerateOnly` to print the paths
+and write the file without booting the VM.
+
+Note the sandbox path deliberately contains a space
+(`Desktop\test folder\vanish-uninstaller`). That is section 1's coverage and
+does not depend on where the repo sits on the host.
 
 This covers everything in the backlog that only needed "a human at a UAC
 prompt" or "a clean machine" -- it does NOT cover Windows 10 (Sandbox always

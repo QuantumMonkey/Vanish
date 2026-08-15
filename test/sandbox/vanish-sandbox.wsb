@@ -3,7 +3,12 @@
   <Networking>Enable</Networking>
   <MappedFolders>
     <MappedFolder>
-      <HostFolder>D:\quickhelp projects\vanish-uninstaller</HostFolder>
+      <!-- 0kp: absolute by construction, and therefore stale the moment the
+           checkout moves - which it did. Prefer test\sandbox\start-sandbox.ps1,
+           which resolves the repo root and generates this file with the real
+           paths. This copy is kept so the configuration can be READ without
+           running anything. -->
+      <HostFolder>D:\quickhelp\vanish-uninstaller</HostFolder>
       <SandboxFolder>C:\Users\WDAGUtilityAccount\Desktop\test folder\vanish-uninstaller</SandboxFolder>
       <ReadOnly>false</ReadOnly>
     </MappedFolder>
