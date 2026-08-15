@@ -127,11 +127,16 @@ function Invoke-Suite($name, $relPath, $key, $idleSeconds = 90, $hardSeconds = 3
     Say ("--- {0} ---" -f $name)
     Say ("    {0}  (idle limit {1}s, hard limit {2}s; live output follows)" -f $relPath, $idleSeconds, $hardSeconds)
 
-    # THE QUOTES ARE NOT OPTIONAL. This repo lives at "D:\quickhelp projects\",
-    # and -ArgumentList builds a COMMAND LINE, not an argument vector: one
-    # element containing a space arrives at the child as two arguments. Electron
-    # then reports 'Unable to find Electron app at D:\quickhelp' and pops a modal
-    # error box that nothing on the console explains. The old code used the call
+    # THE QUOTES ARE NOT OPTIONAL, and do not delete them because the path
+    # currently has no space in it. -ArgumentList builds a COMMAND LINE, not an
+    # argument vector: one element containing a space arrives at the child as
+    # two arguments. This repo used to live at "D:\quickhelp projects\", where
+    # Electron reported 'Unable to find Electron app at D:\quickhelp' and popped
+    # a modal error box that nothing on the console explained. It has since moved
+    # to "D:\quickhelp\vanish-uninstaller", which hides the trap rather than
+    # removing it - anyone who clones this repo into a path with a space, and
+    # the sandbox's own "Desktop\test folder\..." mapping, hit it again
+    # immediately. The old code used the call
     # operator (& $electron $path), which quotes for you - switching to
     # Start-Process for -PassThru and -RedirectStandardOutput moved that
     # responsibility here, and the first version of this line did not take it.
