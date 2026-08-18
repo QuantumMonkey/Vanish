@@ -215,11 +215,55 @@ Phase 0 settles what that flakiness actually was.
       writes nothing at all. Implementation is held on one operator decision,
       named in the issue -- it needs a new persisted record of failed-delete
       paths, which is a privacy-shaped call rather than a UI one.
-- [ ] **The elevated run is STILL outstanding.** Attempted 2026-08-16; the UAC
-      prompt went unanswered and the launch was cancelled, so `dmu`, `e7q`,
-      `bfh.2`, `9sy` and `dvc` are all still open on the same single run. The
-      runner itself is verified ready: it refuses cleanly unelevated (exit 2)
-      and resolves the new repo path correctly.
+- [x] **The elevated run HAPPENED, 2026-08-18.** It cleared `bfh.2` (6/6),
+      `e7q` (43/0), `9sy` (166/0 after two real fixes) and `dvc`, and the
+      operator's standing rpdsvc request is done. It also found three real
+      defects no fixture suite could reach - see 0.8.0 in the CHANGELOG.
+
+#### 0.8.0 and 0.9 progress -- 2026-08-18
+
+**All six elevated confirmations are now resolved or reduced to a machine
+problem.** This was the largest single item left in 0.9:
+
+| Issue | Outcome |
+| --- | --- |
+| `dmu` | CLOSED. Engine half 12/0, and a new IPC suite proves the vault half 27/0 - the manifest is written before the mutation, restore is byte-identical, and a refusal changes nothing. |
+| `e7q` | CLOSED. 43/0 elevated, headless, byte-identical folder restore by SHA256. |
+| `bfh.2` | CLOSED. 6/6 - the hold applies, reverts, and DELETES the policy value rather than zeroing it. |
+| `9sy` | CLOSED. 166/0 elevated, after fixing the two real defects the first run found. |
+| `69a` | STILL OPEN. Needs an unelevated start and a human watching the app relaunch itself. |
+| `1qp` | STILL OPEN. Needs the clean VM, which `start-sandbox.ps1` has made reachable again. |
+
+Also closed this day, all of which had been built and never verified:
+`frr` and `zl4` (both sat in_progress for nine days behind "needs a human" -
+neither did; the notes on each issue say why), `ytv` (verified as far as one
+machine can, with the three environment cases it cannot cover printed by the
+suite itself), `dvc`, `87u`, `z3s`, `qof`, `6d7`, `bkn`, `0kp`, `17z`.
+
+Features shipped: `7v3`, `be8`, `ztl` (0.7.0), `ht8`, `ag0` (0.8.0).
+`bcu` deferred with evidence - none of the four launchers is installed on any
+machine we can read, and its own note says implementing from documentation
+risks attaching a wrong size to a real game.
+
+**The one finding that outranks the features**, recorded here because it
+changes what the vault is allowed to do: the quarantine path could accept a
+file the restore path would refuse to put back, stranding it permanently. It
+surfaced only because `7v3` looks inside `%SystemRoot%`. Quarantine now asks
+the same question restoring does, through the same function. The consequence
+is that `7v3` ships audit-only: its 137 MB is identified and stays unclaimed,
+because offering the removal would be a deletion with no way back dressed as a
+reversible one. Unlocking it means deciding whether a restore to a file's own
+recorded original path may write into a protected location - a security call
+for the operator, and the open half of `z3s`.
+
+**What 1.0 still needs**, and none of it is code that can be written here:
+
+- `69a`, `adg` - a human at the app, unelevated, watching one relaunch.
+- `1qp`, `0xt` - a clean VM pass. Now reachable via `start-sandbox.ps1`.
+- `ytv`'s three environment cases - a second machine, ideally not an
+  administrator account.
+- `7sl` - the CleanerML adapter, the last unbuilt 0.8 feature.
+- The demo GIF, code signing, one external user.
 
 - [ ] **Superseded note kept for the record:** 0.5 did not claim
       it.** The theme is "elevation you can trust" and what shipped is

@@ -8,6 +8,87 @@ full decision rules.
 
 ---
 
+## [0.8.0] - 2026-08-18
+
+### Added -- Windows updates, in plain words
+
+A new Health Advisor section listing what Windows has installed as an update:
+the KB number, what kind of thing it is (security, cumulative, driver, .NET,
+optional component, servicing stack), when it was installed, and one line
+saying what removing it would actually cost you. Newest first, because the
+question people open this screen with is "what changed just before this
+started going wrong".
+
+Vanish does not remove updates and does not pretend it could put one back.
+Every row with a KB number offers Windows' own command and a link to its
+update history instead. Whether a given update can be removed at all is
+something Windows reveals only by refusing, so the list says what removal
+would cost rather than promising it will work.
+
+Unelevated it shows what the servicing stack reports -- 5 updates on the
+development machine -- and SAYS that the fuller component-store list needs
+administrator rights, because a list that silently shrinks by 97% is worse
+than a short list that explains itself. Elevated the same screen shows 194.
+
+**The install dates nearly shipped wrong, and that is the part worth reading.**
+Windows reports these times in the machine's own short-date format. Read as
+US month-first order on a machine using day-first, several landed FOUR MONTHS
+IN THE FUTURE -- at the top of a list sorted by date, on the one screen whose
+entire value is "installed three days ago" next to "this broke three days
+ago". Dates are now parsed against the real format and any result in the
+future is rejected outright: an update cannot have been installed tomorrow, so
+a future date is proof the reading failed, and the row says "not recorded"
+with the reason instead. Fixing it also recovered 92 genuine dates that had
+been discarded.
+
+### Added -- how many shared runtimes are on this PC, and which
+
+33 of this machine's 149 installed entries are shared runtimes: Visual C++,
+.NET, WebView2, DirectX. They were never hidden, but nothing counted them, so
+33 near-identical rows just read as noise in a list of real programs. All
+Programs now shows the count and can isolate them.
+
+Information only. No uninstall is offered, because deciding whether a runtime
+is still needed means reading the import tables of every binary on the
+machine, and without that "safe to remove" is a guess that breaks a program
+which will never say why.
+
+### Fixed -- every destructive control lost its tooltip the moment you elevated
+
+The explanation on every button that changes something disappeared at exactly
+the point the action became live. An element's own hover text was only ever
+remembered while running as a standard user, so on a session that started
+already elevated there was nothing to restore and the text was deleted.
+
+Found by running the real-data checks from an administrator shell for the
+first time: 0 of 46 startup buttons carried any hover text. The same check
+passes as a standard user, for a reason unrelated to what it measures -- which
+is its own lesson about where a test is allowed to run.
+
+### Fixed -- a primary button that was not fully clickable
+
+On the uninstall wizard's "run the program's own uninstaller" step, the
+button's lower edge sat underneath the footer. The window is a fixed height,
+so content taller than its middle section overhung both ends and was clipped
+silently. The first attempt at a fix made it worse -- the button moved below
+the fold entirely -- which the checks caught; the room was taken from the
+screen's own spacing instead.
+
+### Verification
+
+973 automated checks pass, up from 845. Nothing is left half-finished: the six
+features that had been built but never confirmed are all confirmed, including
+the four that needed an administrator session and the two that turned out not
+to need a human at all.
+
+Still outstanding, and honestly outstanding rather than quietly dropped:
+consuming BleachBit's cleaner definitions, game-platform sizes for launchers
+not installed on any machine we can read, a clean-VM acceptance pass, and two
+elevation checks that need a second machine to exercise -- a real UAC refusal
+and a non-administrator account.
+
+---
+
 ## [0.7.0] - 2026-08-18
 
 ### Added -- three more things Windows keeps and never tells you about
