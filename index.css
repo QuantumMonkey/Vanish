@@ -1495,19 +1495,38 @@ input:checked + .slider:before {
 }
 
 /* Native Uninstall Screen (Screen 3) */
+/* 9sy: this screen was a few pixels over its budget, and the pixels it lost
+   were the ones under the primary button.
+
+   .wizard-modal is a fixed 520px, so .wizard-screens gets a fixed slice between
+   the header and the footer, and .wizard-screen centres inside it with
+   overflow:hidden. Content taller than that slice therefore overhangs BOTH
+   edges and is clipped, silently. The elevated real-data pass measured
+   #btn-launch-native at y 497..544 with its bottom edge under DIV.wizard-footer
+   - the button looked fine and its lower edge was not clickable.
+
+   The room is bought back here rather than by making .wizard-screen scroll:
+   with a fixed-height modal, a scrollable screen moves a PRIMARY action below
+   the fold, which is worse than the clipping (measured - the button landed at
+   y 583, fully outside the 246px screen area). Same remedy as d6y, which took
+   content off a screen that had grown past this modal's height.
+
+   #scr-complete, the other screen that hit this, has its own overflow-y patch
+   (vej, further down) because a failures list has no fixed length. This screen
+   does, so it is made to fit. */
 .native-uninst-box {
   background: var(--bg-dark-card);
   border: 1px solid var(--border-glass);
   border-radius: 16px;
-  padding: 24px;
+  padding: 18px 24px;
   max-width: 440px;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .native-uninst-box i {
   font-size: 32px;
   color: var(--color-warning);
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 /* Leftovers list (Screen 4) */

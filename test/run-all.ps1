@@ -28,6 +28,7 @@ $suites = @(
     @{ Name = "Vault engine (TASK-01)";        Kind = "ps";       Path = "test\vault-verify.ps1" },
     @{ Name = "Elevation tiers (TASK-04)";     Kind = "electron"; Path = "test/tier-verify.js" },
     @{ Name = "Vault IPC (TASK-02/03)";        Kind = "electron"; Path = "test/vault-ipc-verify.js" },
+    @{ Name = "Startup actions IPC (dmu)";     Kind = "electron"; Path = "test/startup-action-ipc-verify.js" },
     @{ Name = "Task Manager + Unlocker (2)";   Kind = "ps";       Path = "test\phase2-verify.ps1" },
     @{ Name = "Switches + restore (3)";        Kind = "ps";       Path = "test\phase3-verify.ps1" },
     @{ Name = "Uninstall queue (TASK-11)";     Kind = "node";     Path = "test/queue-verify.js" },

@@ -1072,6 +1072,41 @@ function startupClassLabel(item) {
   return STARTUP_CLASS_LABELS[item.classification] || 'Vanish has no opinion';
 }
 
+// 9sy: what the action button's hover text says.
+//
+// This used to be item.suggestion, which is populated ONLY for orphaned entries
+// (the exePath is gone). The elevated real-data pass reported 0 of 45 buttons
+// carrying a title, because this machine has no orphans - so the one control on
+// the row that changes the system explained itself on exactly none of them, and
+// on the rows where it DID have text, that text was about the orphan rather
+// than about the button.
+//
+// The suggestion still appears, in the place it belongs: the lightbulb row
+// underneath an orphaned entry, which has room for a sentence.
+//
+// Each string names the consequence AND the way back, because that is the
+// difference between this app and the category. The registry and service paths
+// really do export a .reg restore manifest to the vault BEFORE they write, and
+// refuse the change outright if that export fails (main.js startup-action).
+// Disabling a task destroys nothing and the same button re-enables it, which is
+// why it is the one path with no manifest - so it must not claim one.
+function startupActionTitle(item) {
+  if (item.action === 'task-disable') {
+    return item.enabled
+      ? 'Stops this scheduled task from running. Nothing is deleted - this same button turns it back on.'
+      : 'Lets this scheduled task run again.';
+  }
+  if (item.action === 'service-manual') {
+    return 'Stops this service starting on its own; Windows can still start it when something asks for it. '
+      + 'Vanish saves a restore file to Quarantine first, and makes no change at all if it cannot.';
+  }
+  if (item.action === 'registry-remove') {
+    return 'Removes this entry so it no longer runs at startup. Vanish saves a restore file to Quarantine '
+      + 'first, and makes no change at all if it cannot, so you can put it back.';
+  }
+  return item.actionLabel || 'Changes how this entry starts.';
+}
+
 // 5b0: the words the Source and Status cells display, each in one place, so the
 // column filters offer exactly what the table shows. Same trap as All Programs'
 // Type column: filtering on item.source would offer "TaskScheduler" for a cell
@@ -1221,7 +1256,7 @@ function renderStartupTable(startup) {
     const actionCell = item.action
       ? `<button class="btn-sec btn-compact startup-action-btn" data-startup-index="${index}"
                  data-destructive="true"
-                 title="${esc(item.suggestion || '')}">${esc(actionLabel)}</button>`
+                 title="${esc(startupActionTitle(item))}">${esc(actionLabel)}</button>`
       : `<span style="font-size:11.5px; color: var(--text-muted);">Managed by Windows</span>`;
 
     return `

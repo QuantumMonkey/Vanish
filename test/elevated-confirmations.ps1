@@ -276,27 +276,27 @@ try {
     $after = (Get-ItemProperty -LiteralPath $probeRunKey -Name $probeRunValue -ErrorAction SilentlyContinue).$probeRunValue
     Check ($null -eq $after) 'the value is actually gone from the registry'
 
-    # The manifest-only .reg export into the vault is what makes the action
-    # safe to offer - the acceptance criteria calls the restore the proof.
-    $vaultHit = $null
-    if ($r.entryId) {
-        $vaultRoot = Join-Path $env:APPDATA 'vanish-uninstaller\vanish-vault'
-        $vaultHit = Get-ChildItem -Path $vaultRoot -Recurse -Filter '*.reg' -ErrorAction SilentlyContinue |
-            Where-Object { (Get-Content $_.FullName -Raw -ErrorAction SilentlyContinue) -match [regex]::Escape($probeRunValue) } |
-            Select-Object -First 1
-    }
-    Check ($null -ne $vaultHit) "a .reg manifest naming the value was written to the vault (entryId $($r.entryId))"
-    if ($script:lastCheck) {
-        $regText = Get-Content $vaultHit.FullName -Raw
-        Check ($regText -match [regex]::Escape($probeRunData.Replace('\','\\'))) 'the manifest carries the ORIGINAL data, so a restore can be byte-identical'
-        # Restore through Windows' own importer, which is what the vault's .reg
-        # is for, then compare byte for byte.
-        & reg.exe import $vaultHit.FullName 2>&1 | Out-Null
-        $restored = (Get-ItemProperty -LiteralPath $probeRunKey -Name $probeRunValue -ErrorAction SilentlyContinue).$probeRunValue
-        Check ($restored -eq $before) "restored value is byte-identical ('$restored')"
-    } else {
-        Note 'No vault manifest found - restore could not be proven. This is the leg dmu cares most about.'
-    }
+    # 87u: THE VAULT IS NOT CHECKED HERE, AND MUST NOT BE. This leg calls
+    # scanner.ps1 directly, and scanner.ps1's startup-remove-registry
+    # (Remove-StartupRegistryValue) deletes the registry value and nothing
+    # else - correctly, because the vault is not the engine's job. The restore
+    # manifest is exported by main.js's 'startup-action' handler, BEFORE the
+    # mutation, which refuses the whole operation if the export fails.
+    #
+    # This block used to look for that manifest anyway and report it missing.
+    # On 2026-08-18 that produced a FAIL with a NOTE calling it 'the leg dmu
+    # cares most about', which read as a serious INV-1 breach and was a harness
+    # bug - the third of its kind here after bkn and ri6: a harness testing one
+    # layer while its assertion text claims another.
+    #
+    # What this leg proves is the ENGINE half: elevated, the write lands. The
+    # vault half is proved by test/startup-action-ipc-verify.js, which drives
+    # the same actions over IPC and is run further down.
+    Note 'Engine half only. The restore manifest lives in main.js and is proved by the IPC suite below (87u).'
+
+    # Put the probe value back so the machine ends as it started, and so the
+    # cleanup in the finally has something predictable to remove.
+    New-ItemProperty -Path $probeRunKey -Name $probeRunValue -Value $probeRunData -PropertyType String -Force | Out-Null
 
     # --- 2. Service to Manual ---------------------------------------------
     Say ''
@@ -401,6 +401,10 @@ try {
     } else {
         Invoke-Suite 'phase4-ipc-verify (e7q: Store-leftover purge + restore)' 'test/phase4-ipc-verify.js' 'e7q' 90 300
         Invoke-Suite 'vault-ipc-verify (TASK-02/03)' 'test/vault-ipc-verify.js' 'vault-ipc' 90 300
+        # 87u: the half the PowerShell legs above structurally cannot reach -
+        # the restore manifest that main.js writes before it lets anything be
+        # removed. This is what dmu's acceptance criteria actually asks for.
+        Invoke-Suite 'startup-action-ipc-verify (dmu: the vault half)' 'test/startup-action-ipc-verify.js' 'dmu-ipc' 90 300
     }
 
     # ======================================================================
