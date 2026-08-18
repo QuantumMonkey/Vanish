@@ -139,7 +139,10 @@ function describeOrigin(origin) {
     'system-clean/associations': 'System Clean - file types and links',
     'system-clean/profiles': 'System Clean - other user accounts',
     'system-clean/drivers': 'System Clean - driver packages',
-    'system-clean/uwp-leftovers': 'System Clean - left-over Store app data'
+    'system-clean/uwp-leftovers': 'System Clean - left-over Store app data',
+    'system-clean/installer-cache': 'System Clean - left-over Windows installers',
+    'system-clean/firewall-rules': 'System Clean - firewall rules',
+    'system-clean/dead-references': 'System Clean - dead references and ghost devices'
   };
   if (known[raw]) return known[raw];
   if (raw.startsWith('system-clean/path')) return 'System Clean - PATH entries';

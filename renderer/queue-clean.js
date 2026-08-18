@@ -413,6 +413,28 @@ const CLEANERS = [
     title: 'Other user profiles',
     desc: 'Leftovers in the settings of other user accounts on this PC. Needs administrator rights.',
     needsKeyword: true
+  },
+  {
+    // 7v3. The only one of the three below that frees real space: 137 MB of 977 MB
+    // measured on the development machine, and the rest is load-bearing.
+    id: 'installer-cache',
+    icon: 'fa-box-open',
+    title: 'Left-over Windows installers',
+    desc: 'Windows keeps a copy of every installer it has run so Repair and Uninstall keep working. These copies belong to programs that are gone, so nothing points at them any more. Vanish only lists a file when no installed product still references it.'
+  },
+  {
+    // be8
+    id: 'firewall-rules',
+    icon: 'fa-shield-halved',
+    title: 'Firewall rules for missing programs',
+    desc: 'Firewall rules that allow or block a program that is no longer on this PC. Each one says why it is dead. Listed only in this release - Vanish will not remove a rule until it can put it back.'
+  },
+  {
+    // ztl
+    id: 'dead-references',
+    icon: 'fa-ghost',
+    title: 'Dead references and ghost devices',
+    desc: 'Records Windows still holds for files and hardware that are not there. Most are harmless and normal - an unplugged device is supposed to leave a record - so each is labelled with what it actually is. Listed only; removing them frees nothing.'
   }
 ];
 

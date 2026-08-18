@@ -68,6 +68,12 @@ const CLSID_KEY = `HKCU:\\Software\\Classes\\CLSID\\${CLSID}`;
 const SVC_KEY = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\VanishIpcOrphanSvc';
 const DEAD_DIR = 'C:\\Vanish\\Definitely\\Missing\\ipcbin';
 const UWP_FAMILY = 'VanishIpcGhost.Test_vanishtest999';
+// 7v3: a cached installer nothing references. Planted in the real cache dir
+// because that is the only place the sweep looks, with a name no product could
+// own - the whole rule is 'is this filename in the LocalPackage reference set',
+// and this one cannot be.
+const MSI_CACHE = `${process.env.SystemRoot}\\Installer`;
+const MSI_ORPHAN = `${MSI_CACHE}\\vanish-ipc-orphan-probe.msi`;
 const UWP_DIR = `${process.env.LOCALAPPDATA}\\Packages\\${UWP_FAMILY}`;
 const UWP_FILE = `${UWP_DIR}\\LocalState\\payload.bin`;
 
@@ -77,6 +83,7 @@ function cleanup() {
       if (Test-Path -LiteralPath $k) { Remove-Item -LiteralPath $k -Recurse -Force -ErrorAction SilentlyContinue }
     }
     if (Test-Path -LiteralPath '${UWP_DIR}') { Remove-Item -LiteralPath '${UWP_DIR}' -Recurse -Force -ErrorAction SilentlyContinue }
+    if (Test-Path -LiteralPath '${MSI_ORPHAN}') { Remove-Item -LiteralPath '${MSI_ORPHAN}' -Force -ErrorAction SilentlyContinue }
   `);
 }
 
@@ -282,6 +289,69 @@ app.whenReady().then(async () => {
     // ================================================================
     // INV-1: nothing bypassed the vault
     // ================================================================
+    console.log('');
+    // ================================================================
+    // 7v3 orphaned installer cache: purge -> quarantine -> restore
+    // ================================================================
+    console.log('');
+    console.log('7v3 orphaned installer cache: purge -> quarantine -> restore');
+
+    ps(`Set-Content -LiteralPath '${MSI_ORPHAN}' -Value ('vanish-probe-' + ('x' * 2048)) -Encoding ascii -Force`);
+    const msiScan = await invoke('cleaner-scan', { cleaner: 'installer-cache' });
+    const msiFinding = (msiScan.findings || []).find((f) => String(f.path).toLowerCase() === MSI_ORPHAN.toLowerCase());
+    assert(!!msiFinding, 'the planted unreferenced installer is found by the sweep');
+    assert(msiFinding && msiFinding.sizeBytes > 0, 'and it carries a real measured size');
+
+    // The safety property, asserted against the live machine rather than a
+    // fixture: a referenced package must never appear. Breaking this breaks
+    // Repair and Uninstall for a product that is still installed.
+    const referencedNames = new Set(
+      ps(`$ErrorActionPreference='SilentlyContinue'
+         $base=[Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine','Registry64')
+         $r=$base.OpenSubKey('SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Installer\\UserData')
+         foreach ($sid in $r.GetSubKeyNames()) {
+           foreach ($b in @('Products','Patches')) {
+             $bk=$r.OpenSubKey("$sid\\$b"); if (-not $bk) { continue }
+             foreach ($c in $bk.GetSubKeyNames()) {
+               foreach ($s in @("$c\\InstallProperties", $c)) {
+                 $k=$bk.OpenSubKey($s); if (-not $k) { continue }
+                 $lp=[string]$k.GetValue('LocalPackage',''); if ($lp) { Split-Path $lp -Leaf }
+                 $k.Close()
+               }
+             }
+             $bk.Close()
+           }
+         }`).split(/\r?\n/).map((s) => s.trim().toLowerCase()).filter(Boolean)
+    );
+    assert(referencedNames.size > 0, `this machine has referenced packages to protect (${referencedNames.size})`);
+    const proposedReferenced = (msiScan.findings || []).filter((f) => referencedNames.has(String(f.label).toLowerCase()));
+    assert(proposedReferenced.length === 0, `no still-referenced installer is proposed (${proposedReferenced.length} violation(s))`);
+
+    // The sweep is AUDIT ONLY, and these two assertions are why. The cache
+    // lives under %SystemRoot%, which the restore path blocks as a
+    // destination, so a removal here could never be undone.
+    assert(msiFinding && msiFinding.removable === false, 'the finding is NOT offered as removable - the vault cannot restore into %SystemRoot%');
+    assert(msiFinding && /cannot put it back|protected/i.test(String(msiFinding.note || '')), 'and it says why, rather than just being greyed out');
+
+    // INV-1 SYMMETRY: the vault must refuse to TAKE what it cannot RETURN.
+    // Sent straight at the IPC boundary with removable forced true, which is
+    // what a compromised or buggy renderer would do - the guard has to live
+    // below this line, not in the UI.
+    const forced = Object.assign({}, msiFinding, { removable: true });
+    const msiPurge = await invoke('cleaner-purge', { cleaner: 'installer-cache', items: [forced] });
+    const purgedFiles = (msiPurge && msiPurge.files) || [];
+    const refusal = purgedFiles.find((f) => String(f.originalPath).toLowerCase() === MSI_ORPHAN.toLowerCase());
+    assert(!!refusal, 'the engine reports on the file it was asked to take');
+    assert(refusal && refusal.status !== 'quarantined', `it was NOT quarantined (status '${refusal && refusal.status}')`);
+    assert(
+      refusal && /could not put it back|protected system location/i.test(String(refusal.error || '')),
+      `and the refusal names the reason (got '${(refusal && refusal.error) || ''}')`
+    );
+    assert(
+      ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'True',
+      'THE ASSERTION THIS EXISTS FOR: the file is still on disk. A refusal that had already moved it would strand it in the vault forever'
+    );
+
     console.log('');
     console.log('INV-1 every cleaner removal produced a restorable vault entry');
     const finalVault = await invoke('vault-list');

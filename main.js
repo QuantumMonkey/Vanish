@@ -1831,7 +1831,10 @@ function cleanerSourceLabel(cleaner) {
     services: 'Orphaned services cleaner',
     associations: 'File association repair',
     profiles: 'Other user profiles sweep',
-    'uwp-leftovers': 'Left-over Store app data'
+    'uwp-leftovers': 'Left-over Store app data',
+    'installer-cache': 'Left-over Windows installers',
+    'firewall-rules': 'Firewall rule sweep',
+    'dead-references': 'Dead reference sweep'
   };
   return labels[cleaner] || `System Clean (${cleaner})`;
 }

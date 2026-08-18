@@ -42,6 +42,7 @@ $suites = @(
     @{ Name = "Relaunch intent (1dq)";          Kind = "node";     Path = "test/elevation-intent-verify.js" },
     @{ Name = "Icon set";                      Kind = "node";     Path = "test/icon-verify.js" },
     @{ Name = "Network attribution (bfh.1)";   Kind = "ps";       Path = "test\network-verify.ps1" },
+    @{ Name = "Dead refs (7v3/be8/ztl)";       Kind = "ps";       Path = "test\dead-reference-verify.ps1" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },
     @{ Name = "Security regressions";          Kind = "ps";       Path = "test\security-verify.ps1" },
     @{ Name = "Details panel layout (5z5)";    Kind = "electron"; Path = "test/details-panel-layout-verify.js" },

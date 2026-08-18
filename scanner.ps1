@@ -3379,6 +3379,30 @@ function Invoke-QuarantineItems {
             continue
         }
 
+        # INV-1 SYMMETRY. The restore path refuses to write into a protected
+        # system location (Test-ProtectedDestination, used at the top of the
+        # restore loop). Until this guard existed, the QUARANTINE path did not
+        # ask the same question - so the vault would happily take a file out of
+        # one of those locations and then refuse, later and permanently, to put
+        # it back. A vault that can accept what it cannot return is worse than
+        # one that refuses up front: the refusal costs the user a feature, the
+        # asymmetry costs them the file.
+        #
+        # Found 2026-08-18 building the orphaned-installer sweep (7v3), whose
+        # findings live in %SystemRoot%\Installer. The purge reported success,
+        # the vault entry looked correct, and the restore came back
+        # "Rejected: refusing to restore into a protected system location" with
+        # the payload stranded in the vault forever.
+        #
+        # Deliberately checked against the SAME predicate the restore uses
+        # rather than a copy of its list, so the two can never drift apart.
+        if (Test-ProtectedDestination $src) {
+            $row.status = "failed"
+            $row.error  = "Refused: this lives in a protected system location, and the vault could not put it back afterwards. Nothing was moved."
+            $fileRows.Add($row)
+            continue
+        }
+
         $row.sizeBytes = Get-ItemSizeBytes $src
         $leaf    = Split-Path -Path $src -Leaf
         if ([string]::IsNullOrWhiteSpace($leaf)) { $leaf = "item" }
@@ -5751,6 +5775,276 @@ function Find-BrokenAppxRegistrations {
 # A registry finding whose physical key could not be resolved cannot be
 # quarantined, so it must never be offered as removable (INV-1: no removal
 # without a restore manifest).
+# 7v3: orphaned Windows Installer cache (.msi / .msp in C:\Windows\Installer).
+#
+# Measured at 1.2 GB on the operator's machine 2026-08-02, and it is the one
+# finding type here that frees real space.
+#
+# THE ORPHAN RULE, and why it is a cross-reference rather than a heuristic:
+# Windows keeps a cached copy of every installer it has run so that Repair,
+# Modify and Uninstall keep working. Each cached file is referenced by a
+# LocalPackage value under the per-user Installer UserData tree. A file with
+# no reference belongs to a product that is gone; a file WITH one is load-
+# bearing, and deleting it breaks repair and uninstall for a product that is
+# still installed. There is no size, age or name signal that separates them -
+# only the reference. So this refuses to guess: if the reference scan cannot
+# be read at all, it returns NOTHING rather than a list built on a partial
+# picture, because a partial reference set turns live packages into orphans.
+#
+# PatchCleaner is the reference implementation of the same rule and is closed
+# freeware, so there is nothing to integrate - the rule is public knowledge and
+# small. What Vanish adds is the vault: these go to quarantine and come back,
+# where PatchCleaner moves them to a folder and calls it done.
+function Find-OrphanInstallerCache {
+    $findings = [System.Collections.Generic.List[object]]::new()
+
+    $cacheDir = Join-Path $env:SystemRoot 'Installer'
+    if (-not (Test-Path -LiteralPath $cacheDir)) { return $findings }
+
+    # Every LocalPackage the machine still points at. Products AND Patches:
+    # missing the Patches half would offer every .msp on the machine for
+    # deletion, which is the exact failure this guard exists to prevent.
+    $referenced = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $readAny = $false
+    $roots = @(
+        'SOFTWARE\Microsoft\Windows\CurrentVersion\Installer\UserData'
+    )
+    foreach ($rootPath in $roots) {
+        $root = Open-RegistryView -hive 'LocalMachine' -subKey $rootPath -view 'Registry64'
+        if (-not $root) { continue }
+        try {
+            foreach ($sid in $root.GetSubKeyNames()) {
+                foreach ($branch in @('Products', 'Patches')) {
+                    $branchKey = $null
+                    try { $branchKey = $root.OpenSubKey("$sid\$branch") } catch { $branchKey = $null }
+                    if (-not $branchKey) { continue }
+                    try {
+                        foreach ($code in $branchKey.GetSubKeyNames()) {
+                            # Products keep it under InstallProperties; Patches
+                            # keep it on the patch key itself.
+                            foreach ($sub in @("$code\InstallProperties", $code)) {
+                                $k = $null
+                                try { $k = $branchKey.OpenSubKey($sub) } catch { $k = $null }
+                                if (-not $k) { continue }
+                                try {
+                                    $local = [string]$k.GetValue('LocalPackage', '')
+                                    if (-not [string]::IsNullOrWhiteSpace($local)) {
+                                        $readAny = $true
+                                        [void]$referenced.Add([System.IO.Path]::GetFileName($local))
+                                    }
+                                } finally { $k.Close() }
+                            }
+                        }
+                    } finally { $branchKey.Close() }
+                }
+            }
+        } finally { $root.Close() }
+    }
+
+    # Nothing readable means no evidence, and no evidence means no findings.
+    # An empty reference set would make EVERY cached installer look orphaned.
+    if (-not $readAny) { return $findings }
+
+    $files = @()
+    try {
+        $files = @(Get-ChildItem -LiteralPath $cacheDir -File -Force -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @('.msi', '.msp') })
+    } catch { return $findings }
+
+    # AUDIT ONLY, and this is the honest answer rather than a cautious one.
+    #
+    # The cache lives under %SystemRoot%, which Test-ProtectedDestination blocks
+    # as a restore destination - so the vault can take these files and can NEVER
+    # put them back. Measured, not assumed: a planted orphan quarantined
+    # cleanly, the entry looked correct, and the restore returned "Rejected:
+    # refusing to restore into a protected system location" with the payload
+    # stranded in the vault.
+    #
+    # Removing them anyway would mean shipping the one thing this app exists to
+    # be the alternative to - a deletion with no way back - and dressing it as a
+    # reversible one. The space is real (137 MB of 977 MB measured here) and it
+    # stays unclaimed until the restore path can honour the promise. That is a
+    # decision recorded in 7v3, not an oversight.
+    #
+    # Note what is NOT done here: relaxing the guard. The blocked list exists
+    # because writing into %SystemRoot% is how privileged execution gets
+    # planted, and a restore is still a write.
+    $protectedNote = 'Listed only. These sit inside a protected Windows folder, and Vanish will not remove anything it cannot put back - the vault refuses to restore into that location. The space is real; the promise comes first.'
+
+    foreach ($f in $files) {
+        if ($referenced.Contains($f.Name)) { continue }
+        $kind = if ($f.Extension -eq '.msp') { 'patch' } else { 'installer' }
+        $findings.Add(@{
+            id        = "msicache|$($f.Name)"
+            label     = $f.Name
+            evidence  = "cached $kind no product still references - $([math]::Round($f.Length / 1MB, 1)) MB"
+            risk      = "Moderate"
+            kind      = "file"
+            path      = $f.FullName
+            sizeBytes = [long]$f.Length
+            removable = $false
+            note      = $protectedNote
+        })
+    }
+
+    return $findings
+}
+
+# be8: firewall rules pointing at a program that is no longer on disk.
+#
+# AUDIT ONLY in this release, and the note on every finding says so. Removing
+# one means deleting a registry VALUE under FirewallPolicy\FirewallRules, which
+# needs the value-level export/restore path PATH uses (Set-PathEntries), not the
+# key-level one the vault offers today. Listing without removing is the honest
+# half: nothing else on the machine will tell you these are dead.
+#
+# THE MEASUREMENT TRAP, recorded because the first pass got it wrong: 659 rules
+# on the operator's machine, and a naive Test-Path flagged 295 of them against
+# LIVE Windows binaries. Rule program paths are stored with %SystemRoot%-style
+# variables and Test-Path does not expand them. Expanded properly, the real
+# count was 48.
+#
+# Rule 24: each finding says WHY it is dead. A rule left by a removed Windows
+# feature and a rule left by an uninstalled third-party app are not the same
+# news, and "orphaned" alone would flatten them.
+function Find-OrphanFirewallRules {
+    $findings = [System.Collections.Generic.List[object]]::new()
+
+    if (-not (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) { return $findings }
+
+    $filters = @()
+    try {
+        $filters = @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue)
+    } catch { return $findings }
+    if ($filters.Count -eq 0) { return $findings }
+
+    foreach ($filter in $filters) {
+        $program = [string]$filter.Program
+        if ([string]::IsNullOrWhiteSpace($program)) { continue }
+        if ($program -eq 'Any' -or $program -eq 'System') { continue }
+
+        # THE line the first measurement pass was missing.
+        $expanded = [System.Environment]::ExpandEnvironmentVariables($program)
+        if (Test-Path -LiteralPath $expanded -ErrorAction SilentlyContinue) { continue }
+
+        $rule = $null
+        try { $rule = $filter | Get-NetFirewallRule -ErrorAction SilentlyContinue } catch { $rule = $null }
+        if (-not $rule) { continue }
+
+        $why = Get-DeadFirewallReason -program $expanded -group ([string]$rule.Group) -displayName ([string]$rule.DisplayName)
+
+        $findings.Add(@{
+            id        = "fwrule|$($rule.Name)"
+            label     = [string]$rule.DisplayName
+            evidence  = "$why - $expanded"
+            risk      = "Safe"
+            kind      = "firewall-rule"
+            removable = $false
+            note      = "Audit only in this release. Removing a rule means deleting a registry VALUE, which needs the same export-the-whole-key-first path PATH entries use; until that ships, Vanish will not offer a removal it cannot reverse."
+            meta      = @{ ruleName = [string]$rule.Name; program = $expanded; reason = $why; enabled = [string]$rule.Enabled; direction = [string]$rule.Direction }
+        })
+    }
+
+    return $findings
+}
+
+# Rule 24 in one function: name the KIND of dead, not just the fact of it.
+function Get-DeadFirewallReason {
+    param([string]$program, [string]$group, [string]$displayName)
+
+    $haystack = "$group $displayName"
+    if ($haystack -match 'Media Center|ehome|P2P|Peer.?to.?Peer|Collaboration|Windows Meeting') {
+        return 'a Windows feature that no longer ships'
+    }
+    if ($program -match '\\Temp\\|\\AppData\\Local\\Temp\\|~') {
+        return 'a rule an installer left behind in a temp folder'
+    }
+    if ($program -match '^' + [regex]::Escape($env:SystemRoot)) {
+        return 'a Windows component that is no longer installed'
+    }
+    return 'a program that is no longer on this PC'
+}
+
+# ztl: two more dead-reference sweeps that free no space and are worth having
+# anyway, because nothing else lists them.
+#
+# (1) SharedDLLs is a reference COUNT table. A path that no longer exists is a
+#     count nothing will ever decrement.
+# (2) Ghost PnP devices are records for hardware not currently present.
+#
+# BOTH AUDIT ONLY, and the second one is the reason Rule 24 exists. 80 ghost
+# devices measured on the operator's machine, 23 of them benign VolumeSnapshot
+# records and most of the rest simply unplugged peripherals. A list that showed
+# those with the same weight as a genuinely failed device would be alarming and
+# wrong, so this classifies first and says which kind each one is.
+function Find-DeadSharedDlls {
+    $findings = [System.Collections.Generic.List[object]]::new()
+
+    $key = Open-RegistryView -hive 'LocalMachine' -subKey 'SOFTWARE\Microsoft\Windows\CurrentVersion\SharedDLLs' -view 'Registry64'
+    if (-not $key) { return $findings }
+    try {
+        foreach ($name in $key.GetValueNames()) {
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            $expanded = [System.Environment]::ExpandEnvironmentVariables($name)
+            if (Test-Path -LiteralPath $expanded -ErrorAction SilentlyContinue) { continue }
+            $count = $key.GetValue($name, 0)
+            $findings.Add(@{
+                id        = "shareddll|$name"
+                label     = $name
+                evidence  = "reference count $count for a file that is not there"
+                risk      = "Safe"
+                kind      = "shared-dll"
+                removable = $false
+                note      = "Audit only in this release. These are registry VALUES, which need the value-level export the PATH cleaner uses; they also free no space, so they are listed rather than rushed."
+                meta      = @{ path = $expanded; refCount = "$count" }
+            })
+        }
+    } finally { $key.Close() }
+
+    return $findings
+}
+
+function Find-GhostDevices {
+    $findings = [System.Collections.Generic.List[object]]::new()
+
+    if (-not (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue)) { return $findings }
+
+    $devices = @()
+    try {
+        $devices = @(Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Unknown' })
+    } catch { return $findings }
+
+    foreach ($d in $devices) {
+        $class = [string]$d.Class
+        $name  = [string]$d.FriendlyName
+        if ([string]::IsNullOrWhiteSpace($name)) { $name = [string]$d.InstanceId }
+
+        # Rule 24. A restore-point record is not a broken device.
+        $reason = if ($class -eq 'VolumeSnapshot' -or $name -match 'Volume Shadow|VolumeSnapshot') {
+            'a System Restore bookkeeping record, not hardware'
+        } elseif ($class -in @('USB', 'HIDClass', 'Bluetooth', 'WPD', 'Image', 'Media', 'AudioEndpoint')) {
+            'a peripheral that is simply not plugged in right now'
+        } elseif ($class -eq 'Volume' -or $class -eq 'DiskDrive') {
+            'a drive that is not currently attached'
+        } else {
+            'a device Windows still has a record for and cannot see'
+        }
+
+        $findings.Add(@{
+            id        = "ghostdev|$([string]$d.InstanceId)"
+            label     = $name
+            evidence  = $reason
+            risk      = "Safe"
+            kind      = "ghost-device"
+            removable = $false
+            note      = "Audit only, and deliberately so. Most of these are normal - unplugging a device is supposed to leave a record, and Windows reuses it when the device comes back. Removing them frees nothing and can force a driver reinstall on the next plug-in."
+            meta      = @{ instanceId = [string]$d.InstanceId; class = $class; reason = $reason }
+        })
+    }
+
+    return $findings
+}
+
 function Set-FindingRemovability {
     param($findings)
     foreach ($finding in @($findings)) {
@@ -6026,6 +6320,17 @@ function Invoke-CleanerScan {
             "services"      { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanServices)) } }
             "drivers"       { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanDriverPackages)) } }
             "path"          { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-DeadPathEntries)) } }
+            "installer-cache" { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanInstallerCache)) } }
+            "firewall-rules"  { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Find-OrphanFirewallRules)) } }
+            "dead-references" {
+                # ztl: two sweeps, one section. They answer the same question -
+                # "what does Windows still have a record of that is not there" -
+                # and neither is big enough to be worth its own row of UI.
+                $all = [System.Collections.Generic.List[object]]::new()
+                foreach ($f in @(Find-DeadSharedDlls)) { $all.Add($f) }
+                foreach ($f in @(Find-GhostDevices))   { $all.Add($f) }
+                return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $all) }
+            }
             "associations"  { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Set-FindingRemovability (Find-DeadAssociations))) } }
             "uwp-leftovers" {
                 $res = Find-UwpLeftovers -p $p
