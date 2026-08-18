@@ -456,6 +456,28 @@ async function checkElevation() {
 // Every control marked data-destructive is inert in Audit Mode and says why.
 function applyTierLocks() {
   document.querySelectorAll('[data-destructive="true"]').forEach((el) => {
+    // 9sy: remember the element's OWN title on first sight, in EITHER tier.
+    //
+    // This used to be stashed only in the Audit branch below, so the sequence
+    // that mattered was never covered: on a session that starts ALREADY
+    // elevated, applyTierLocks runs with isAdmin true, finds no stashed title
+    // because the Audit branch has never executed, and removeAttribute('title')
+    // deletes the authored one. Every destructive control lost its explanation
+    // at exactly the moment its action became live.
+    //
+    // The elevated real-data pass measured 0 of 46 startup action buttons
+    // carrying a title. It read as a rendering bug and is not - the markup sets
+    // them correctly and this function then strips them.
+    //
+    // Worth noting how it hid: unelevated the SAME assertion passes, because
+    // the Audit branch gives every control TIER_TOOLTIP. A test that only ever
+    // ran unelevated could not fail, and passed for a reason unrelated to the
+    // thing it names.
+    if (!('tierTitle' in el.dataset)) {
+      const authored = (el.getAttribute('title') || '').trim();
+      if (authored && authored !== TIER_TOOLTIP) el.dataset.tierTitle = authored;
+    }
+
     if (isAdmin) {
       el.classList.remove('tier-locked');
       if (el.dataset.tierTitle) {

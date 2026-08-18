@@ -94,10 +94,19 @@ app.whenReady().then(async () => {
   console.log('Startup write actions, through the IPC layer (dmu / 87u)');
   console.log('=======================================================');
 
+  // main.js resolves the tier ASYNCHRONOUSLY - it spawns scanner.ps1's
+  // check-admin and assigns currentTier in the callback (main.js:144), starting
+  // from TIER_AUDIT. Reading get-tier the instant whenReady fires therefore
+  // returns audit in an elevated process, and this suite refused itself out of
+  // the first elevated run it was ever part of. Same 3s the other IPC suites
+  // wait for the same reason.
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+
   const tier = await invoke('get-tier');
-  const resolved = (tier && (tier.tier || tier.mode)) || 'unknown';
-  console.log(`Resolved tier: ${resolved}`);
-  if (String(resolved) !== 'full') {
+  console.log(`Resolved tier: ${(tier && tier.tier) || 'unknown'} (isFullMode=${tier && tier.isFullMode})`);
+  // isFullMode, not a string compare on tier: get-tier returns BOTH, and
+  // isFullMode is the flag every other suite and the renderer gate on.
+  if (!tier || tier.isFullMode !== true) {
     console.log('');
     console.log('  This suite needs Full Mode - every action under test is a write.');
     console.log('  Re-run from an elevated shell.');
