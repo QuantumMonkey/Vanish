@@ -54,11 +54,21 @@ function nextResponse(method, fallback) {
 // every tab visit, a minutes-long re-scan after every purge - were invisible
 // precisely because nothing counted.
 const callCounts = {};
+// zl4: WHAT a channel was called with, not just how many times. Clean All is the
+// first control that fans one click out across several sections, so "it called
+// cleanerPurge twice" is not enough - the question is WHICH sections it sent,
+// and specifically that a section whose only finding is list-only was skipped
+// rather than sent as an empty purge.
+const callArgs = {};
 const scanProgressListeners = [];
 
 function stub(method, defaultValue) {
   return async (...args) => {
     callCounts[method] = (callCounts[method] || 0) + 1;
+    if (!callArgs[method]) callArgs[method] = [];
+    // Structured-cloned across the bridge, so a later mutation by the renderer
+    // cannot rewrite what the test believes was sent.
+    try { callArgs[method].push(JSON.parse(JSON.stringify(args))); } catch { callArgs[method].push(null); }
     const r = nextResponse(method, defaultValue);
     if (r && typeof r === 'object' && '__reject' in r) throw new Error(r.__reject);
     return typeof r === 'function' ? r(...args) : r;
@@ -312,7 +322,9 @@ contextBridge.exposeInMainWorld('__test', {
     scanProgressListeners.forEach((cb) => cb(payload));
   },
   callCount: (method) => callCounts[method] || 0,
+  callArgs: (method) => callArgs[method] || [],
   resetCallCounts: () => {
     Object.keys(callCounts).forEach((k) => delete callCounts[k]);
+    Object.keys(callArgs).forEach((k) => delete callArgs[k]);
   }
 });

@@ -43,6 +43,7 @@ $suites = @(
     @{ Name = "Icon set";                      Kind = "node";     Path = "test/icon-verify.js" },
     @{ Name = "Shared runtimes (ht8)";         Kind = "electron"; Path = "test/runtimes-verify.js" },
     @{ Name = "Windows updates (ag0)";         Kind = "electron"; Path = "test/updates-verify.js" },
+    @{ Name = "Missing engine (frr)";          Kind = "electron"; Path = "test/engine-missing-verify.js" },
     @{ Name = "Network attribution (bfh.1)";   Kind = "ps";       Path = "test\network-verify.ps1" },
     @{ Name = "Dead refs (7v3/be8/ztl)";       Kind = "ps";       Path = "test\dead-reference-verify.ps1" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },
@@ -56,6 +57,7 @@ $suites = @(
     @{ Name = "Startup grouping (tda)";        Kind = "electron"; Path = "test/startup-groups-verify.js" },
     @{ Name = "Column filters (5b0)";          Kind = "electron"; Path = "test/column-filter-verify.js" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
+    @{ Name = "Clean All (zl4)";               Kind = "electron-full"; Path = "test/clean-all-verify.js" },
     @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" }
 )
 
