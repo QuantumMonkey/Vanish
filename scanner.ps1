@@ -607,6 +607,19 @@ function Add-EntryClassification {
         $e | Add-Member -NotePropertyName uninstallerPath      -NotePropertyValue $uninstallerPath -Force
         $e | Add-Member -NotePropertyName actionable           -NotePropertyValue $uninstallerOk  -Force
         $e | Add-Member -NotePropertyName family               -NotePropertyValue (Get-ProductFamilyKey $e.name $e.publisher) -Force
+        # ht8: a redistributable is a shared runtime some OTHER program installed
+        # and depends on. 22 of them on the operator machine, and the reason this
+        # is a FLAG rather than a new classification is that they are already
+        # correctly classified as components - what was missing was any way to
+        # count them or see them as a group, so 22 rows of near-identical
+        # Microsoft Visual C++ entries just read as noise.
+        #
+        # INFORMATION ONLY, per the reduced Stage 13 scope. No removal is offered
+        # from this surface and none should be: knowing whether a redistributable
+        # is still needed requires reading the import tables of every binary on
+        # the machine, and without that the honest answer is that removing one
+        # may break a program that will not say why.
+        $e | Add-Member -NotePropertyName isRuntime -NotePropertyValue ([bool]($e.name -match $script:SharedRuntimePattern)) -Force
     }
 
     return $entries
@@ -638,6 +651,7 @@ function Get-InstalledApps {
             protectionReason     = $e.protectionReason
             actionable           = $e.actionable
             family               = $e.family
+            isRuntime            = $e.isRuntime
         }
     }
 

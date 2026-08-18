@@ -171,6 +171,24 @@
               </span>
             </label>
 
+            <!-- ht8: 22 near-identical "Microsoft Visual C++ ... Redistributable"
+                 rows on the operator's machine. They were never hidden - they are
+                 classified as components and always reachable - but there was no
+                 way to COUNT them or see them as one group, so they read as noise
+                 in a list of real programs. This states the number and isolates
+                 them. Information only: no uninstall is offered from here,
+                 because knowing whether a runtime is still needed means reading
+                 the import tables of every binary on the machine, and without
+                 that "safe to remove" is a guess that breaks programs silently. -->
+            <label class="components-toggle" id="runtimes-toggle" title="Shared runtimes - Visual C++, .NET, WebView2, DirectX - installed by other programs that depend on them. Listed for information; Vanish does not offer to remove these.">
+              <input type="checkbox" id="chk-only-runtimes">
+              <span class="slider"></span>
+              <span class="components-toggle-label">
+                Runtimes only
+                <span class="audit-badge" id="runtimes-count">0</span>
+              </span>
+            </label>
+
             <!-- Sorting -->
             <select class="select-custom" id="sort-selector">
               <option value="name-asc">Name (A - Z)</option>

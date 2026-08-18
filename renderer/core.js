@@ -38,6 +38,9 @@ let filterType = 'all';
 // Components are classified and counted, never dropped - this flag is how they
 // come into view.
 let showComponents = false;
+// ht8: isolate the shared runtimes. Not a hiding filter - it is the only way to
+// see 22 near-identical redistributable rows as one group rather than as noise.
+let runtimesOnly = false;
 // 7oo.7: Windows optional features are neither desktop apps nor Store apps, so
 // they were invisible to this app entirely. Loaded lazily - there is no reason
 // to pay for the query on every start when the default view excludes them.
@@ -773,7 +776,12 @@ function installDateProvenance(app) {
 // Everything the user would call an application. Components and update rows are
 // real and reachable, but they are not what "you have N applications" means.
 function visibleApps() {
-  const base = showComponents ? allApps : allApps.filter((a) => a.classification === 'application');
+  // ht8: runtimes-only overrides the components split, because every runtime IS
+  // a component - filtering to runtimes inside "applications only" would always
+  // produce an empty table and read as "you have none".
+  const base = runtimesOnly
+    ? allApps.filter((a) => a.isRuntime === true)
+    : (showComponents ? allApps : allApps.filter((a) => a.classification === 'application'));
   return showFeatures ? base.concat(windowsFeatures) : base;
 }
 
@@ -809,6 +817,11 @@ function updateDashboardStats() {
 
   const badge = document.getElementById('components-count');
   if (badge) badge.textContent = componentCount;
+
+  // ht8: the redistributable count, always on screen for the same reason the
+  // component count is - a number nobody can see is a number nobody can act on.
+  const runtimesBadge = document.getElementById('runtimes-count');
+  if (runtimesBadge) runtimesBadge.textContent = allApps.filter((a) => a.isRuntime === true).length;
 
   const featuresBadge = document.getElementById('features-count');
   if (featuresBadge) featuresBadge.textContent = featuresLoaded ? windowsFeatures.length : '?';
@@ -890,7 +903,7 @@ function updateFilterStatus(shownCount) {
   if (!row || !text || !clearBtn) return;
 
   const columnFiltered = activeColumnFilterKeys(APP_COLUMN_FILTERS).length > 0;
-  const isFiltered = filterText.trim() !== '' || filterType !== 'all' || columnFiltered;
+  const isFiltered = filterText.trim() !== '' || filterType !== 'all' || columnFiltered || runtimesOnly;
   row.classList.toggle('filtered', isFiltered);
   clearBtn.style.display = isFiltered ? '' : 'none';
   renderColumnFilterChips('apps-filter-chips', APP_COLUMN_FILTERS);
@@ -903,7 +916,16 @@ function updateFilterStatus(shownCount) {
   const hidden = showComponents ? 0 : allApps.length - applications;
 
   const notes = [];
-  if (hidden > 0) notes.push(`${hidden} component${hidden === 1 ? '' : 's'} hidden`);
+  const runtimeTotal = allApps.filter((a) => a.isRuntime === true).length;
+  // ht8: the count is stated whether or not the filter is on, because "how many
+  // redistributables are on this machine" is the question, and a number that
+  // only appears once you have already found the control answers it too late.
+  if (runtimesOnly) {
+    notes.push(`shared runtimes only - ${runtimeTotal} of ${allApps.length}`);
+  } else {
+    if (hidden > 0) notes.push(`${hidden} component${hidden === 1 ? '' : 's'} hidden`);
+    if (runtimeTotal > 0) notes.push(`${runtimeTotal} shared runtime${runtimeTotal === 1 ? '' : 's'}`);
+  }
   if (showFeatures) notes.push(`including ${windowsFeatures.length} Windows feature${windowsFeatures.length === 1 ? '' : 's'}`);
   const suffix = notes.length ? ` (${notes.join(', ')})` : '';
 
@@ -1129,6 +1151,26 @@ function setupFilters() {
   if (componentsBox) {
     componentsBox.addEventListener('change', (e) => {
       showComponents = e.target.checked;
+      // Turning components off while isolating runtimes would empty the table.
+      if (!showComponents) runtimesOnly = false;
+      const rb = document.getElementById('chk-only-runtimes');
+      if (rb) rb.checked = runtimesOnly;
+      updateDashboardStats();
+      filterAndRenderApps();
+    });
+  }
+
+  // ht8: runtimes-only toggle.
+  const runtimesBox = document.getElementById('chk-only-runtimes');
+  if (runtimesBox) {
+    runtimesBox.addEventListener('change', (e) => {
+      runtimesOnly = e.target.checked;
+      // Runtimes are components, so isolating them has to reveal them too.
+      if (runtimesOnly) {
+        showComponents = true;
+        const cb = document.getElementById('chk-show-components');
+        if (cb) cb.checked = true;
+      }
       updateDashboardStats();
       filterAndRenderApps();
     });
