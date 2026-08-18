@@ -8,6 +8,70 @@ full decision rules.
 
 ---
 
+## [0.7.0] - 2026-08-18
+
+### Added -- three more things Windows keeps and never tells you about
+
+All three appear as new sections in System Clean rather than as new panels.
+
+**Left-over Windows installers.** Windows keeps a copy of every installer it
+has ever run so that Repair and Uninstall keep working. When the program goes,
+the copy usually stays. Vanish lists the ones no installed product still
+references -- 105 cached files totalling 977 MB on the development machine, of
+which 29 (137 MB) belong to nothing.
+
+The rule is a registry cross-reference, not a guess. A cached installer that is
+still referenced is what makes Repair work for a program you still have, and no
+size, age or filename signal separates the two -- only the reference does. If
+that reference list cannot be read at all, the sweep reports nothing rather
+than treating everything as orphaned.
+
+**Firewall rules for programs that are gone.** 56 on the development machine.
+Each says which kind of dead it is: a Windows feature that no longer ships, a
+rule an installer left in a temp folder, or a program that is no longer here.
+
+**Dead references and ghost devices.** Records Windows still holds for files
+and hardware that are not present. Every one is labelled with what it actually
+is before it is shown -- 36 of the 107 found here are System Restore
+bookkeeping records, and an unplugged device leaving a record is normal, not a
+fault. A list that made those look like broken hardware would be worse than no
+list.
+
+### All three are LISTED, not removable, and that is the news
+
+Vanish will not remove anything it cannot put back. None of these three can be
+put back yet, so none of them is offered for removal, and each finding says why
+rather than being silently greyed out.
+
+For the installers the reason is specific and was found by measuring rather
+than assuming: the cache sits inside a protected Windows folder, and the
+quarantine vault refuses to restore anything into those. A planted test file
+quarantined perfectly and then could not be brought back. The 137 MB is real,
+it is identified, and it stays where it is until the restore path can honour
+the promise.
+
+The other two need a kind of undo the vault does not have yet -- they are
+single registry values rather than whole keys, the same shape the PATH cleaner
+already handles specially.
+
+### Fixed -- the vault could accept something it could never return
+
+Found while building the above, and the more important half of this release.
+
+Restoring already refused to write into protected Windows locations. Taking
+things IN did not check the same thing. So a removal from one of those
+locations reported success, produced a correct-looking quarantine entry, and
+then could never be undone -- the file sat in the vault permanently.
+
+No shipping cleaner removed from such a location, so nothing had ever
+exercised the pair; it surfaced only because the new installer sweep looks
+inside one. Quarantine now asks exactly the same question restoring does,
+through the same code rather than a second copy of the list, and refuses up
+front with a reason. A vault that can accept what it cannot return is worse
+than one that says no: the refusal costs a feature, the silence costs the file.
+
+---
+
 ## [0.6.6] - 2026-08-16
 
 ### Fixed -- two numbers that were wrong, and a test suite that could not say which
