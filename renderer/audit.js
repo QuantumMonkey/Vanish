@@ -43,18 +43,23 @@ async function loadAuditData(force = false) {
     // Fire every PowerShell query in parallel. The network read spends most of
     // its time asleep between two counter samples, so running it alongside the
     // others costs the load almost nothing in wall-clock time.
-    const [diag, startup, redundancy, network, listeners] = await Promise.all([
+    // ag0 joins the same Promise.all rather than getting its own await: the
+    // update read is a Get-HotFix plus one DISM call, and serialising it would
+    // add its whole duration to a panel people already wait on.
+    const [diag, startup, redundancy, network, listeners, updates] = await Promise.all([
       window.api.getSystemDiagnostics(),
       window.api.getStartupItems(),
       window.api.getSoftwareRedundancy(),
       window.api.getNetworkActivity(),
-      window.api.getListeners()
+      window.api.getListeners(),
+      window.api.getWindowsUpdates()
     ]);
 
     renderSysInfoCards(diag);
     renderDiskBars(diag.disks || [], diag.disksError);
     renderNetworkActivity(network);
     renderListeners(listeners);
+    renderWindowsUpdates(updates);
     renderStartupTable(startup);
     renderRedundancyGroups(redundancy);
 

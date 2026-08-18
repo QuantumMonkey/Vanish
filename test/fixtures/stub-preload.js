@@ -193,6 +193,47 @@ contextBridge.exposeInMainWorld('api', {
       }
     ]
   }),
+  // ag0. Deliberately not the easy case: one dated security update, one row
+  // Windows recorded NO install time for, and one component-store package with
+  // no KB number at all. Those three are the shapes the panel has to render
+  // without lying - a blank date must read as absent rather than as a value,
+  // and a row with no KB cannot offer the wusa handoff because there is no
+  // number to hand off.
+  getWindowsUpdates: stub('getWindowsUpdates', {
+    success: true,
+    elevated: true,
+    dismAvailable: true,
+    dismNote: null,
+    total: 3,
+    recentCount: 1,
+    recentDays: 14,
+    undatedCount: 1,
+    handoffCommand: 'wusa.exe /uninstall /kb:<number>',
+    handoffUi: 'ms-settings:windowsupdate-history',
+    updates: [
+      {
+        id: 'KB5121003', kb: 'KB5121003', title: 'Security Update', kind: 'Security update',
+        installedOn: '2026-08-14T00:00:00.0000000', installedOnNote: null,
+        source: 'servicing', state: 'Installed', removable: null,
+        removalNote: 'Removing this puts back a hole Microsoft published a fix for, and the same update will usually reinstall itself.'
+      },
+      {
+        id: 'KB5054156', kb: 'KB5054156', title: 'Update', kind: 'Cumulative update',
+        installedOn: null,
+        installedOnNote: 'Windows did not record an install time for this package.',
+        source: 'servicing', state: 'Installed', removable: null,
+        removalNote: 'A cumulative update contains every fix before it, so removing one rolls back months of work, not a day.'
+      },
+      {
+        id: 'Microsoft-Windows-LanguageFeatures-Basic-en-gb-Package', kb: null,
+        title: 'Microsoft-Windows-LanguageFeatures-Basic-en-gb-Package',
+        kind: 'Optional component',
+        installedOn: '2026-07-22T03:22:00.0000000', installedOnNote: null,
+        source: 'component-store', state: 'Installed', removable: null,
+        removalNote: 'An on-demand component such as a language pack or optional feature. Removing it is comparatively safe and it can be added again.'
+      }
+    ]
+  }),
   networkHoldState: stub('networkHoldState', { active: false, record: null }),
   networkHoldApply: stub('networkHoldApply', { success: true }),
   networkHoldRevert: stub('networkHoldRevert', { success: true }),

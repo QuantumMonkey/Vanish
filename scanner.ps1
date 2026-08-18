@@ -6059,6 +6059,246 @@ function Find-GhostDevices {
     return $findings
 }
 
+# ag0: a legible list of what Windows has installed as an update.
+#
+# UN-CUT and rescoped. The first pass cut this as redundant because Windows
+# CAN roll updates back - but the redundancy was never the rollback, it was the
+# idea of reimplementing wusa/DISM. That half stays cut and this function does
+# no removal of any kind. What Windows does badly is the LIST: Settings >
+# Windows Update > Update history > Uninstall updates is several clicks deep,
+# shows a bare KB list with no indication of what any of them is, surfaces no
+# useful install date, and never says what removing one would cost.
+#
+# TWO SOURCES, and they answer different questions:
+#   Get-HotFix  - the servicing-stack view. Few rows, each with a KB number, a
+#                 type and a date. Works UNELEVATED.
+#   DISM        - the component-store view. Hundreds of rows including the
+#                 OnDemand packs and superseded revisions Get-HotFix never
+#                 mentions. Requires Full Mode: unelevated it exits 740.
+#
+# The DISM half being unavailable is REPORTED, not silently skipped. A list
+# that quietly shrinks in Audit Mode is the same silent-filter failure this app
+# keeps fixing - the caller gets dismAvailable=false and a reason to display.
+function Get-WindowsUpdateList {
+    $updates = [System.Collections.Generic.List[object]]::new()
+    $elevated = Test-IsElevated
+
+    # --- servicing-stack view -------------------------------------------
+    $hotfixes = @()
+    try { $hotfixes = @(Get-HotFix -ErrorAction SilentlyContinue) } catch { $hotfixes = @() }
+
+    foreach ($h in $hotfixes) {
+        $kb = [string]$h.HotFixID
+        if ([string]::IsNullOrWhiteSpace($kb)) { continue }
+
+        # Get-HotFix already hands back a DateTime where it can, but it is
+        # frequently empty and occasionally a string - both go through the
+        # same guard as DISM so one screen cannot show two standards of date.
+        $when = if ($h.InstalledOn -is [datetime]) {
+            if ($h.InstalledOn -gt (Get-Date).AddDays(1)) {
+                @{ iso = $null; note = 'Windows reported an install time in the future, so it is not shown rather than shown wrongly.' }
+            } else {
+                @{ iso = ([datetime]$h.InstalledOn).ToString('o'); note = $null }
+            }
+        } else {
+            Convert-UpdateInstallTime -raw ([string]$h.InstalledOn)
+        }
+        $installed = $when.iso
+
+        $updates.Add(@{
+            id          = $kb
+            kb          = $kb
+            title       = [string]$h.Description
+            kind        = (Get-UpdateKind -description ([string]$h.Description) -name $kb)
+            installedOn = $installed
+            installedOnNote = $when.note
+            source      = 'servicing'
+            state       = 'Installed'
+            # Whether wusa can actually remove it is not knowable from here,
+            # and guessing would be the "Windows tells you only by failing"
+            # behaviour this exists to improve on. Reported as unknown.
+            removable   = $null
+            removalNote = (Get-UpdateRemovalNote -kind (Get-UpdateKind -description ([string]$h.Description) -name $kb))
+        })
+    }
+
+    # --- component-store view -------------------------------------------
+    $dismAvailable = $false
+    $dismNote = $null
+    if (-not $elevated) {
+        $dismNote = 'The component-store list needs Full Mode. Windows refuses DISM to a standard user (error 740), so this list currently shows only what the servicing stack reports - typically a handful of recent updates rather than every package on the machine.'
+    } else {
+        $raw = @()
+        try { $raw = @(& dism.exe /Online /Get-Packages 2>&1) } catch { $raw = @() }
+
+        $seen = @{}
+        foreach ($u in $updates) { $seen[$u.kb] = $true }
+
+        $current = $null
+        foreach ($line in $raw) {
+            $text = [string]$line
+            if ($text -match '^\s*Package Identity\s*:\s*(.+?)\s*$') {
+                if ($current) { $null = Add-DismPackage -updates $updates -pkg $current -seen $seen }
+                $current = @{ identity = $Matches[1]; state = ''; releaseType = ''; installTime = '' }
+                $dismAvailable = $true
+            }
+            elseif ($current -and $text -match '^\s*State\s*:\s*(.+?)\s*$')        { $current.state = $Matches[1] }
+            elseif ($current -and $text -match '^\s*Release Type\s*:\s*(.+?)\s*$') { $current.releaseType = $Matches[1] }
+            elseif ($current -and $text -match '^\s*Install Time\s*:\s*(.*?)\s*$') { $current.installTime = $Matches[1] }
+        }
+        if ($current) { $null = Add-DismPackage -updates $updates -pkg $current -seen $seen }
+
+        if (-not $dismAvailable) {
+            $dismNote = 'DISM returned nothing this run. The servicing-stack list below is still accurate as far as it goes.'
+        }
+    }
+
+    # Newest first: the reason anyone opens this screen is "what changed just
+    # before this machine started misbehaving", and that question is answered
+    # by the top of the list or not at all.
+    $sorted = @($updates | Sort-Object -Property @{ Expression = { if ($_.installedOn) { [datetime]$_.installedOn } else { [datetime]::MinValue } }; Descending = $true })
+
+    $recent = @($sorted | Where-Object {
+        $_.installedOn -and ([datetime]$_.installedOn) -gt (Get-Date).AddDays(-14)
+    })
+
+    return @{
+        success        = $true
+        updates        = @($sorted)
+        total          = $sorted.Count
+        elevated       = $elevated
+        dismAvailable  = $dismAvailable
+        dismNote       = $dismNote
+        recentCount    = $recent.Count
+        recentDays     = 14
+        # A date column that is blank for most rows needs explaining, or it
+        # reads as Vanish failing to look rather than Windows never recording.
+        # 176 of 194 on this machine - almost every staged OnDemand package.
+        undatedCount   = @($sorted | Where-Object { -not $_.installedOn }).Count
+        # THE handoff, and the only action this feature offers. Vanish never
+        # owns the removal - the UI must not imply it can reverse an update.
+        handoffCommand = 'wusa.exe /uninstall /kb:<number>'
+        handoffUi      = 'ms-settings:windowsupdate-history'
+    }
+}
+
+# ag0: turn an install time into either a real date or an honest blank.
+#
+# THIS IS c0y ALL OVER AGAIN, which is why it is a function with its own
+# guard rather than an inline cast. The entire value of this screen is
+# "installed 3 days ago" sitting next to "this machine started misbehaving 3
+# days ago". A date that is wrong does not degrade that - it inverts it.
+#
+# MEASURED on this machine: culture en-IN, short date dd-MM-yyyy, and DISM
+# emits install times in exactly that form ("22-07-2026 03:22"). Confirmed by
+# the data rather than assumed - across 280 non-empty samples the first field
+# reaches 28 and the second never exceeds 12, so the leading number is the day.
+# A bare [datetime] cast reads whatever the running culture says, and a
+# service account or a different locale silently swaps day and month.
+#
+# Two rules, both of which return NULL plus a reason rather than a guess:
+#   1. Parse with the current culture, then explicitly with dd-MM-yyyy and
+#      MM/dd/yyyy, and take the first that works.
+#   2. Reject anything in the FUTURE. An update cannot have been installed
+#      tomorrow, so a future date is proof the parse was wrong - and showing
+#      it would put an impossible row at the top of a list sorted by date.
+function Convert-UpdateInstallTime {
+    param([string]$raw)
+
+    if ([string]::IsNullOrWhiteSpace($raw)) {
+        return @{ iso = $null; note = 'Windows did not record an install time for this package.' }
+    }
+
+    $parsed = [datetime]::MinValue
+    $ok = [datetime]::TryParse($raw, [System.Globalization.CultureInfo]::CurrentCulture, [System.Globalization.DateTimeStyles]::None, [ref]$parsed)
+    if (-not $ok) {
+        foreach ($fmt in @('dd-MM-yyyy HH:mm', 'dd-MM-yyyy', 'MM/dd/yyyy HH:mm', 'MM/dd/yyyy', 'yyyy-MM-dd HH:mm')) {
+            if ([datetime]::TryParseExact($raw, $fmt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::None, [ref]$parsed)) {
+                $ok = $true; break
+            }
+        }
+    }
+
+    if (-not $ok) {
+        return @{ iso = $null; note = "Windows reported an install time this build could not read ('$raw')." }
+    }
+
+    # Tomorrow is not a date anything was installed on.
+    if ($parsed -gt (Get-Date).AddDays(1)) {
+        return @{ iso = $null; note = "Windows reported an install time in the future ('$raw'), so it is not shown rather than shown wrongly." }
+    }
+
+    return @{ iso = $parsed.ToString('o'); note = $null }
+}
+
+# Split out so both the hotfix and DISM paths label a row the same way.
+function Get-UpdateKind {
+    param([string]$description, [string]$name)
+    $all = "$description $name"
+    if ($all -match 'Security')                    { return 'Security update' }
+    if ($all -match 'Cumulative')                  { return 'Cumulative update' }
+    if ($all -match 'Driver')                      { return 'Driver update' }
+    if ($all -match '\.NET|NetFx')                 { return '.NET update' }
+    if ($all -match 'Defender')                    { return 'Defender update' }
+    if ($all -match 'OnDemand|Language|FOD')       { return 'Optional component' }
+    if ($all -match 'Servicing|SSU')               { return 'Servicing stack update' }
+    if ($all -match 'Hotfix')                      { return 'Hotfix' }
+    return 'Update'
+}
+
+# The cost line. Rule 24 applied to updates: "removable" is not the useful
+# fact - what it costs you is.
+function Get-UpdateRemovalNote {
+    param([string]$kind)
+    switch ($kind) {
+        'Security update'        { return 'Removing this puts back a hole Microsoft published a fix for, and the same update will usually reinstall itself. Do this only to test whether it caused a specific problem, and put it back afterwards.' }
+        'Servicing stack update' { return 'Servicing stack updates generally cannot be removed at all. Windows will refuse rather than explain.' }
+        'Cumulative update'      { return 'A cumulative update contains every fix before it, so removing one rolls back months of work, not a day. Many are not removable at all.' }
+        'Driver update'          { return 'Roll a driver back from Device Manager rather than here - it keeps the previous version and can put it back.' }
+        'Optional component'     { return 'An on-demand component such as a language pack or optional feature. Removing it is comparatively safe and it can be added again.' }
+        default                  { return 'Removing an update is a diagnostic step, not maintenance. If it does not fix the problem, put it back.' }
+    }
+}
+
+# One DISM package -> one row, unless the servicing stack already named it.
+function Add-DismPackage {
+    param($updates, $pkg, $seen)
+
+    $identity = [string]$pkg.identity
+    if ([string]::IsNullOrWhiteSpace($identity)) { return }
+
+    # Superseded revisions are history, not what is on the machine now. Listing
+    # them would triple the list with rows the user cannot act on.
+    if ([string]$pkg.state -match 'Superseded') { return }
+
+    $kb = $null
+    if ($identity -match '(KB\d{6,})') { $kb = $Matches[1] }
+    if ($kb -and $seen.ContainsKey($kb)) { return }   # already listed by Get-HotFix
+
+    $when = Convert-UpdateInstallTime -raw ([string]$pkg.installTime)
+    $installed = $when.iso
+
+    # The identity is a package name, not a title. Trim it to the readable
+    # part rather than showing the publisher hash and architecture.
+    $title = ($identity -split '~')[0]
+
+    $kind = Get-UpdateKind -description ([string]$pkg.releaseType) -name $identity
+    if ($kb) { $seen[$kb] = $true }
+
+    $updates.Add(@{
+        id          = $identity
+        kb          = $kb
+        title       = $title
+        kind        = $kind
+        installedOn = $installed
+        installedOnNote = $when.note
+        source      = 'component-store'
+        state       = [string]$pkg.state
+        removable   = $null
+        removalNote = (Get-UpdateRemovalNote -kind $kind)
+    })
+}
+
 function Set-FindingRemovability {
     param($findings)
     foreach ($finding in @($findings)) {
@@ -6560,6 +6800,9 @@ if ($Action) {
             # passes and a registry read. Deliberately callable in Audit Mode,
             # because "what did that installer change" is an audit question.
             Get-InstallSnapshot | ConvertTo-Json -Depth 5 -Compress
+        }
+        "get-windows-updates" {
+            Get-WindowsUpdateList | ConvertTo-Json -Depth 6 -Compress
         }
         "cleaner-scan" {
             Invoke-CleanerScan -p $Params | ConvertTo-Json -Depth 7 -Compress

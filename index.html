@@ -428,6 +428,35 @@
               </div>
             </div>
 
+            <!-- ag0: Windows updates, as a legible list.
+                 Windows CAN roll updates back; what it does badly is telling you
+                 what they are. Settings > Windows Update > Update history >
+                 Uninstall updates is several clicks deep, shows a bare KB list
+                 with no indication of what any entry is, and never says what
+                 removing one costs. We build the list; the removal stays
+                 Windows' own, through wusa. -->
+            <div class="audit-section" id="audit-updates-section">
+              <div class="audit-section-title">
+                <i class="fa-solid fa-clock"></i> Windows updates, in plain words
+                <span class="audit-badge" id="audit-updates-badge" style="display:none;">checking</span>
+              </div>
+              <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 4px;">
+                What Windows has installed, what kind of thing each one is, and when. Sorted newest
+                first, because the question people actually open this screen with is
+                &ldquo;what changed just before this started going wrong&rdquo;.
+              </div>
+              <div class="panel-inline-note" id="audit-updates-note">
+                Read-only. Vanish does not remove updates and will not pretend it can reverse one
+                &ndash; that is Windows' own job, through <span class="mono">wusa.exe</span> or the
+                Settings page, and both are one click away on any row. Whether a given update can
+                be removed at all is something Windows reveals only by refusing, so this list says
+                what removing one would cost rather than promising it will work.
+              </div>
+              <div id="audit-updates-body">
+                <!-- injected by renderer -->
+              </div>
+            </div>
+
             <!-- Section: Startup Items -->
             <div class="audit-section">
               <div class="audit-section-title">
@@ -1435,6 +1464,7 @@
   <script src="renderer/settings-about.js"></script>
   <script src="renderer/wizard.js"></script>
   <script src="renderer/audit.js"></script>
+  <script src="renderer/updates.js"></script>
   <script src="renderer/quarantine-tasks.js"></script>
   <script src="renderer/queue-clean.js"></script>
   <script src="renderer/force-tour.js"></script>

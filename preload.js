@@ -73,6 +73,7 @@ contextBridge.exposeInMainWorld('api', {
   // anything on this machine is at all. Read-only, no network I/O.
   getNetworkActivity: (params) => ipcRenderer.invoke('get-network-activity', params),
   getListeners: () => ipcRenderer.invoke('get-listeners'),
+  getWindowsUpdates: () => ipcRenderer.invoke('get-windows-updates'),
   networkSpeedTest: () => ipcRenderer.invoke('network-speedtest'),
 
   // kp0 - the one deliberate exception: a single ICMP echo, only on an

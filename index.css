@@ -3451,3 +3451,66 @@ input:checked + .slider:before {
 }
 #process-filter-bar { padding: 0 20px 8px; }
 #startup-filter-bar { padding: 0 0 8px; }
+
+/* --- ag0: Windows update list ------------------------------------------- */
+.update-caption {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.update-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  background: var(--bg-dark-card);
+  margin-bottom: 8px;
+}
+/* min-width:0 is load-bearing on every flex child that holds text in this
+   app - without it a long package identity refuses to wrap and pushes the
+   date and button off the panel. Same fix as the details panel (5z5) and
+   the All Programs overflow. */
+.update-row-main { flex: 1; min-width: 0; }
+.update-row-side {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.update-kb {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-white);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.update-kind {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--text-gray);
+  border: 1px solid var(--border-glass-active);
+  border-radius: 6px;
+  padding: 1px 7px;
+}
+.update-title {
+  font-size: 11.5px;
+  color: var(--text-gray);
+  margin-top: 3px;
+  word-break: break-word;
+}
+.update-cost {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 5px;
+  line-height: 1.5;
+}
+.update-when { font-size: 11.5px; color: var(--text-gray); white-space: nowrap; }
+/* A date Windows never recorded is styled as ABSENT, not as a value. It must
+   not be mistakable for a real date at a glance (c0y). */
+.update-nodate { color: var(--text-muted); font-style: italic; }
+.update-nokb { color: var(--text-muted); font-weight: 400; }

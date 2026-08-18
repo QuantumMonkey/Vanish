@@ -1182,6 +1182,19 @@ ipcMain.handle('network-speedtest', async () => {
   }
 });
 
+// ag0: read-only, and reachable in Audit Mode on purpose. 'what did Windows
+// install and when' is an audit question; gating it behind elevation would
+// make the honest answer available only to users who had already granted the
+// app more power than the answer needs. The DISM half genuinely does require
+// Full Mode and the payload says so rather than quietly returning a shorter list.
+ipcMain.handle('get-windows-updates', async () => {
+  try {
+    return await runPowerShell('get-windows-updates', {});
+  } catch (error) {
+    return { success: false, error: error.message, updates: [] };
+  }
+});
+
 ipcMain.handle('get-listeners', async () => {
   try {
     return await runPowerShell('get-listeners', {});
