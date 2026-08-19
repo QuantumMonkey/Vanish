@@ -12,9 +12,27 @@ Set-Location $root
 # 28-suite run, the Summary block kept only the counts, and re-running the
 # suite alone passed 51/0. A failure you cannot name is a failure everyone
 # learns to re-run instead of read.
-$logDir = Join-Path $PSScriptRoot "logs"
+# PER MACHINE, and this is not tidiness - it is a bug that destroyed real
+# evidence on 2026-08-19.
+#
+# test\logs lives INSIDE the repo folder, and Windows Sandbox maps that folder
+# read-write from the host. So the sandbox's logs and the host's logs were the
+# same files. The sandbox produced ten failures worth diagnosing; a routine
+# `npm test` on the host minutes later hit the wipe below and overwrote every
+# one of them with its own output - which then read as a set of clean passes and
+# nearly sent us chasing a contradiction between the summary and the logs.
+#
+# Keyed by computer name because that is what actually differs between the host
+# and the VM, and the wipe now only clears THIS machine's directory. Two
+# machines sharing one checkout can no longer erase each other.
+$logDir = Join-Path (Join-Path $PSScriptRoot "logs") $env:COMPUTERNAME
 if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 Get-ChildItem -LiteralPath $logDir -Filter *.log -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
+
+# Stray logs from before the per-machine split, so an old flat set cannot be
+# mistaken for this run's.
+Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "logs") -Filter *.log -ErrorAction SilentlyContinue |
+    Remove-Item -Force -ErrorAction SilentlyContinue
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 

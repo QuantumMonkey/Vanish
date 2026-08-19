@@ -24,6 +24,7 @@ function Emit($text) { $lines.Add([string]$text); Write-Host $text }
 Emit ''
 Emit '=== Vanish verification report ==================================='
 Emit ("collected  : {0}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'))
+Emit ("machine    : {0}   <- host and sandbox write separate log dirs" -f $env:COMPUTERNAME)
 
 # --- what was running ------------------------------------------------------
 $pkgPath = Join-Path $root 'package.json'
@@ -101,7 +102,17 @@ if ($candidates.Count -eq 0) {
 # --- the last automated run ------------------------------------------------
 Emit ''
 Emit '--- last npm test summary -----------------------------------------'
-$logDir = Join-Path $root 'test\logs'
+# Per machine, matching run-all.ps1. The flat directory was shared with the host
+# through the sandbox's mapped folder, so a host run could overwrite the VM's
+# logs - which happened, and briefly made a sandbox run look like clean passes.
+$logDir = Join-Path (Join-Path $root 'test\logs') $env:COMPUTERNAME
+if (-not (Test-Path $logDir)) {
+    # Fall back to the flat layout so this still reports something useful when
+    # reading logs written by an older build.
+    $flat = Join-Path $root 'test\logs'
+    if (Test-Path $flat) { $logDir = $flat }
+}
+Emit ("log dir : {0}" -f $logDir)
 if (Test-Path $logDir) {
     $logs = @(Get-ChildItem $logDir -Filter *.log -ErrorAction SilentlyContinue)
     $totalPass = 0; $totalFail = 0; $notRun = @()
