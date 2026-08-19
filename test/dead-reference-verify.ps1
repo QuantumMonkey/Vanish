@@ -76,11 +76,29 @@ if ($udRoot) {
     $udRoot.Close()
 }
 
-Assert-True ($referenced.Count -gt 0) "this machine has referenced installer packages to protect ($($referenced.Count))"
+# A CLEAN MACHINE HAS ZERO REFERENCES, and that is not a failure - it is the
+# case the sweep's own guard exists for. Found on Windows Sandbox 2026-08-19,
+# where Installer\UserData holds no LocalPackage values at all because nothing
+# has been installed by MSI. The previous version asserted
+# '$referenced.Count -gt 0' as though every machine must have some, which made
+# a correct empty result look like a defect.
+#
+# So the two branches are asserted separately, because they defend different
+# things and only one of them can apply on any given machine.
+if ($referenced.Count -eq 0) {
+    Write-Host '  SKIP  no referenced installer packages on this machine - nothing to protect' -ForegroundColor Yellow
+    # THE SAFETY PROPERTY, and on this kind of machine it is the ONLY one that
+    # matters: with no reference data readable, the sweep must return NOTHING
+    # rather than treating every cached installer as an orphan. Getting this
+    # wrong would propose deleting every .msi on a fresh Windows install.
+    Assert-True ($findings.Count -eq 0) "with no reference data readable the sweep proposes NOTHING, rather than treating every cached installer as an orphan (got $($findings.Count))"
+} else {
+    Assert-True ($referenced.Count -gt 0) "this machine has referenced installer packages to protect ($($referenced.Count))"
 
-# THE assertion the whole feature rests on.
-$violations = @($findings | Where-Object { $referenced.Contains([string]$_.label) })
-Assert-True ($violations.Count -eq 0) "no file still referenced by an installed product is proposed ($($violations.Count) violation(s))"
+    # THE assertion the whole feature rests on.
+    $violations = @($findings | Where-Object { $referenced.Contains([string]$_.label) })
+    Assert-True ($violations.Count -eq 0) "no file still referenced by an installed product is proposed ($($violations.Count) violation(s))"
+}
 
 Assert-True (
     ($findings.Count -eq 0) -or (@($findings | Where-Object { $_.kind -eq 'file' }).Count -eq $findings.Count)

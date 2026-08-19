@@ -190,7 +190,34 @@ app.whenReady().then(async () => {
   // --- NFR-04 audit trail ------------------------------------------------
   console.log('');
   console.log('NFR-04: every destructive act left an audit trail');
-  const oplogPath = path.join(app.getPath('userData'), 'oplog.jsonl');
+  // ASK THE APP WHERE ITS OPLOG IS. Do not rebuild the path here.
+  //
+  // This line used to be path.join(app.getPath('userData'), 'oplog.jsonl') -
+  // the PRE-SEC-3 location, before state moved into a 'vanish-state'
+  // subdirectory. It passed on the development machine for the worst possible
+  // reason: a leftover oplog.jsonl from before that migration was still sitting
+  // at the old path, frozen on 2026-08-03. So these four assertions - the ones
+  // that claim every destructive act left an audit trail - were reading a file
+  // fifteen days stale and finding quarantine/restore/delete entries in it,
+  // while the purges this suite had just performed went to a file it never
+  // opened.
+  //
+  // A clean Windows Sandbox has no such leftover, so it failed there with ENOENT
+  // and that is how it was found (2026-08-19). Green for a reason unrelated to
+  // what it measures is this repo's recurring defect, and a hardcoded path is
+  // how it got in.
+  //
+  // get-app-info reports the store's own oplogPath, so this cannot drift again.
+  const info = await invoke('get-app-info');
+  const oplogPath = info && info.oplogPath;
+  assert(
+    typeof oplogPath === 'string' && oplogPath.length > 0,
+    `the app reports where its oplog lives (got '${oplogPath}')`
+  );
+  assert(
+    fs.existsSync(oplogPath),
+    `and that file exists - this run has just written to it (${oplogPath})`
+  );
   const lines = fs
     .readFileSync(oplogPath, 'utf8')
     .trim()

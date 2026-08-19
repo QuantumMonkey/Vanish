@@ -71,4 +71,28 @@ Write-Host " manual steps (launch app, run npm start, etc)." -ForegroundColor Ye
 Write-Host "=======================================================" -ForegroundColor Yellow
 Write-Host ""
 
-notepad "C:\Users\WDAGUtilityAccount\Desktop\test folder\vanish-uninstaller\test\sandbox\VERIFICATION-CHECKLIST.md"
+# NOT notepad. The Windows Sandbox image does not ship it - this line threw
+# 'The term notepad is not recognized' on 2026-08-19 and the checklist never
+# opened, which on a machine whose whole purpose is a manual checklist is the
+# one failure that matters. Try the editors an image might have, and if none of
+# them exist PRINT the file, because the point is that the operator can read it.
+$checklist = "C:\Users\WDAGUtilityAccount\Desktop\test folder\vanish-uninstaller\test\sandbox\VERIFICATION-CHECKLIST.md"
+$opened = $false
+foreach ($editor in @('notepad.exe', 'write.exe', 'wordpad.exe')) {
+    if (Get-Command $editor -ErrorAction SilentlyContinue) {
+        Start-Process $editor -ArgumentList "`"$checklist`"" -ErrorAction SilentlyContinue
+        $opened = $true
+        break
+    }
+}
+if (-not $opened) {
+    Write-Host "No text editor in this Sandbox image - printing the checklist instead." -ForegroundColor Yellow
+    Write-Host ""
+    Get-Content -LiteralPath $checklist | ForEach-Object { Write-Host $_ }
+    Write-Host ""
+    Write-Host "(also at: $checklist)" -ForegroundColor DarkGray
+}
+
+Write-Host ""
+Write-Host "When you are done, run this and paste the output back:" -ForegroundColor Cyan
+Write-Host "  powershell -NoProfile -ExecutionPolicy Bypass -File test\sandbox\collect-report.ps1" -ForegroundColor Cyan
