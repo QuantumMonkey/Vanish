@@ -23,7 +23,19 @@ function Invoke-Engine {
     $b64  = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
     $out  = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scanner -Action $action -ParamsBase64 $b64
     if (-not $out) { throw "Engine returned no output for '$action'." }
-    return ($out -join "`n") | ConvertFrom-Json
+    # 8ok: stdout is supposed to carry one JSON document and nothing else, but
+    # powershell.exe writes the WARNING, VERBOSE and DEBUG streams to STDOUT -
+    # only errors go to stderr. One cmdlet warning inside the engine therefore
+    # used to take the whole suite down with a raw ConvertFrom-Json exception
+    # and no Result line, which is how bfh.1 came back as "not run" rather than
+    # as "broke, and here is what it saw". Report what actually arrived.
+    # The engine-side fix is the preference block in scanner.ps1's preamble.
+    $text = ($out -join "`n")
+    try { return $text | ConvertFrom-Json }
+    catch {
+        $head = if ($text.Length -gt 300) { $text.Substring(0, 300) + '...' } else { $text }
+        throw "Engine output for '$action' was not JSON: $($_.Exception.Message)`nOutput began: $head"
+    }
 }
 
 Write-Host ""

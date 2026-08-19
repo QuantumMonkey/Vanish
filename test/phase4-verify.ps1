@@ -26,7 +26,19 @@ function Invoke-Engine {
     $b64  = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
     $out  = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scanner -Action $action -ParamsBase64 $b64
     if (-not $out) { throw "Engine returned no output for '$action'." }
-    return ($out -join "`n") | ConvertFrom-Json
+    # 8ok: stdout is supposed to carry one JSON document and nothing else, but
+    # powershell.exe writes the WARNING, VERBOSE and DEBUG streams to STDOUT -
+    # only errors go to stderr. One cmdlet warning inside the engine therefore
+    # used to take the whole suite down with a raw ConvertFrom-Json exception
+    # and no Result line, which is how bfh.1 came back as "not run" rather than
+    # as "broke, and here is what it saw". Report what actually arrived.
+    # The engine-side fix is the preference block in scanner.ps1's preamble.
+    $text = ($out -join "`n")
+    try { return $text | ConvertFrom-Json }
+    catch {
+        $head = if ($text.Length -gt 300) { $text.Substring(0, 300) + '...' } else { $text }
+        throw "Engine output for '$action' was not JSON: $($_.Exception.Message)`nOutput began: $head"
+    }
 }
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -188,11 +200,31 @@ try {
     Write-Host ""
     Write-Host "TASK-15b PATH cleaner (REQ-15)" -ForegroundColor Cyan
 
+    # This block writes to the REAL user PATH, so it reads and restores the RAW
+    # value through the same DoNotExpandEnvironmentNames route the engine uses.
+    # Get-ItemProperty EXPANDS a REG_EXPAND_SZ and the old restore wrote that
+    # expanded text back - on any machine whose PATH contains %USERPROFILE% the
+    # suite permanently flattened it while reporting a clean pass.
     $userPathKey = "HKCU:\Environment"
-    $originalPath = (Get-ItemProperty -Path $userPathKey -Name Path -ErrorAction SilentlyContinue).Path
+    $envKey = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    $originalPath = $envKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
+    $originalKind = if ($null -ne $originalPath) { $envKey.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
     $deadDir = "C:\Vanish\Definitely\Missing\bin"
-    $newPath = if ($originalPath) { "$originalPath;$deadDir" } else { $deadDir }
-    Set-ItemProperty -Path $userPathKey -Name Path -Value $newPath
+
+    # 5l0: the fixture plants an EMPTY element as well as the dead directory,
+    # and $survivors is the exact string the cleaner must leave behind.
+    # Set-PathEntries used to delete every whitespace-only element as a side
+    # effect of removing something else - an edit Find-DeadPathEntries had
+    # already refused to propose, so nobody ever consented to it - and then
+    # reported the list's total shrinkage as removedCount. That is why the
+    # sandbox saw "dead entry gone from the live PATH" pass while both the
+    # byte-identity assertion and the count failed on the same write.
+    #
+    # Planted rather than borrowed from the machine: the host PATH has no empty
+    # element, so on the host this regression exists only if the test puts it
+    # there.
+    $survivors = if ($originalPath) { "$originalPath;" } else { "" }
+    $envKey.SetValue('Path', "$survivors;$deadDir", $originalKind)
 
     try {
         $pathScan = Invoke-Engine "cleaner-scan" @{ cleaner = "path" }
@@ -206,17 +238,24 @@ try {
         # Live directories must not be proposed.
         Assert-True (@($pathScan.findings | Where-Object { Test-Path $_.label }).Count -eq 0) "no existing directory is ever flagged as dead"
 
+        # Nor may the empty element be. The scanner filters whitespace-only
+        # elements out before deciding what is dead; the writer has to honour
+        # the same boundary.
+        Assert-True (@($pathScan.findings | Where-Object { [string]::IsNullOrWhiteSpace($_.label) }).Count -eq 0) "an empty PATH element is never proposed as a finding"
+
         if ($isAdmin) {
             $write = Invoke-Engine "set-path-entries" @{ scope = "User"; remove = @($deadDir) }
-            Assert-True ($write.success -eq $true)     "PATH write-back succeeded"
-            Assert-True ($write.removedCount -eq 1)    "exactly one entry removed"
-            $afterPath = (Get-ItemProperty -Path $userPathKey -Name Path).Path
+            Assert-True ($write.success -eq $true)       "PATH write-back succeeded"
+            Assert-True ($write.removedCount -eq 1)      "exactly one entry removed"
+            Assert-True (@($write.notFound).Count -eq 0) "nothing we asked to remove was reported missing"
+            $afterPath = $envKey.GetValue('Path', $null, [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
             Assert-True ($afterPath -notmatch [regex]::Escape($deadDir)) "dead entry gone from the live PATH"
-            Assert-True ($afterPath -eq $originalPath) "every surviving entry is byte-identical to the original PATH"
+            Assert-True ($afterPath -eq $survivors) "every surviving entry is byte-identical, including the empty element nobody asked us to remove"
         }
     } finally {
         if ($null -eq $originalPath) { Remove-ItemProperty -Path $userPathKey -Name Path -ErrorAction SilentlyContinue }
-        else { Set-ItemProperty -Path $userPathKey -Name Path -Value $originalPath }
+        else { $envKey.SetValue('Path', $originalPath, $originalKind) }
+        $envKey.Close()
     }
 
     # ==================================================================

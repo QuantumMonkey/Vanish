@@ -8,6 +8,56 @@ full decision rules.
 
 ---
 
+## [Unreleased]
+
+### Fixed -- three things that were telling the truth about the wrong subject
+
+All three came out of the Windows Sandbox run of 2026-08-19, which finished
+with five failures and one suite that produced no result at all. None of them
+reproduced on the development machine, and all three are the same shape: an
+answer delivered confidently about something other than what it claimed.
+
+**The PATH cleaner removed entries nobody had proposed** (`5l0`). The scan
+deliberately skips empty PATH elements -- it never offers one as a finding, so
+nobody can consent to removing one. The writer deleted them anyway, as a side
+effect of removing something else, and then reported how much shorter the list
+had got as though that number were "entries you asked me to remove". On a PATH
+ending in `;` those are different numbers. It now removes exactly what it was
+given, leaves every other element byte-identical including empty ones, counts
+only what it actually matched, and reports anything it was asked for and could
+not find. The audit trail records the engine's real count rather than the
+number the UI requested.
+
+**A single cmdlet warning could break any engine reply** (`8ok`). `powershell.exe`
+sends only the error stream to stderr -- warnings, verbose and debug records go
+to stdout, which is where the JSON payload lives. One warning from one cmdlet
+therefore prefixed `WARNING: ...` to a valid result, and Vanish told the user
+"the scanning engine returned something unexpected" about a feature that had
+worked perfectly. Seen for real in Windows Sandbox, where the network activity
+read warned and the whole suite reading it died mid-run. The engine now
+silences those streams in its preamble, before any cmdlet can run; scan
+progress keeps its own channel on stderr, as it always had.
+
+**A security regression test was describing a machine it was not running on**
+(`bnj`). The SEC-3 check proves that a data directory still *owned* by the
+interactive user is not called protected, however good its DACL looks. The
+fixture assumed the scratch tree would come out owned by that user, which is
+not true where the account is an administrator and the machine hands ownership
+to the Administrators group -- Windows Sandbox exactly. The verdict there was
+correct and the test failed anyway. It now measures the owner it actually got,
+prints it, and asserts the regression only where the premise holds, asserting
+the positive case where it does not. Nothing is weakened where it does hold.
+
+Also: the sandbox setup script no longer appends node to an empty user PATH
+with a trailing separator, which is what planted the empty element that
+surfaced the first bug; the PowerShell suites report the offending output when
+an engine reply is not JSON, instead of dying with a raw parser exception and
+no result line; and the PATH suite now reads and restores the raw registry
+value, having previously written expanded `%VARIABLE%` text back over the
+machine's own PATH while reporting a clean pass.
+
+---
+
 ## [0.8.0] - 2026-08-18
 
 ### Added -- Windows updates, in plain words

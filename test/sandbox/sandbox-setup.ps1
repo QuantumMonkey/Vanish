@@ -23,7 +23,16 @@ try {
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     if (-not $userPath) { $userPath = '' }
     if ($userPath -notlike "*$nodeDir*") {
-        [Environment]::SetEnvironmentVariable('Path', "$nodeDir;$userPath", 'User')
+        # No trailing separator. The User PATH is empty in a fresh Sandbox,
+        # so the old form left the value ending in ";" - an EMPTY final PATH
+        # element that the host does not have. The cleaner suites were being
+        # handed a different machine to test than the one they pass on.
+        #
+        # It found a real bug rather than a false alarm (5l0: the writer was
+        # deleting empty elements the scanner had refused to propose), but a
+        # setup script should still not be inventing its own fixtures.
+        $combined = if ($userPath) { "$nodeDir;$userPath" } else { $nodeDir }
+        [Environment]::SetEnvironmentVariable('Path', $combined, 'User')
     }
 } catch {
     Write-Host "Could not persist node on PATH for new windows: $($_.Exception.Message)" -ForegroundColor Yellow

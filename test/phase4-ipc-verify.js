@@ -181,7 +181,15 @@ app.whenReady().then(async () => {
     const originalPath = ps(
       `(Get-Item -LiteralPath 'HKCU:\\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')`
     );
-    ps(`Set-ItemProperty -LiteralPath 'HKCU:\\Environment' -Name Path -Value '${originalPath};${DEAD_DIR}'`);
+
+    // 5l0: plant an EMPTY element alongside the dead directory. `survivors` is
+    // the exact string the purge must leave behind - the cleaner may remove the
+    // one entry it was given and nothing else. Set-PathEntries used to strip
+    // every whitespace-only element as well, which no scan had proposed and no
+    // user had consented to; the sandbox caught it as a byte-identity failure
+    // while the dead entry itself came out correctly.
+    const survivors = originalPath ? `${originalPath};` : '';
+    ps(`Set-ItemProperty -LiteralPath 'HKCU:\\Environment' -Name Path -Value '${survivors};${DEAD_DIR}'`);
 
     const pathScan = await invoke('cleaner-scan', { cleaner: 'path' });
     const pathFinding = pathScan.findings.find((f) => f.label === DEAD_DIR);
@@ -194,7 +202,10 @@ app.whenReady().then(async () => {
       `(Get-Item -LiteralPath 'HKCU:\\Environment').GetValue('Path', '', 'DoNotExpandEnvironmentNames')`
     );
     assert(!afterPath.includes(DEAD_DIR), 'dead entry removed from the live PATH');
-    assert(afterPath === originalPath, 'the surviving PATH is byte-identical to the original');
+    assert(
+      afterPath === survivors,
+      'the surviving PATH is byte-identical, including the empty element nobody asked us to remove'
+    );
 
     const vault2 = await invoke('vault-list');
     const pathEntry = vault2.entries.find((e) => e.id === pathPurge.perScope[0].entryId);

@@ -22,7 +22,19 @@ function Invoke-Engine {
     $b64  = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
     $out  = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scanner -Action $action -ParamsBase64 $b64
     if (-not $out) { throw "Engine returned no output for '$action'." }
-    return ($out -join "`n") | ConvertFrom-Json
+    # 8ok: stdout is supposed to carry one JSON document and nothing else, but
+    # powershell.exe writes the WARNING, VERBOSE and DEBUG streams to STDOUT -
+    # only errors go to stderr. One cmdlet warning inside the engine therefore
+    # used to take the whole suite down with a raw ConvertFrom-Json exception
+    # and no Result line, which is how bfh.1 came back as "not run" rather than
+    # as "broke, and here is what it saw". Report what actually arrived.
+    # The engine-side fix is the preference block in scanner.ps1's preamble.
+    $text = ($out -join "`n")
+    try { return $text | ConvertFrom-Json }
+    catch {
+        $head = if ($text.Length -gt 300) { $text.Substring(0, 300) + '...' } else { $text }
+        throw "Engine output for '$action' was not JSON: $($_.Exception.Message)`nOutput began: $head"
+    }
 }
 
 # The SEC-3 block deliberately applies a restrictive DACL to a scratch
@@ -86,11 +98,42 @@ try {
     $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($users,  [System.Security.AccessControl.FileSystemRights]::ReadAndExecute, $inh, $none, $allow)))
     Set-Acl -LiteralPath $aclWork -AclObject $acl -ErrorAction Stop
 
+    # bnj: the regression needs the fixture to be OWNED by a principal that
+    # Test-VanishDataDirAcl does not trust. For an interactive user that is the
+    # normal outcome, but it is not universal: when the creating account is an
+    # administrator and the machine's "default owner for objects created by
+    # members of the Administrators group" policy names the GROUP, the tree
+    # comes out owned by S-1-5-32-544 - which the check trusts, correctly.
+    # Windows Sandbox is exactly that machine (WDAGUtilityAccount is an admin),
+    # and this block reported two FAILs there for a fixture it had never
+    # actually built.
+    #
+    # So measure the premise, say what it was, and assert the regression only
+    # where it can exist. Nothing is weakened where it does: on the dev host
+    # the same two assertions run, and where it does not, the positive case is
+    # asserted instead of nothing.
+    $ownerTrusted   = @('S-1-5-32-544', 'S-1-5-18')
+    $fixtureOwners  = @()
+    foreach ($obj in @($aclWork, (Join-Path $aclWork "vault"), (Join-Path $aclWork "vault\manifest.json"))) {
+        if (-not (Test-Path -LiteralPath $obj)) { continue }
+        $fixtureOwners += (Get-Acl -LiteralPath $obj).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+    }
+    $fixtureOwners   = @($fixtureOwners | Select-Object -Unique)
+    $untrustedOwners = @($fixtureOwners | Where-Object { $ownerTrusted -notcontains $_ })
+
     $ownerVerdict = Invoke-Engine "check-data-dir" @{ path = $aclWork }
     Assert-True (@($ownerVerdict.nonAdminWriters).Count -eq 0) "the DACL alone shows no non-administrator writer"
     Assert-True ($ownerVerdict.inherited -eq $false)           "the DACL alone looks protected"
-    Assert-True (@($ownerVerdict.foreignOwners).Count -gt 0)   "a child still owned by the interactive user is reported"
-    Assert-True ($ownerVerdict.protected -eq $false)           "a user-owned subtree is NOT called protected (the SEC-3 false positive)"
+
+    Write-Host ("  (fixture owned by {0})" -f ($fixtureOwners -join ', ')) -ForegroundColor DarkGray
+    if ($untrustedOwners.Count -gt 0) {
+        Assert-True (@($ownerVerdict.foreignOwners).Count -gt 0) "a child still owned by the interactive user is reported"
+        Assert-True ($ownerVerdict.protected -eq $false)         "a user-owned subtree is NOT called protected (the SEC-3 false positive)"
+    } else {
+        Write-Host "  SKIP  every fixture object came out owned by a principal this check trusts by design, so the SEC-3 false positive cannot be reproduced on this machine" -ForegroundColor Yellow
+        Assert-True (@($ownerVerdict.foreignOwners).Count -eq 0) "no foreign owner is invented where there is none"
+        Assert-True ($ownerVerdict.protected -eq $true)          "and the verdict is protected, which is the correct answer for what is actually on disk"
+    }
 } finally {
     Remove-TestTree $aclWork
 }

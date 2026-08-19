@@ -26,7 +26,19 @@ function Invoke-Engine {
     $b64  = [System.Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
     $out  = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $scanner -Action $action -ParamsBase64 $b64
     if (-not $out) { throw "Engine returned no output for '$action'." }
-    return ($out -join "`n") | ConvertFrom-Json
+    # 8ok: stdout is supposed to carry one JSON document and nothing else, but
+    # powershell.exe writes the WARNING, VERBOSE and DEBUG streams to STDOUT -
+    # only errors go to stderr. One cmdlet warning inside the engine therefore
+    # used to take the whole suite down with a raw ConvertFrom-Json exception
+    # and no Result line, which is how bfh.1 came back as "not run" rather than
+    # as "broke, and here is what it saw". Report what actually arrived.
+    # The engine-side fix is the preference block in scanner.ps1's preamble.
+    $text = ($out -join "`n")
+    try { return $text | ConvertFrom-Json }
+    catch {
+        $head = if ($text.Length -gt 300) { $text.Substring(0, 300) + '...' } else { $text }
+        throw "Engine output for '$action' was not JSON: $($_.Exception.Message)`nOutput began: $head"
+    }
 }
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -35,6 +47,36 @@ Write-Host ""
 Write-Host "Vanish network attribution verification" -ForegroundColor Cyan
 Write-Host "======================================="
 Write-Host ("Elevation: {0}" -f $(if ($isAdmin) { "Full Mode" } else { "Audit Mode" }))
+
+# ======================================================================
+# 8ok: the engine's stdout contract - one JSON document and nothing else
+# ======================================================================
+# Checked in this suite because this is the file the breach actually killed.
+# In the Windows Sandbox run of 2026-08-19, get-network-activity emitted a
+# cmdlet WARNING, ConvertFrom-Json threw on it, and the whole suite died with
+# no Result line at all - the failure reported itself as "not run".
+Write-Host ""
+Write-Host "8ok engine stdout contract" -ForegroundColor Cyan
+
+# The mechanism, measured rather than assumed. A child powershell.exe writes
+# its WARNING to the CALLER'S STDOUT - only the error stream goes to stderr -
+# and setting the preference inside the child suppresses it at source. If the
+# first of these ever fails, the reasoning behind the engine's preamble is
+# wrong and belongs back on the table rather than quietly still in the file.
+$leaked = @(& powershell.exe -NoProfile -Command "Write-Warning 'probe'; 'PAYLOAD'") -join "`n"
+Assert-True ($leaked -match 'WARNING') "a cmdlet warning really does land on the caller's stdout - this is the failure mode"
+
+$quiet = @(& powershell.exe -NoProfile -Command "`$WarningPreference='SilentlyContinue'; Write-Warning 'probe'; 'PAYLOAD'") -join "`n"
+Assert-True ($quiet -notmatch 'WARNING')  "setting WarningPreference in the child suppresses it at source"
+Assert-True ($quiet.Trim() -eq 'PAYLOAD') "and leaves the payload untouched"
+
+# So the engine has to set it BEFORE it runs anything - hence the first 60
+# lines, not merely somewhere in the file.
+$preambleText = (Get-Content $scanner -TotalCount 60) -join "`n"
+foreach ($pref in @('WarningPreference', 'VerbosePreference', 'DebugPreference', 'InformationPreference')) {
+    $pattern = '\$' + $pref + "\s*=\s*'SilentlyContinue'"
+    Assert-True ($preambleText -match $pattern) "the engine silences $pref in its preamble, before any cmdlet can run"
+}
 
 # ======================================================================
 # INV-4: the panel that reads the network must not use it -

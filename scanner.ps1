@@ -8,6 +8,29 @@ param(
 
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
+# STDOUT CARRIES ONE JSON DOCUMENT AND NOTHING ELSE.
+#
+# powershell.exe sends only the ERROR stream to stderr. Warning, verbose,
+# debug and information records go to STDOUT when it is redirected - which is
+# how every caller of this engine reads it. So a warning from any cmdlet
+# anywhere below prepends "WARNING: ..." to the payload and breaks the
+# contract, and try/catch does not stop it: a warning is not an error.
+#
+# main.js does a strict JSON.parse and rejects with ENGINE_BAD_OUTPUT, so the
+# user is told "the scanning engine returned something unexpected" about a
+# feature that worked perfectly. Observed in Windows Sandbox on 2026-08-19:
+# get-network-activity warned, its JSON was unparseable, and the suite reading
+# it died mid-run with no result at all (8ok).
+#
+# Diagnostics are not lost by this - they were never reaching a human. The one
+# channel that IS wanted is scan progress, which has its own: stderr, behind a
+# marker, defined just below.
+$WarningPreference     = 'SilentlyContinue'
+$VerbosePreference     = 'SilentlyContinue'
+$DebugPreference       = 'SilentlyContinue'
+$InformationPreference = 'SilentlyContinue'
+$ProgressPreference    = 'SilentlyContinue'
+
 $ParamsJson = ""
 if ($ParamsBase64) {
     try {
@@ -6641,18 +6664,53 @@ function Set-PathEntries {
 
             $kind = $key.GetValueKind('Path')
             $entries = @([string]$raw -split ';')
-            $kept = @($entries | Where-Object {
-                $trimmed = $_.Trim()
-                if ([string]::IsNullOrWhiteSpace($trimmed)) { return $false }
-                return (-not ($remove -contains $trimmed))
-            })
+
+            # Remove EXACTLY what was asked for, and nothing else.
+            #
+            # This used to also drop every whitespace-only element, on the
+            # reasonable-sounding grounds that an empty PATH entry is junk. It
+            # is not our junk to throw away. Find-DeadPathEntries deliberately
+            # filters whitespace-only elements out BEFORE deciding what is
+            # dead, so an empty entry is never proposed to the user, never
+            # shown and never consented to - and was deleted anyway, as a side
+            # effect of removing something else. An empty element is not inert
+            # either: several Windows search paths read it as the current
+            # directory, so dropping it silently changes behaviour.
+            #
+            # The count told the same lie from the other end. removedCount was
+            # ($entries.Count - $kept.Count) - how much SHORTER the list got -
+            # while every caller reads it as "how many of the entries I asked
+            # you to remove were removed". On a PATH ending in ';' those are
+            # different numbers, which is exactly how this surfaced: three
+            # sandbox assertions failed while "dead entry gone from the live
+            # PATH" passed in both suites.
+            $removed = [System.Collections.Generic.List[string]]::new()
+            $kept    = [System.Collections.Generic.List[string]]::new()
+            foreach ($entry in $entries) {
+                $trimmed = $entry.Trim()
+                if ($trimmed -and ($remove -contains $trimmed)) {
+                    $removed.Add($trimmed)
+                } else {
+                    # Kept verbatim rather than trimmed: "byte-identical to the
+                    # original" has to mean byte-identical.
+                    $kept.Add($entry)
+                }
+            }
+
+            # Requested entries that were not in the value. Reported rather
+            # than swallowed - a write that removed nothing must not be able to
+            # report success indistinguishable from one that removed what it
+            # was given.
+            $notFound = @($remove | Where-Object { $removed -notcontains $_ })
 
             $newValue = ($kept -join ';')
             $key.SetValue('Path', $newValue, $kind)
 
             return @{
                 success      = $true
-                removedCount = $entries.Count - $kept.Count
+                removedCount = $removed.Count
+                removed      = @($removed)
+                notFound     = @($notFound)
                 newValue     = $newValue
                 valueKind    = [string]$kind
             }

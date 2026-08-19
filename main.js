@@ -1812,10 +1812,20 @@ async function purgePathEntries(items, params) {
       remove: scopeItems.map((i) => i.meta.entry)
     });
 
+    // The audit trail records what the ENGINE did, not what the UI asked for.
+    // 'removed: scopeItems.length' was the requested count written down as
+    // though it were the outcome, so an engine that removed a different number
+    // of entries - which it could, and did - left an oplog line that agreed
+    // with the request and disagreed with the registry.
     store.appendOplog({
       action: 'path-clean',
       tier: currentTier,
-      items: { scope, removed: scopeItems.length },
+      items: {
+        scope,
+        requested: scopeItems.length,
+        removed: written && typeof written.removedCount === 'number' ? written.removedCount : 0,
+        notFound: (written && written.notFound) || []
+      },
       outcome: written && written.success ? 'success' : 'error',
       meta: { entryId: quarantined.entryId, error: written && written.error }
     });
@@ -1823,7 +1833,9 @@ async function purgePathEntries(items, params) {
     results.push({
       scope,
       success: written && written.success === true,
+      requestedCount: scopeItems.length,
       removedCount: written && written.removedCount,
+      notFound: (written && written.notFound) || [],
       error: written && written.error,
       entryId: quarantined.entryId
     });
