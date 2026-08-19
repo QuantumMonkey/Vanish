@@ -3,7 +3,33 @@
 # then runs the unelevated regression suite before handing off to the human
 # checklist for the parts that need a real UAC click or a real install.
 
-$env:Path = "C:\Users\WDAGUtilityAccount\Desktop\nodejs;$env:Path"
+$nodeDir = "C:\Users\WDAGUtilityAccount\Desktop\nodejs"
+$env:Path = "$nodeDir;$env:Path"
+
+# PERSIST IT FOR THE WHOLE SANDBOX SESSION, not just this process.
+#
+# $env:Path only affects the process that sets it. This script runs as a child
+# (from LogonCommand, or from the operator typing a powershell -File line), and
+# when it exits the PATH goes with it - so the surviving window has no node and
+# no npm. The operator hit exactly that on 2026-08-19: "of course npm isn't
+# installed", in the window this script had just finished printing instructions
+# into. The instructions said "use this window for the manual steps", and that
+# window could not run any of them.
+#
+# Written at User scope, which every NEW shell in the sandbox inherits. Safe by
+# construction: a Sandbox session is discarded on close, so nothing here touches
+# the host's environment.
+try {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (-not $userPath) { $userPath = '' }
+    if ($userPath -notlike "*$nodeDir*") {
+        [Environment]::SetEnvironmentVariable('Path', "$nodeDir;$userPath", 'User')
+    }
+} catch {
+    Write-Host "Could not persist node on PATH for new windows: $($_.Exception.Message)" -ForegroundColor Yellow
+    Write-Host "Run this in any new window before npm: `$env:Path = '$nodeDir;`$env:Path'" -ForegroundColor Yellow
+}
+
 Set-Location "C:\Users\WDAGUtilityAccount\Desktop\test folder\vanish-uninstaller"
 
 Write-Host ""
@@ -65,10 +91,28 @@ if ($wingetAvailable) {
 
 Write-Host ""
 Write-Host "=======================================================" -ForegroundColor Yellow
-Write-Host " Automated suite done. Opening the manual checklist." -ForegroundColor Yellow
-Write-Host " This PowerShell window stays open -- use it for the" -ForegroundColor Yellow
-Write-Host " manual steps (launch app, run npm start, etc)." -ForegroundColor Yellow
+Write-Host " Automated suite done." -ForegroundColor Yellow
 Write-Host "=======================================================" -ForegroundColor Yellow
+Write-Host ""
+# The old version of these lines claimed "this PowerShell window stays open --
+# use it for the manual steps", which was wrong twice over: this script is a
+# CHILD process, so the window that survives is its parent, and that parent has
+# never had node on PATH. Say what is actually true, and hand over the one line
+# that makes any window work if the User-scope PATH above did not take.
+Write-Host "For the manual steps, in THIS window or a new one:" -ForegroundColor Cyan
+Write-Host "  cd `"$PWD`"" -ForegroundColor Gray
+# npm.cmd, not npm. A bare `npm` resolves to npm.ps1 first, and a default
+# Sandbox shell runs under the Restricted execution policy, so it refuses with
+# "running scripts is disabled on this system" - which reads like npm is broken
+# rather than like a policy. The .cmd shim does not go through PowerShell at all.
+# Hit on 2026-08-19, one line after the PATH problem above.
+Write-Host "  npm.cmd test      # re-run the suite" -ForegroundColor Gray
+Write-Host "  npm.cmd start     # launch from source" -ForegroundColor Gray
+Write-Host ""
+Write-Host "Two things that bite in a fresh Sandbox shell, and their fixes:" -ForegroundColor Cyan
+Write-Host "  'npm is not recognized'        ->  `$env:Path = '$nodeDir;' + `$env:Path" -ForegroundColor Gray
+Write-Host "  'running scripts is disabled'  ->  use npm.cmd, or:" -ForegroundColor Gray
+Write-Host "                                    Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force" -ForegroundColor Gray
 Write-Host ""
 
 # NOT notepad. The Windows Sandbox image does not ship it - this line threw
