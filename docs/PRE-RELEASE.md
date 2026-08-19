@@ -25,7 +25,7 @@ and the waivers previously recorded against 1.0 move to 0.9's gate instead.
 | **0.5** | Elevation you can trust | SHIPPED 2026-08-13. `1dq` (de-elevation reports success without verifying it), `qyt` (UAC disabled vs locked by policy), plus `5z5` and `c0y` as they were open bugs |
 | **0.6** | Say which, and say what matters | SHIPPED 2026-08-14: `aaw` (GPU column names the adapter) and `ddx` (what can be reached from outside). Still open under this theme: `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
 | **0.7** | Space you can actually recover | `7v3` (orphaned MSI/MSP cache, 1.2 GB measured), `be8` (firewall rule orphans), `ztl` (SharedDLLs + ghost PnP) |
-| **0.8** | Other people's tools, used properly | `7sl` (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
+| **0.8** | Other people's tools, used properly | `7sl` BUILT 2026-08-19 (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
 | **0.9** | Pre-release | The six elevated confirmations, the demo recording, code signing, a second machine, final docs pass |
 | **1.0** | Everything above, done | No waivers carried forward |
 
@@ -262,7 +262,11 @@ for the operator, and the open half of `z3s`.
 - `1qp`, `0xt` - a clean VM pass. Now reachable via `start-sandbox.ps1`.
 - `ytv`'s three environment cases - a second machine, ideally not an
   administrator account.
-- `7sl` - the CleanerML adapter, the last unbuilt 0.8 feature.
+- ~~`7sl` - the CleanerML adapter, the last unbuilt 0.8 feature.~~ BUILT
+  2026-08-19: MIT reader, the definitions cleaner, and the vault route. It
+  deliberately ships NO definition of our own - see the note under 0.8
+  below - and still wants one acceptance pass against a real BleachBit
+  install, which needs a machine that has one.
 - The demo GIF, code signing, one external user.
 
 - [ ] **Superseded note kept for the record:** 0.5 did not claim
@@ -283,12 +287,27 @@ for the operator, and the open half of `z3s`.
    The first finding type to run through `bu2`'s attribution pipe rather than
    getting its own panel. What we add over PatchCleaner is the vault.
 
-2. **`7sl`** CleanerML adapter. Ship an MIT parser; consume definitions the
-   user already has (an installed BleachBit, or a folder they point at).
-   **Never vendor the definitions** -- BleachBit is GPL-3.0 and CleanerML
-   definitions are GPL-3.0+, this repo is MIT and public. `INV-4` forbids
-   fetching them over the network anyway. Every commodity cleaner deletes;
-   nobody offers reversible cleaning, and that is the whole contribution.
+2. ~~**`7sl`** CleanerML adapter.~~ **BUILT 2026-08-19.** An MIT reader in
+   the engine, a "Cleaning definitions" section that reads whatever the
+   user already has (an installed BleachBit, or a folder they point at),
+   and every removal through the vault. No definition file is vendored:
+   BleachBit is GPL-3.0 and CleanerML definitions are GPL-3.0+, this repo
+   is MIT and public, and `INV-4` forbids fetching them anyway.
+
+   **It ships no cleaning rules of its own, on purpose.** The order of work
+   on the issue called for one Vanish-native definition to prove the
+   pipeline end to end. Every category we could have written one for -
+   temporary files, browser caches, log sweeps - is already covered either
+   by a Windows built-in or by the definitions we now read, so shipping one
+   would have been the redundant nonsense this repo refuses to build. The
+   end-to-end proof comes from fixture definitions the test suite writes
+   itself (`test/cleanerml-verify.ps1`, 61 assertions) rather than from a
+   category we would then have to defend.
+
+   Only `delete` is executed. The other seventeen CleanerML commands edit a
+   file in place, drive a package manager or act on the running system, and
+   none of those is a change the vault can undo - so an option containing
+   one is withheld ENTIRELY and named in the panel, rather than half-run.
 
 3. **`ag0`** Windows Update: a legible list (`Get-HotFix` + DISM
    `/Get-Packages`, read-only) showing type, install date, and whether the

@@ -10,6 +10,60 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added -- other people's cleaning rules, run through our vault (`7sl`)
+
+A new System Clean section, **Cleaning definitions**, that reads CleanerML --
+the XML format BleachBit's cleaner definitions are written in -- and puts the
+deletions in them through Vanish's quarantine vault.
+
+The point is not the rules. Hundreds of them already exist, maintained by
+people who do that work full time, and writing a competing catalogue by hand
+was the largest item on the old roadmap and would have been a worse copy. The
+point is that **every commodity cleaner in this category deletes, and none of
+them can put anything back.** That is the whole contribution here.
+
+**Vanish ships no definitions and will not download any.** BleachBit is GPL-3.0
+and its definition files are GPL-3.0+; this repository is MIT and public, so a
+reader for the format lives here and the definitions never do. `INV-4` forbids
+fetching them over the network in any case. The section reads a folder you
+point it at, or a BleachBit already installed on the PC, and says plainly when
+it finds neither.
+
+**Only deletions are performed.** CleanerML defines eighteen action commands.
+Seventeen of them edit a file in place, drive a package manager, or act on the
+running system, and none of those is a change the vault can undo. So an option
+containing one is withheld *entirely* -- never half-run -- and the panel names
+the command that caused it. A cleaner that quietly performs three of an
+option's five instructions is worse than one that refuses, because you believe
+the option was applied. The whole-filesystem `deep` search is refused for its
+own reason: it is a different product, not a cleaning rule.
+
+Nothing from a third-party definition is ever labelled Safe. We did not write
+these rules and are in no position to vouch for them; what Vanish adds is that
+the removal can be undone, not that somebody else's rule was a good idea. An
+option carrying its own `<warning>` is raised to Advanced and shows that
+warning as written.
+
+One option is one row and one vault entry, however many files it matches, so
+undoing it puts back everything it took. Paths already covered by a parent
+directory in the same set are pruned before anything moves -- the vault takes a
+directory's children with it, and a child listed alongside its own parent is a
+move that cannot happen twice.
+
+A definition file is treated as data, not as a program: external entity
+references are not resolved, so someone else's XML cannot make the engine read
+a file on your disk on its behalf.
+
+### Fixed -- a scan's explanation was thrown away exactly when it mattered
+
+Every System Clean section can return a note alongside its findings: what was
+left out, what could not be read, what was refused and why. That note was only
+ever rendered when the section found **nothing**. If a scan found something,
+the explanation was dropped -- in the one case where the user was about to act
+on the list. Left-over Store app data and the other-profiles sweep had both
+been losing their own explanations this way; `7sl` made it load-bearing, since
+its named refusals live in that note.
+
 ### Fixed -- three things that were telling the truth about the wrong subject
 
 All three came out of the Windows Sandbox run of 2026-08-19, which finished

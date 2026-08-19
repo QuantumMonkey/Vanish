@@ -622,6 +622,103 @@ app.whenReady().then(async () => {
   );
 
   // ==========================================================================
+  // 7sl: the definitions section - the one cleaner whose rules Vanish did not
+  // write, and therefore the one that has to be TOLD where they are.
+  //
+  // The engine half is covered exhaustively by test/cleanerml-verify.ps1. What
+  // only this suite can prove is that the folder the user chooses actually
+  // reaches the engine, because that value crosses two boundaries (a DOM input
+  // that renderCleanerBody rebuilds on every render, then the IPC bridge) and
+  // a section that silently scanned the wrong folder would still look like a
+  // clean, successful, entirely wrong result.
+  // ==========================================================================
+  console.log('');
+  console.log('System Clean: cleaning definitions (7sl)');
+
+  await win.webContents.executeJavaScript(`(() => {
+    document.getElementById('cleaner-definitions').scrollIntoView({ block: 'center' });
+    return true;
+  })()`);
+  await wait(200);
+  await assertClickable(win, '#cleaner-definitions .cleaner-section-header', 'the definitions section header is clickable');
+  await click(win, '#cleaner-definitions .cleaner-section-header');
+  await wait(400);
+
+  const folderRow = await win.webContents.executeJavaScript(`(() => {
+    const input = document.getElementById('cleaner-folder-definitions');
+    const browse = document.querySelector('[data-browse="definitions"]');
+    return {
+      hasInput: !!input,
+      hasBrowse: !!browse,
+      placeholder: input ? input.placeholder : ''
+    };
+  })()`);
+  assert(folderRow.hasInput === true, 'the section offers somewhere to say where the definitions are');
+  assert(folderRow.hasBrowse === true, 'and a Browse button, rather than requiring a path typed by hand');
+  assert(
+    /BleachBit/i.test(folderRow.placeholder),
+    'the empty state says what happens if it is left blank, instead of leaving the user to guess'
+  );
+
+  // The picker writes into the input. Queued as a real response so the click
+  // path is what gets exercised, not a direct assignment.
+  await queueResponse(win, 'browseForPath', { canceled: false, path: 'C:\\Fixture\\cleaners' });
+  await click(win, '[data-browse="definitions"]');
+  await wait(300);
+  const afterBrowse = await win.webContents.executeJavaScript(
+    `document.getElementById('cleaner-folder-definitions').value`
+  );
+  assert(afterBrowse === 'C:\\Fixture\\cleaners', 'choosing a folder in the picker fills the input');
+
+  await queueResponse(win, 'cleanerScan', {
+    success: true,
+    note: "1 option(s) were NOT offered because they use instructions Vanish will not run: Some App - Databases (uses command 'sqlite.vacuum').",
+    findings: [
+      {
+        id: 'cleanerml|someapp|cache',
+        label: 'Some App - Cache - 12.0 MB',
+        evidence: "someapp.xml option 'cache' matched 4 item(s)",
+        risk: 'Moderate',
+        kind: 'file',
+        path: 'C:\\Fixture\\cache',
+        paths: ['C:\\Fixture\\cache\\a', 'C:\\Fixture\\cache\\b'],
+        removable: true
+      }
+    ]
+  });
+  await click(win, '[data-scan="definitions"]');
+  await wait(700);
+
+  const sent = await win.webContents.executeJavaScript(`(() => {
+    const calls = window.__test.callArgs('cleanerScan');
+    const last = calls[calls.length - 1];
+    return last && last[0] ? last[0] : null;
+  })()`);
+  assert(sent !== null && sent.cleaner === 'definitions', 'scanning asks the engine for the definitions cleaner');
+  assert(
+    sent !== null && sent.definitionsPath === 'C:\\Fixture\\cleaners',
+    'and the folder the user chose is what it sends - not a default, and not nothing'
+  );
+
+  const defsBody = await win.webContents.executeJavaScript(`(() => {
+    const body = document.getElementById('cleaner-body-definitions');
+    return {
+      rows: body.querySelectorAll('.finding-row').length,
+      text: body.textContent || '',
+      folderKept: (document.getElementById('cleaner-folder-definitions') || {}).value
+    };
+  })()`);
+  assert(defsBody.rows === 1, 'a matched option renders as one row, not one row per file');
+  assert(
+    defsBody.text.includes('sqlite.vacuum'),
+    'and the options Vanish refused to run are named on screen, not left out silently'
+  );
+  assert(
+    defsBody.folderKept === 'C:\\Fixture\\cleaners',
+    'the chosen folder survives the re-render that the scan result triggers'
+  );
+
+  // ==========================================================================
   // All Programs: multi-select + "Add N to queue" (bd vanish-uninstaller-5rz)
   //
   // The single-item path was already covered above. What is new here is a

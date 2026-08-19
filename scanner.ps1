@@ -6586,6 +6586,534 @@ function Get-InstallSnapshot {
     }
 }
 
+# ==========================================
+# 7sl - CLEANERML: OTHER PEOPLE'S DEFINITIONS, RUN THROUGH OUR VAULT
+# ==========================================
+# Writing a risk-tiered cleaner catalogue by hand was the largest item on the
+# old roadmap and would have been a worse copy of work other people already do
+# and maintain. BleachBit's cleanerml repository carries hundreds of
+# per-application cleaning rules in CleanerML and has for years. What NOBODY in
+# this category offers is a removal you can undo - every commodity cleaner
+# deletes. So Vanish brings the vault, not a second catalogue.
+#
+# LICENCE BOUNDARY, and it decides the design. BleachBit is GPL-3.0 and its
+# CleanerML definition files are GPL-3.0+. This repository is MIT and public.
+# A file format is a specification rather than a copyrightable work, so a
+# READER for it written here carries no obligation - but the definitions
+# themselves are never vendored into this tree. They are read from wherever the
+# user already has them (an installed BleachBit, or a folder they point at).
+# INV-4 forbids fetching them over the network in any case, so "download the
+# latest definitions" is not a feature that can exist here.
+#
+# WHAT THIS EXECUTES, AND WHAT IT REFUSES BY NAME. CleanerML defines eighteen
+# action commands. Seventeen of them either mutate a file in place
+# (sqlite.vacuum, json, ini, truncate, office_registrymodifications, the
+# chrome.* and mozilla_* readers), act on a package manager (apt.*, yum.*), or
+# act on the running system (process, win.shell.change.notify). None of those
+# is a removal the vault can put back, and INV-1 is not negotiable, so none of
+# them is executed. Only "delete" is. An option containing anything else is
+# reported with the command named, and the WHOLE option is withheld: a cleaner
+# that quietly performs three of an option's five actions is worse than one
+# that refuses, because the user believes the option was applied.
+#
+# The "deep" search is refused for a different reason. It queues a scan of the
+# entire filesystem, which is not a cleaning rule but a different product, and
+# it would run for minutes bearing no relation to the option that was picked.
+#
+# Spec read 2026-08-19 from docs.bleachbit.org/cml/cleanerml.html and
+# /cml/variables.html. Nothing was copied out of the definitions repository.
+
+$script:CleanerMlSupportedCommands = @('delete')
+$script:CleanerMlSupportedSearches = @('file', 'glob', 'walk.files', 'walk.all', 'walk.top')
+
+# An option matching more entries than this is reported rather than offered.
+# The number is not a performance guess: it is the point past which one vault
+# entry stops being something a person could review before restoring it, and
+# reviewability is the only reason the vault is worth having.
+$script:CleanerMlMaxMatches = 5000
+
+# BleachBit defines a handful of path variables Windows does not. Everything
+# else falls through to the real environment block.
+function Get-CleanerMlExtraVariables {
+    $vars = @{}
+    $lowLocal = if ($env:USERPROFILE) { Join-Path $env:USERPROFILE 'AppData' } else { $null }
+    if ($lowLocal) { $lowLocal = Join-Path $lowLocal 'LocalLow' }
+
+    $known = @{
+        'CommonAppData'   = $env:ProgramData
+        'LocalAppDataLow' = $lowLocal
+        'Documents'       = [System.Environment]::GetFolderPath('MyDocuments')
+        'Music'           = [System.Environment]::GetFolderPath('MyMusic')
+        'Pictures'        = [System.Environment]::GetFolderPath('MyPictures')
+        'Video'           = [System.Environment]::GetFolderPath('MyVideos')
+        'Desktop'         = [System.Environment]::GetFolderPath('Desktop')
+    }
+    foreach ($key in @($known.Keys)) {
+        if (-not [string]::IsNullOrWhiteSpace($known[$key])) { $vars[$key.ToLowerInvariant()] = [string]$known[$key] }
+    }
+    return $vars
+}
+
+# Multi-value variables expand ONE action into SEVERAL paths - $$ProgramFiles$$
+# covers both Program Files trees on a 64-bit machine. Returning an array here
+# is what makes that possible; collapsing it to a single string would clean one
+# of the two trees and report the option as done.
+function Get-CleanerMlMultiVariables {
+    $multi = @{}
+    $pf  = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ } | Select-Object -Unique
+    $cpf = @($env:CommonProgramFiles, ${env:CommonProgramFiles(x86)}) | Where-Object { $_ } | Select-Object -Unique
+    if ($pf.Count  -gt 0) { $multi['programfiles'] = @($pf) }
+    if ($cpf.Count -gt 0) { $multi['commonprogramfiles'] = @($cpf) }
+    return $multi
+}
+
+function Get-CleanerMlVariableValue {
+    param([string]$name, [hashtable]$extra)
+
+    if ([string]::IsNullOrWhiteSpace($name)) { return $null }
+
+    # The real environment block first, so a machine that genuinely defines one
+    # of these wins over our stand-in for it.
+    $value = [System.Environment]::GetEnvironmentVariable($name)
+    if (-not [string]::IsNullOrWhiteSpace($value)) { return $value }
+
+    $key = $name.ToLowerInvariant()
+    if ($extra.ContainsKey($key)) { return $extra[$key] }
+    return $null
+}
+
+# Returns EVERY path a raw CleanerML path expands to, or an empty array when a
+# variable in it cannot be resolved on this machine. Unresolved is not an error
+# and not a zero-match: it means the question does not apply here, and the
+# caller has to be able to say so rather than reporting a clean result.
+#
+# DELIBERATE DEVIATION from the published spec, and it is load-bearing. The
+# spec calls $foo case-SENSITIVE and %foo% case-insensitive. Real definitions
+# in the wild write $localappdata in lower case, and Windows environment
+# variables are case-insensitive by OS design, so a case-sensitive reading
+# would resolve nothing on exactly the definitions people actually have. Both
+# forms are expanded case-insensitively here.
+function Expand-CleanerMlPath {
+    param([string]$raw)
+
+    if ([string]::IsNullOrWhiteSpace($raw)) { return @() }
+
+    $extra = Get-CleanerMlExtraVariables
+    $multi = Get-CleanerMlMultiVariables
+    $paths = @([string]$raw)
+
+    # $$foo$$ first, because it is the only form that changes the NUMBER of
+    # paths, and every later substitution has to happen on each of them.
+    for ($round = 0; $round -lt 8; $round++) {
+        $pending = @($paths | Where-Object { $_ -match '\$\$([A-Za-z_][A-Za-z0-9_]*)\$\$' })
+        if ($pending.Count -eq 0) { break }
+
+        $next = [System.Collections.Generic.List[string]]::new()
+        foreach ($path in $paths) {
+            if ($path -notmatch '\$\$([A-Za-z_][A-Za-z0-9_]*)\$\$') { $next.Add($path); continue }
+            $name  = $Matches[1]
+            $token = '$$' + $name + '$$'
+            $key   = $name.ToLowerInvariant()
+
+            $values = if ($multi.ContainsKey($key)) { @($multi[$key]) }
+                      else {
+                          $single = Get-CleanerMlVariableValue -name $name -extra $extra
+                          if ($single) { @($single) } else { @() }
+                      }
+
+            # No value means this path cannot be resolved on this machine, so
+            # it is dropped rather than left carrying a literal $$name$$ that
+            # would match nothing and read as a clean result.
+            foreach ($value in $values) { $next.Add($path.Replace($token, [string]$value)) }
+        }
+        $paths = @($next)
+        if ($paths.Count -eq 0) { return @() }
+    }
+
+    $resolved = [System.Collections.Generic.List[string]]::new()
+    foreach ($path in $paths) {
+        $current = [string]$path
+        $failed  = $false
+
+        if ($current.StartsWith('~')) {
+            if ([string]::IsNullOrWhiteSpace($env:USERPROFILE)) { continue }
+            $current = $env:USERPROFILE + $current.Substring(1)
+        }
+
+        foreach ($pattern in @('%([A-Za-z_][A-Za-z0-9_ ]*)%', '\$\{([A-Za-z_][A-Za-z0-9_]*)\}', '\$([A-Za-z_][A-Za-z0-9_]*)')) {
+            $guard = 0
+            while (($current -match $pattern) -and ($guard -lt 16)) {
+                $guard++
+                $name  = $Matches[1]
+                $token = $Matches[0]
+                $value = Get-CleanerMlVariableValue -name $name -extra $extra
+                if ([string]::IsNullOrWhiteSpace($value)) { $failed = $true; break }
+                $current = $current.Replace($token, [string]$value)
+            }
+            if ($failed) { break }
+        }
+
+        if (-not $failed) { $resolved.Add($current) }
+    }
+
+    return @($resolved)
+}
+
+# One <action>, normalised. Reading and JUDGING are separate on purpose: the
+# reader records what the file said, and the caller decides whether Vanish is
+# willing to run it. A reader that silently dropped the actions it did not like
+# would make an option look smaller than it is.
+function ConvertFrom-CleanerMlAction {
+    param([System.Xml.XmlElement]$node)
+
+    $command = [string]$node.GetAttribute('command')
+    $search  = [string]$node.GetAttribute('search')
+
+    $unsupported = $null
+    if ([string]::IsNullOrWhiteSpace($command)) {
+        $unsupported = 'an action with no command'
+    } elseif ($script:CleanerMlSupportedCommands -notcontains $command) {
+        $unsupported = "command '$command'"
+    } elseif ([string]::IsNullOrWhiteSpace($search)) {
+        $unsupported = 'a delete action with no search mode'
+    } elseif ($script:CleanerMlSupportedSearches -notcontains $search) {
+        $unsupported = "search '$search'"
+    }
+
+    return @{
+        command     = $command
+        search      = $search
+        path        = [string]$node.GetAttribute('path')
+        regex       = [string]$node.GetAttribute('regex')
+        nregex      = [string]$node.GetAttribute('nregex')
+        wholeregex  = [string]$node.GetAttribute('wholeregex')
+        nwholeregex = [string]$node.GetAttribute('nwholeregex')
+        unsupported = $unsupported
+    }
+}
+
+# Read one .xml definition. A definition written for another operating system
+# is not a failure and neither is one this build will not run, so those come
+# back as success with a reason rather than as an error.
+function ConvertFrom-CleanerMlFile {
+    param([string]$path)
+
+    try {
+        $xml = New-Object System.Xml.XmlDocument
+        # A definition file is DATA, and data does not get to name a DTD for us
+        # to go and fetch. XmlResolver = $null is what stops an external entity
+        # reference in someone else's XML from turning into a file read or a
+        # network call inside our engine - INV-4 is not satisfied by having no
+        # network code of our own if a parser will make the call for us.
+        $xml.XmlResolver = $null
+        $xml.Load($path)
+    } catch {
+        return @{ success = $false; file = $path; error = $_.Exception.Message }
+    }
+
+    $root = $xml.DocumentElement
+    if (-not $root -or $root.Name -ne 'cleaner') {
+        $found = if ($root) { $root.Name } else { 'nothing' }
+        return @{ success = $false; file = $path; error = "not a CleanerML file - the root element is '$found', not 'cleaner'" }
+    }
+
+    $os = [string]$root.GetAttribute('os')
+    if (-not [string]::IsNullOrWhiteSpace($os) -and $os -ne 'windows') {
+        return @{ success = $true; file = $path; skipped = "written for $os, not windows" }
+    }
+
+    $running = [System.Collections.Generic.List[object]]::new()
+    foreach ($node in @($root.SelectNodes('running'))) {
+        $running.Add(@{ type = [string]$node.GetAttribute('type'); value = ([string]$node.InnerText).Trim() })
+    }
+
+    $options = [System.Collections.Generic.List[object]]::new()
+    foreach ($node in @($root.SelectNodes('option'))) {
+        $optionOs = [string]$node.GetAttribute('os')
+        if (-not [string]::IsNullOrWhiteSpace($optionOs) -and $optionOs -ne 'windows') { continue }
+
+        $actions = [System.Collections.Generic.List[object]]::new()
+        foreach ($actionNode in @($node.SelectNodes('action'))) {
+            $actions.Add((ConvertFrom-CleanerMlAction -node $actionNode))
+        }
+
+        $labelNode   = $node.SelectSingleNode('label')
+        $descNode    = $node.SelectSingleNode('description')
+        $warningNode = $node.SelectSingleNode('warning')
+
+        $options.Add(@{
+            id          = [string]$node.GetAttribute('id')
+            label       = if ($labelNode) { ([string]$labelNode.InnerText).Trim() } else { [string]$node.GetAttribute('id') }
+            description = if ($descNode) { ([string]$descNode.InnerText).Trim() } else { $null }
+            warning     = if ($warningNode) { ([string]$warningNode.InnerText).Trim() } else { $null }
+            actions     = @($actions)
+        })
+    }
+
+    $rootLabel = $root.SelectSingleNode('label')
+    return @{
+        success = $true
+        file    = $path
+        id      = [string]$root.GetAttribute('id')
+        label   = if ($rootLabel) { ([string]$rootLabel.InnerText).Trim() } else { [string]$root.GetAttribute('id') }
+        running = @($running)
+        options = @($options)
+    }
+}
+
+# A definition may declare that its application must not be running. Answer
+# with the REASON rather than a boolean: "vivaldi is running" is the sentence
+# the user needs, and a bare false would make an option vanish unexplained.
+function Test-CleanerMlBlockedByRunning {
+    param([object[]]$running)
+
+    foreach ($entry in @($running)) {
+        $value = [string]$entry.value
+        if ([string]::IsNullOrWhiteSpace($value)) { continue }
+
+        if ($entry.type -eq 'exe') {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($value)
+            if (Get-Process -Name $name -ErrorAction SilentlyContinue) { return "$name is running" }
+        } elseif ($entry.type -eq 'pathname') {
+            foreach ($candidate in (Expand-CleanerMlPath -raw $value)) {
+                if (Test-Path -LiteralPath $candidate -ErrorAction SilentlyContinue) {
+                    return "$candidate exists, and this definition treats that as the application being in use"
+                }
+            }
+        }
+    }
+    return $null
+}
+
+function Test-CleanerMlFilters {
+    param([object]$action, [string]$fullPath)
+
+    $leaf = [System.IO.Path]::GetFileName($fullPath)
+
+    if (-not [string]::IsNullOrWhiteSpace($action.regex)       -and ($leaf     -notmatch $action.regex))       { return $false }
+    if (-not [string]::IsNullOrWhiteSpace($action.nregex)      -and ($leaf     -match    $action.nregex))      { return $false }
+    if (-not [string]::IsNullOrWhiteSpace($action.wholeregex)  -and ($fullPath -notmatch $action.wholeregex))  { return $false }
+    if (-not [string]::IsNullOrWhiteSpace($action.nwholeregex) -and ($fullPath -match    $action.nwholeregex)) { return $false }
+    return $true
+}
+
+# Everything one action matches on THIS machine. The search modes are the
+# spec's and the differences between them are the whole point: walk.files
+# leaves the directories standing, walk.all takes them but not the top one,
+# walk.top takes the top one too. Reading them loosely would remove a directory
+# tree that the definition only asked to empty.
+function Resolve-CleanerMlAction {
+    param([object]$action)
+
+    $matched = [System.Collections.Generic.List[string]]::new()
+    if ($action.unsupported) { return @($matched) }
+
+    foreach ($root in (Expand-CleanerMlPath -raw $action.path)) {
+        try {
+            if ($action.search -eq 'file') {
+                if (Test-Path -LiteralPath $root -ErrorAction SilentlyContinue) { $matched.Add($root) }
+            } elseif ($action.search -eq 'glob') {
+                foreach ($item in @(Get-Item -Path $root -Force -ErrorAction SilentlyContinue)) {
+                    $matched.Add($item.FullName)
+                }
+            } elseif (Test-Path -LiteralPath $root -ErrorAction SilentlyContinue) {
+                # NOT a switch with `continue` in it. `continue` inside a switch
+                # continues the SWITCH, not the enclosing foreach, so a missing
+                # directory would have skipped the remaining roots of a
+                # multi-value path instead of just that one.
+                $files = ($action.search -eq 'walk.files')
+                foreach ($item in @(Get-ChildItem -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue)) {
+                    if ($files -and $item.PSIsContainer) { continue }
+                    $matched.Add($item.FullName)
+                }
+                if ($action.search -eq 'walk.top') {
+                    $matched.Add((Get-Item -LiteralPath $root -Force).FullName)
+                }
+            }
+        } catch { }
+    }
+
+    return @($matched | Where-Object { Test-CleanerMlFilters -action $action -fullPath $_ } | Select-Object -Unique)
+}
+
+# Drop any path whose ancestor is already in the set.
+#
+# Not a tidy-up: the vault moves what it is given, and moving a parent
+# directory takes its children with it, so a later attempt to move a child that
+# is no longer there would fail - and a restore would then have to put the same
+# file back twice. walk.all and walk.top collapse to their top directories
+# here, which is exactly what those two modes mean anyway.
+function Compress-CleanerMlPaths {
+    param([string[]]$paths)
+
+    $sorted = @($paths | Sort-Object { $_.Length })
+    $kept   = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($path in $sorted) {
+        $covered = $false
+        foreach ($parent in $kept) {
+            if ($path.StartsWith($parent + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+                $covered = $true
+                break
+            }
+        }
+        if (-not $covered) { $kept.Add($path) }
+    }
+
+    return @($kept)
+}
+
+# Where the definitions come from. Never from us and never from the network:
+# a folder the user pointed at, or a BleachBit they already installed.
+function Get-CleanerMlDefinitionDirs {
+    param([object]$p)
+
+    $dirs = [System.Collections.Generic.List[string]]::new()
+
+    if ($p -and -not [string]::IsNullOrWhiteSpace([string]$p.definitionsPath)) {
+        $given = [string]$p.definitionsPath
+        if (Test-Path -LiteralPath $given -PathType Container) { $dirs.Add($given) }
+        return @($dirs)
+    }
+
+    foreach ($root in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:APPDATA)) {
+        if ([string]::IsNullOrWhiteSpace($root)) { continue }
+        foreach ($relative in @('BleachBit\share\cleaners', 'BleachBit\cleaners')) {
+            $candidate = Join-Path $root $relative
+            if (Test-Path -LiteralPath $candidate -PathType Container) { $dirs.Add($candidate) }
+        }
+    }
+
+    return @($dirs | Select-Object -Unique)
+}
+
+function Find-CleanerMlFindings {
+    param([object]$p)
+
+    $findings = [System.Collections.Generic.List[object]]::new()
+    $dirs = Get-CleanerMlDefinitionDirs -p $p
+
+    if ($dirs.Count -eq 0) {
+        return @{
+            success  = $true
+            findings = $findings
+            note     = "No CleanerML definitions were found. Vanish does not ship any and will not download them - point it at a folder of definition files, or install BleachBit and they will be read from there."
+            sources  = @()
+        }
+    }
+
+    $files = [System.Collections.Generic.List[string]]::new()
+    foreach ($dir in $dirs) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $dir -Filter '*.xml' -File -ErrorAction SilentlyContinue)) {
+            $files.Add($file.FullName)
+        }
+    }
+
+    $unreadable    = [System.Collections.Generic.List[string]]::new()
+    $otherOs       = 0
+    $withheld      = [System.Collections.Generic.List[string]]::new()
+    $blocked       = [System.Collections.Generic.List[string]]::new()
+    $tooLarge      = [System.Collections.Generic.List[string]]::new()
+    $optionsRead   = 0
+    $done          = 0
+
+    foreach ($file in $files) {
+        $done++
+        Write-ScanProgress -stage "Reading cleaning definitions" -done $done -total $files.Count -found $findings.Count
+
+        $definition = ConvertFrom-CleanerMlFile -path $file
+        if (-not $definition.success) {
+            $unreadable.Add("$([System.IO.Path]::GetFileName($file)): $($definition.error)")
+            continue
+        }
+        if ($definition.skipped) { $otherOs++; continue }
+
+        $runningReason = Test-CleanerMlBlockedByRunning -running $definition.running
+
+        foreach ($option in @($definition.options)) {
+            $optionsRead++
+            $name = "$($definition.label) - $($option.label)"
+
+            # Named refusals, one line each, rather than an option that quietly
+            # does not appear. The command that caused it is in the message,
+            # because "some options were skipped" tells nobody anything.
+            $reasons = @(@($option.actions) | Where-Object { $_.unsupported } | ForEach-Object { $_.unsupported } | Select-Object -Unique)
+            if ($reasons.Count -gt 0) {
+                $withheld.Add("$name (uses $($reasons -join ', '))")
+                continue
+            }
+            if (@($option.actions).Count -eq 0) { continue }
+
+            if ($runningReason) {
+                $blocked.Add("$name ($runningReason)")
+                continue
+            }
+
+            $matched = [System.Collections.Generic.List[string]]::new()
+            foreach ($action in @($option.actions)) {
+                foreach ($hit in (Resolve-CleanerMlAction -action $action)) { $matched.Add($hit) }
+            }
+            if ($matched.Count -eq 0) { continue }
+
+            $paths = Compress-CleanerMlPaths -paths @($matched | Select-Object -Unique)
+            if ($paths.Count -gt $script:CleanerMlMaxMatches) {
+                $tooLarge.Add("$name ($($paths.Count) items)")
+                continue
+            }
+
+            $sizeBytes = [long]0
+            foreach ($path in $paths) {
+                try {
+                    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+                    if ($item.PSIsContainer) { $sizeBytes += (Get-FolderSize $item.FullName) }
+                    else { $sizeBytes += [long]$item.Length }
+                } catch { }
+            }
+
+            # Never "Safe". We did not write these rules and cannot vouch for
+            # them; what Vanish adds is that the removal can be undone, not
+            # that somebody else's rule was a good idea.
+            $risk = if ($option.warning) { 'Advanced' } else { 'Moderate' }
+
+            $findings.Add(@{
+                id        = "cleanerml|$($definition.id)|$($option.id)"
+                label     = "$name - $(Format-ByteSize $sizeBytes)"
+                evidence  = "$([System.IO.Path]::GetFileName($file)) option '$($option.id)' matched $($paths.Count) item(s)"
+                risk      = $risk
+                kind      = "file"
+                path      = $paths[0]
+                paths     = @($paths)
+                removable = $true
+                note      = $option.warning
+                sizeBytes = $sizeBytes
+                meta      = @{
+                    cleanerId  = [string]$definition.id
+                    optionId   = [string]$option.id
+                    file       = $file
+                    matchCount = $paths.Count
+                    warning    = $option.warning
+                }
+            })
+        }
+    }
+
+    $notes = [System.Collections.Generic.List[string]]::new()
+    $notes.Add("Read $($files.Count) definition file(s) from $($dirs -join '; ').")
+    if ($otherOs -gt 0)          { $notes.Add("$otherOs are written for another operating system.") }
+    if ($withheld.Count -gt 0)   { $notes.Add("$($withheld.Count) option(s) were NOT offered because they use instructions Vanish will not run - it only performs deletions, which the vault can undo: $($withheld -join '; ').") }
+    if ($blocked.Count -gt 0)    { $notes.Add("$($blocked.Count) option(s) were skipped because their application is in use: $($blocked -join '; ').") }
+    if ($tooLarge.Count -gt 0)   { $notes.Add("$($tooLarge.Count) option(s) matched more than $($script:CleanerMlMaxMatches) items and were not offered, because a vault entry that large is not something you could review before restoring it: $($tooLarge -join '; ').") }
+    if ($unreadable.Count -gt 0) { $notes.Add("$($unreadable.Count) file(s) could not be read: $($unreadable -join '; ').") }
+    if ($findings.Count -eq 0 -and $optionsRead -gt 0) { $notes.Add("Nothing matched on this machine.") }
+
+    return @{
+        success  = $true
+        findings = $findings
+        note     = ($notes -join ' ')
+        sources  = @($dirs)
+    }
+}
+
 function Invoke-CleanerScan {
     param([object]$p)
 
@@ -6609,6 +7137,15 @@ function Invoke-CleanerScan {
                 return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $all) }
             }
             "associations"  { return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList (Set-FindingRemovability (Find-DeadAssociations))) } }
+            "definitions"   {
+                # 7sl: the only cleaner whose rules Vanish did not write. The
+                # note is not decoration here - it carries every option that
+                # was withheld and why, and a caller that drops it turns a
+                # named refusal back into a silent one.
+                $res = Find-CleanerMlFindings -p $p
+                if (-not $res.success) { return @{ success = $false; cleaner = $cleaner; error = $res.error } }
+                return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $res.findings); note = $res.note; sources = @($res.sources) }
+            }
             "uwp-leftovers" {
                 $res = Find-UwpLeftovers -p $p
                 if (-not $res.success) { return @{ success = $false; cleaner = $cleaner; error = $res.error } }
@@ -6892,6 +7429,49 @@ if ($Action) {
                 protected = [bool](Test-ProtectedDestination ([string]$Params.path))
                 resolved  = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
             } | ConvertTo-Json -Depth 4 -Compress
+        }
+        "cleanerml-probe" {
+            # 7sl verification hook, in the same shape as the SEC-2 and TASK-05
+            # probes above: read-only, side-effect free, and callable in Audit
+            # Mode, so the parts of the CleanerML reader that decide WHAT would
+            # be removed are testable without removing anything.
+            #
+            # These are the three questions worth asking separately. A suite
+            # that could only call cleaner-scan would be testing variable
+            # expansion, search modes and filters through one aggregate answer,
+            # and a wrong path would be indistinguishable from a machine where
+            # the files happen not to exist.
+            $mode = [string]$Params.mode
+            $result = switch ($mode) {
+                'expand' {
+                    @{ success = $true; paths = @(Expand-CleanerMlPath -raw ([string]$Params.path)) }
+                }
+                'parse' {
+                    ConvertFrom-CleanerMlFile -path ([string]$Params.file)
+                }
+                'compress' {
+                    @{ success = $true; paths = @(Compress-CleanerMlPaths -paths @($Params.paths)) }
+                }
+                'resolve' {
+                    $node = @{
+                        command     = [string]$Params.command
+                        search      = [string]$Params.search
+                        path        = [string]$Params.path
+                        regex       = [string]$Params.regex
+                        nregex      = [string]$Params.nregex
+                        wholeregex  = [string]$Params.wholeregex
+                        nwholeregex = [string]$Params.nwholeregex
+                        unsupported = $null
+                    }
+                    if ($script:CleanerMlSupportedCommands -notcontains $node.command) { $node.unsupported = "command '$($node.command)'" }
+                    elseif ($script:CleanerMlSupportedSearches -notcontains $node.search) { $node.unsupported = "search '$($node.search)'" }
+                    @{ success = $true; unsupported = $node.unsupported; paths = @(Resolve-CleanerMlAction -action $node) }
+                }
+                default {
+                    @{ success = $false; error = "Unknown cleanerml-probe mode '$mode'." }
+                }
+            }
+            $result | ConvertTo-Json -Depth 8 -Compress
         }
         "registry-view-probe" {
             # TASK-13 verification hook: read one key through an explicit view.

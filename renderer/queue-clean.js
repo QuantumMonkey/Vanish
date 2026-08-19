@@ -435,6 +435,21 @@ const CLEANERS = [
     icon: 'fa-ghost',
     title: 'Dead references and ghost devices',
     desc: 'Records Windows still holds for files and hardware that are not there. Most are harmless and normal - an unplugged device is supposed to leave a record - so each is labelled with what it actually is. Listed only; removing them frees nothing.'
+  },
+  {
+    // 7sl. The only section whose rules Vanish did not write. Everything else
+    // in this panel is a question Vanish answers itself; this one reads
+    // BleachBit's CleanerML definitions - which are maintained by people who
+    // do that work full time - and puts them through the vault, because every
+    // commodity cleaner deletes and none of them can put anything back.
+    //
+    // Vanish ships no definitions and will not download any: BleachBit's are
+    // GPL-3.0+ and this repo is MIT, and INV-4 forbids the network anyway.
+    id: 'definitions',
+    icon: 'fa-list-check',
+    title: 'Cleaning definitions',
+    desc: 'Cleaning rules written and maintained by the BleachBit project, read from a copy you already have. Vanish only performs the deletions in them - never the instructions that edit a file in place, because those cannot be undone - and everything it does remove goes to quarantine first.',
+    needsFolder: true
   }
 ];
 
@@ -444,7 +459,10 @@ function setupCleanTab() {
   CLEANERS.forEach((c) => {
     cleanerState[c.id] = {
       findings: [], scanned: false, loading: false, error: null, note: null,
-      selected: new Set(), resolvedCount: 0, scannedAt: null
+      selected: new Set(), resolvedCount: 0, scannedAt: null,
+      // 7sl: only the definitions cleaner uses this, but the shape is
+      // declared here with the rest rather than appearing from nowhere.
+      definitionsPath: ''
     };
   });
 
@@ -545,6 +563,15 @@ async function scanCleaner(cleanerId, options = {}) {
     const input = document.getElementById(`cleaner-keyword-${cleanerId}`);
     params.keyword = input ? input.value.trim() : '';
   }
+  // 7sl: remembered on the state rather than read back off the DOM later,
+  // because renderCleanerBody replaces that subtree on every re-render and
+  // the folder the user chose would not survive the first result.
+  if (cleaner.needsFolder) {
+    const input = document.getElementById(`cleaner-folder-${cleanerId}`);
+    const chosen = input ? input.value.trim() : '';
+    state.definitionsPath = chosen;
+    if (chosen) params.definitionsPath = chosen;
+  }
 
   const res = await window.api.cleanerScan(params);
   state.loading = false;
@@ -594,8 +621,20 @@ function renderCleanerBody(cleaner) {
        </div>`
     : '';
 
+  // 7sl: this section runs rules Vanish did not write, so it has to be told
+  // where they are. Left blank it looks for a BleachBit installed on this PC
+  // and says plainly when it finds none - it will never fetch any.
+  const folderRow = cleaner.needsFolder
+    ? `<div class="unlock-input-row">
+         <input type="text" class="search-input" id="cleaner-folder-${esc(cleaner.id)}" placeholder="Folder of CleanerML definitions (leave blank to use an installed BleachBit)" value="${esc(state.definitionsPath || '')}">
+         <button class="btn-sec btn-compact" data-browse="${esc(cleaner.id)}"><i class="fa-solid fa-folder-open"></i> Browse</button>
+       </div>`
+    : '';
+
+  const inputRows = `${keywordRow}${folderRow}`;
+
   if (state.loading) {
-    body.innerHTML = `${keywordRow}<div class="panel-state">
+    body.innerHTML = `${inputRows}<div class="panel-state">
       <i class="fa-solid fa-spinner fa-spin"></i>
       <div id="cleaner-progress-${esc(cleaner.id)}">Scanning...</div>
     </div>`;
@@ -610,13 +649,13 @@ function renderCleanerBody(cleaner) {
   }
 
   if (state.error) {
-    body.innerHTML = `${keywordRow}<div class="panel-state error"><i class="fa-solid fa-circle-xmark"></i><div>${esc(state.error)}</div></div>`;
+    body.innerHTML = `${inputRows}<div class="panel-state error"><i class="fa-solid fa-circle-xmark"></i><div>${esc(state.error)}</div></div>`;
     wireCleanerBody(cleaner);
     return;
   }
 
   if (!state.scanned) {
-    body.innerHTML = `${keywordRow}
+    body.innerHTML = `${inputRows}
       <div class="cleaner-actions">
         <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}">
           <i class="fa-solid fa-magnifying-glass"></i> Scan
@@ -631,7 +670,7 @@ function renderCleanerBody(cleaner) {
     const cleared = state.resolvedCount > 0
       ? `All ${state.resolvedCount} item(s) found here have been moved to quarantine.`
       : esc(state.note || 'Nothing left behind here.');
-    body.innerHTML = `${keywordRow}
+    body.innerHTML = `${inputRows}
       <div class="panel-state">
         <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
         <div>${cleared}</div>
@@ -647,7 +686,12 @@ function renderCleanerBody(cleaner) {
   const removable = state.findings.filter((f) => f.removable !== false);
 
   body.innerHTML = `
-    ${keywordRow}
+    ${inputRows}
+    ${
+      state.note
+        ? `<div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px;">${esc(state.note)}</div>`
+        : ''
+    }
     <div class="cleaner-findings">
       ${state.findings
         .map(
@@ -701,6 +745,22 @@ function wireCleanerBody(cleaner) {
       });
     });
   }
+
+  // 7sl: typing a full path by hand was the only option for the Unlocker
+  // until a picker was added for it (operator feedback 2026-08-05); the same
+  // applies here, and it is the same dialog.
+  body.querySelectorAll('[data-browse]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const picked = await window.api.browseForPath({
+        title: 'Select a folder of CleanerML definition files',
+        directoryOnly: true
+      });
+      if (!picked || picked.canceled || !picked.path) return;
+      const input = document.getElementById(`cleaner-folder-${cleaner.id}`);
+      if (input) input.value = picked.path;
+      if (state) state.definitionsPath = picked.path;
+    });
+  });
 
   body.querySelectorAll('[data-scan]').forEach((btn) => {
     btn.addEventListener('click', (e) => {

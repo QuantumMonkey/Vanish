@@ -54,6 +54,7 @@ $suites = @(
     @{ Name = "Store migration (SEC-3)";       Kind = "node";     Path = "test/store-migration-verify.js" },
     @{ Name = "System Clean scans (4)";        Kind = "ps";       Path = "test\phase4-verify.ps1" },
     @{ Name = "System Clean purges (4)";       Kind = "electron"; Path = "test/phase4-ipc-verify.js" },
+    @{ Name = "CleanerML reader (7sl)";        Kind = "ps";       Path = "test\cleanerml-verify.ps1" },
     @{ Name = "Install snapshot (zrw)";        Kind = "node";     Path = "test/snapshot-verify.js" },
     @{ Name = "Size attribution (bu2)";        Kind = "node";     Path = "test/attribution-verify.js" },
     @{ Name = "Platform uninstalls (8ns)";     Kind = "node";     Path = "test/platforms-verify.js" },

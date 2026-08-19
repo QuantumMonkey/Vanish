@@ -142,7 +142,8 @@ function describeOrigin(origin) {
     'system-clean/uwp-leftovers': 'System Clean - left-over Store app data',
     'system-clean/installer-cache': 'System Clean - left-over Windows installers',
     'system-clean/firewall-rules': 'System Clean - firewall rules',
-    'system-clean/dead-references': 'System Clean - dead references and ghost devices'
+    'system-clean/dead-references': 'System Clean - dead references and ghost devices',
+    'system-clean/definitions': 'System Clean - a CleanerML cleaning rule'
   };
   if (known[raw]) return known[raw];
   if (raw.startsWith('system-clean/path')) return 'System Clean - PATH entries';

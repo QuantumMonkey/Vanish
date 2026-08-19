@@ -1235,10 +1235,17 @@ fullModeOnly('kill-process', async (event, params) => {
 // only option before this (operator feedback 2026-08-05). Windows lets
 // openFile and openDirectory combine into one dialog; other platforms would
 // need to split this, but this app only ships on Windows.
-ipcMain.handle('browse-for-path', async () => {
+//
+// 7sl: now used by the definitions cleaner too, which wants a FOLDER and a
+// title that says so. A dialog whose caption still reads 'to check for
+// locks' while the user picks cleaning rules is the same class of defect as
+// a count that is not about what it claims - so the caller names it, and the
+// old call site keeps its wording by supplying nothing.
+ipcMain.handle('browse-for-path', async (event, options) => {
+  const opts = options || {};
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select a file or folder to check for locks',
-    properties: ['openFile', 'openDirectory']
+    title: opts.title || 'Select a file or folder to check for locks',
+    properties: opts.directoryOnly === true ? ['openDirectory'] : ['openFile', 'openDirectory']
   });
   if (result.canceled || result.filePaths.length === 0) return { canceled: true };
   return { canceled: false, path: result.filePaths[0] };
@@ -1755,9 +1762,18 @@ fullModeOnly('cleaner-purge', async (event, params) => {
     // whole, the same way an uninstall's remnant folders do. A finding the
     // engine marked unremovable never reaches the vault, whatever the renderer
     // sent - the guard belongs on this side of the IPC boundary too.
+    //
+    // 7sl: a finding may carry MANY paths rather than one. A CleanerML option
+    // is a single thing the user consents to ('Vivaldi - Cache') and can be a
+    // hundred files, so the option is one row and one vault entry, and undoing
+    // it puts back everything it took. 'path' is still the row's headline
+    // path; 'paths' is the set that actually moves, and it is the set the
+    // engine already pruned so no parent directory carries its own children
+    // into the vault twice.
     const files = items
-      .filter((i) => i.kind === 'file' && i.path && i.removable !== false)
-      .map((i) => ({ path: i.path }));
+      .filter((i) => i.kind === 'file' && i.removable !== false)
+      .flatMap((i) => (Array.isArray(i.paths) && i.paths.length ? i.paths : i.path ? [i.path] : []))
+      .map((path) => ({ path }));
 
     if (registry.length === 0 && files.length === 0) {
       return { success: false, error: 'None of the selected findings can be removed in this release.' };
@@ -1859,7 +1875,8 @@ function cleanerSourceLabel(cleaner) {
     'uwp-leftovers': 'Left-over Store app data',
     'installer-cache': 'Left-over Windows installers',
     'firewall-rules': 'Firewall rule sweep',
-    'dead-references': 'Dead reference sweep'
+    'dead-references': 'Dead reference sweep',
+    definitions: 'Cleaning definitions (CleanerML)'
   };
   return labels[cleaner] || `System Clean (${cleaner})`;
 }
