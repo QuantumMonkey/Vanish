@@ -59,20 +59,32 @@ P2 and is acceptance for a feature that already passes its automated tests.
 
 ---
 
-## !! Sections 1 and 2 CANNOT be done in the sandbox !!
+## Sections 1 and 2 need UAC ON, and the sandbox can do that
 
-**Corrected 2026-08-19, from the operator's own report.** The Windows Sandbox
-image runs `WDAGUtilityAccount` as an administrator **with UAC switched off** -
-measured, `EnableLUA = 0`. So Vanish always starts in Full Mode there, the Audit
-Mode banner never renders, and the button these two sections are about is never
-on screen. An earlier version of this file sent the operator into the sandbox to
-do exactly that, which was wrong.
+**The Windows Sandbox image ships with UAC OFF** - measured 2026-08-19,
+`EnableLUA = 0`, and `WDAGUtilityAccount` is an administrator. In that state
+Vanish always starts in Full Mode, the Audit Mode banner never renders, and the
+button these two sections are entirely about is never on screen.
 
-**Do sections 1 and 2 on the HOST**, with UAC on, launching the portable exe
-unelevated. The host path has no space, and `69a` is specifically about a spaced
-one, so copy the exe somewhere spaced first - the portable build is
-self-contained and `PORTABLE_EXECUTABLE_FILE` is its own location, which is
-exactly what the relaunch path reads:
+**Turn UAC on inside the sandbox and restart Windows FROM INSIDE it** (Start >
+Power > Restart). Do NOT close the sandbox window: closing discards the VM and
+reverts to the clean image, but an in-guest restart keeps everything, so the
+policy change survives and takes effect. Operator-confirmed 2026-08-19; an
+earlier version of this file wrongly claimed the change could not survive at all
+and sent the work to the host.
+
+This is the better venue than the host, for two reasons: the machine is
+disposable, and the repo is already mapped under a path containing a space
+(`Desktop\test folder\...`), which is exactly what `69a` is about.
+
+Because the account is an administrator, UAC on means it receives a filtered
+token at logon - so the app starts unelevated, the banner appears, and clicking
+it produces a real consent prompt. That is the whole test.
+
+If you would rather do it on the host, the host checkout has no space in its
+path, so copy the self-contained exe somewhere spaced first
+(`PORTABLE_EXECUTABLE_FILE` is the exe's own location, which is what the relaunch
+path reads):
 
 ```
 $dest = "$env:USERPROFILE\Desktop\test folder"
@@ -80,11 +92,8 @@ New-Item -ItemType Directory -Force -Path $dest | Out-Null
 Copy-Item "D:\quickhelp\vanish-uninstaller\dist\Vanish-0.8.0-portable.exe" $dest
 ```
 
-Then double-click it from that folder - do NOT run it from an elevated shell,
-because the whole point is to start unelevated and watch it elevate itself.
-
-Section 3 (`1qp`) is the opposite: it wants the throwaway machine, so do that one
-in the sandbox.
+Either way, launch it by double-clicking - never from an elevated shell, because
+the point is to start unelevated and watch it elevate itself.
 
 ---
 
