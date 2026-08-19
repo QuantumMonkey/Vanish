@@ -256,6 +256,16 @@ reversible one. Unlocking it means deciding whether a restore to a file's own
 recorded original path may write into a protected location - a security call
 for the operator, and the open half of `z3s`.
 
+**`z3s`'s open half is DECIDED, 2026-08-19.** The operator allowed a restore
+into a protected location when the destination is the file's own recorded
+original path. It could not be implemented as worded -- "where we took it
+from" is a claim the user-writable manifest makes, and the restore runs
+elevated, so the literal form is an elevation-of-privilege primitive. It
+ships as a narrow exception instead: the Windows installer cache only, `.msi`
+and `.msp` only, nothing already at the destination, and only while the vault
+data directory still passes the SEC-3 ownership check. `7v3` is removable as
+a result -- 136.8 MB measured here, reversibly.
+
 **What 1.0 still needs**, and none of it is code that can be written here:
 
 - `69a`, `adg` - a human at the app, unelevated, watching one relaunch.

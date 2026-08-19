@@ -225,6 +225,110 @@ try {
     if ([IO.Directory]::Exists($jChainWork)) { [IO.Directory]::Delete($jChainWork, $true) }
 }
 
+
+# ======================================================================
+# z3s OPEN HALF (operator decision 2026-08-19): a restore may write into a
+# protected location when the destination is the file's own recorded
+# original path. Implemented as a narrow exception, and this is where the
+# narrowness is held in place.
+# ======================================================================
+# The decision as worded cannot be implemented: "where we took it from" is a
+# claim the MANIFEST makes, the manifest is user-writable, and the restore runs
+# elevated. So the exception is conditional on the vault's own data directory
+# still passing the SEC-3 ownership check - and THAT is the assertion that
+# matters most here, because every other assertion in this block passes
+# trivially on a machine where the condition is false.
+#
+# Which is the trap this file exists to avoid. If the fixture directory is not
+# actually trusted, "System32 is refused" is true for a reason that has nothing
+# to do with the guard being right.
+Write-Host ""
+Write-Host "z3s - the narrow protected-restore exception" -ForegroundColor Cyan
+
+$z3sRoot  = Join-Path $env:TEMP "vanish-z3s-verify"
+$z3sVault = Join-Path $z3sRoot "vault"
+Remove-TestTree $z3sRoot
+$null = New-Item -ItemType Directory -Path $z3sVault -Force
+
+function Test-Restorable {
+    param([string]$path, [switch]$MustNotExist)
+    $params = @{ path = $path; vaultRoot = $z3sVault }
+    if ($MustNotExist) { $params.mustNotExist = $true }
+    return (Invoke-Engine "protected-destination-probe" $params)
+}
+
+$cacheMsi = Join-Path $env:SystemRoot "Installer\vanish-z3s-not-a-real-file.msi"
+
+# CONDITION 3 FIRST, because it is what holds the other three up. A freshly
+# created directory inherits its parent's ACL and is owned by the interactive
+# user, so it is exactly the state in which the recorded original path is
+# attacker-controlled - and the exception must not apply.
+$beforeSecuring = Test-Restorable -path $cacheMsi
+Assert-True ($beforeSecuring.dataDirTrusted -eq $false) "a freshly created vault directory is NOT trusted"
+Assert-True ($beforeSecuring.restorable -eq $false)     "and while it is not, even the one allowed location is refused - the manifest is attacker-controlled in that state"
+
+# Now make it genuinely trusted the way main.js secures the real data
+# directory, and re-ask everything.
+$z3sAdmins = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null)
+$z3sSystem = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::LocalSystemSid, $null)
+$z3sInh    = [System.Security.AccessControl.InheritanceFlags]::ContainerInherit -bor `
+             [System.Security.AccessControl.InheritanceFlags]::ObjectInherit
+try {
+    $z3sAcl = Get-Acl -LiteralPath $z3sRoot
+    $z3sAcl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @($z3sAcl.Access)) { $null = $z3sAcl.RemoveAccessRule($rule) }
+    $z3sAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($z3sAdmins, [System.Security.AccessControl.FileSystemRights]::FullControl, $z3sInh, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)))
+    $z3sAcl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($z3sSystem, [System.Security.AccessControl.FileSystemRights]::FullControl, $z3sInh, [System.Security.AccessControl.PropagationFlags]::None, [System.Security.AccessControl.AccessControlType]::Allow)))
+    $z3sAcl.SetOwner($z3sAdmins)
+    Set-Acl -LiteralPath $z3sRoot -AclObject $z3sAcl -ErrorAction Stop
+} catch {
+    # Setting the owner to the Administrators group needs SeRestorePrivilege,
+    # which an unelevated shell does not have. Reported below rather than
+    # swallowed.
+}
+
+$trustedProbe = Test-Restorable -path $cacheMsi
+if ($trustedProbe.dataDirTrusted -ne $true) {
+    Write-Host "  SKIP  the fixture could not be made trusted (setting the owner to Administrators needs elevation), so the ALLOW half of this exception cannot be exercised in this tier - every path below would be refused for the wrong reason" -ForegroundColor Yellow
+} else {
+    Assert-True ($trustedProbe.protected  -eq $true)  "the installer cache is still a protected location - the exception does not un-protect it"
+    Assert-True ($trustedProbe.restorable -eq $true)  "and a .msi that is not there can be put back into it, which is the whole decision"
+
+    $msp = Test-Restorable -path (Join-Path $env:SystemRoot "Installer\vanish-z3s-not-real.msp")
+    Assert-True ($msp.restorable -eq $true) "a .msp too - the cache holds both"
+
+    # Everything the decision did NOT unlock. Each of these is asserted with the
+    # fixture KNOWN trusted, so a false here means the guard refused, not that
+    # the precondition happened to fail.
+    $mustStayRefused = @(
+        @{ Path = (Join-Path $env:SystemRoot 'System32\vanish-z3s.msi'); Why = 'System32, even with an allowed extension' }
+        @{ Path = (Join-Path $env:SystemRoot 'SysWOW64\vanish-z3s.msi'); Why = 'SysWOW64' }
+        @{ Path = (Join-Path $env:SystemRoot 'WinSxS\vanish-z3s.msi');   Why = 'WinSxS' }
+        @{ Path = (Join-Path $env:SystemRoot 'vanish-z3s.msi');          Why = 'the Windows directory itself' }
+        @{ Path = (Join-Path $env:SystemRoot 'Installer\vanish-z3s.exe'); Why = 'the right folder, the wrong extension' }
+        @{ Path = (Join-Path $env:SystemRoot 'Installer\sub\vanish-z3s.msi'); Why = 'a subdirectory of the cache' }
+        @{ Path = (Join-Path $env:SystemRoot 'Installer\..\System32\vanish-z3s.msi'); Why = 'a traversal back out of the cache' }
+        @{ Path = 'C:\vanish-z3s.msi';                                    Why = 'a drive root' }
+        @{ Path = (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\StartUp\vanish-z3s.msi'); Why = 'the all-users Startup folder' }
+    )
+    foreach ($c in $mustStayRefused) {
+        Assert-True ((Test-Restorable -path $c.Path).restorable -eq $false) ("still refused: " + $c.Why)
+    }
+
+    # Putting back a file that is gone is a restore. Overwriting one that is
+    # there is a different act, and the restore path asks with -MustNotExist
+    # for exactly this reason.
+    $liveMsi = @(Get-ChildItem (Join-Path $env:SystemRoot 'Installer') -Filter *.msi -Force -ErrorAction SilentlyContinue | Select-Object -First 1)
+    if ($liveMsi.Count -gt 0) {
+        $existing = $liveMsi[0].FullName
+        Assert-True ((Test-Restorable -path $existing).restorable -eq $true) "quarantine may TAKE a cached installer that is present"
+        Assert-True ((Test-Restorable -path $existing -MustNotExist).restorable -eq $false) "but a restore may not overwrite one that is present - only put back one that is gone"
+    } else {
+        Write-Host "  SKIP  no cached installer on this machine to test the overwrite refusal against" -ForegroundColor Yellow
+    }
+}
+
+Remove-TestTree $z3sRoot
 # ======================================================================
 # TASK-05 elevated relaunch argument vector (bd vanish-uninstaller-ceb).
 #

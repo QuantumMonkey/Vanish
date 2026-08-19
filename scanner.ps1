@@ -3316,6 +3316,116 @@ function Test-ProtectedDestination {
     return $false
 }
 
+
+# ==========================================================================
+# z3s, OPEN HALF. Operator decision 2026-08-19: a restore MAY write into a
+# protected location when the destination is the file's own recorded
+# original path.
+# ==========================================================================
+# Taken literally that decision cannot be implemented, and saying so is part
+# of implementing it. The restore loop's own comment is the reason:
+#
+#     "The manifest is user-writable; the restore runs elevated. Both the
+#      source it reads and the destination it writes are untrusted."
+#
+# "Restore it to where we took it from" is a claim the MANIFEST makes. An
+# attacker who can write entry.json writes originalPath = System32\evil.dll,
+# supplies the payload, and asks an elevated process to move it there. That is
+# not a relaxed guard, it is an elevation-of-privilege primitive with a
+# comment explaining why it is fine.
+#
+# So the decision is implemented in the narrow form that actually buys what it
+# was asked for. 7v3 needs exactly one directory - the Windows installer cache
+# - and every condition below is checked against BOTH the literal path and the
+# junction-resolved one, because a reparse point inside the cache pointing at
+# System32 is the obvious way through a location check.
+#
+#   1. Under %SystemRoot%\Installer, and DIRECTLY in it. The cache is flat;
+#      a subdirectory is not something we put there.
+#   2. A .msi or .msp. The cache holds nothing else, and a file Windows will
+#      not execute unless it is registered against a product code is about as
+#      inert as a write into that folder can be.
+#   3. THE VAULT'S OWN DATA DIRECTORY MUST CURRENTLY PASS THE SEC-3 CHECK -
+#      no non-administrator writer, and owned by a principal we trust. This is
+#      the load-bearing condition, and it is what makes the whole thing safe
+#      rather than merely narrow: if the manifest is user-writable then the
+#      recorded original path is attacker-controlled and the exception must
+#      not apply. main.js already tests and re-applies that ACL at startup, so
+#      the normal state is trusted; a machine where it is not gets the old
+#      refusal, which is the correct answer for a machine in that state.
+#   4. On restore only: nothing may already exist at the destination. Putting
+#      back a file that is gone is a restore. Overwriting a file that is there
+#      is a different act, and not one the user asked for.
+#
+# What is NOT unlocked, deliberately: System32, SysWOW64, WinSxS, INF, Boot,
+# any Start Menu, any drive root, and the engine's own directory. Those are
+# where privileged execution gets planted, and none of them is what the 137 MB
+# was sitting in.
+$script:RestorableProtectedExtensions = @('.msi', '.msp')
+
+function Get-RestorableProtectedRoots {
+    if ([string]::IsNullOrWhiteSpace($env:SystemRoot)) { return @() }
+    return @((Join-Path $env:SystemRoot 'Installer'))
+}
+
+# Condition 3, asked of the SAME function SEC-3 uses rather than a copy of its
+# reasoning - the two must not be able to drift, for the same reason the
+# quarantine and restore guards share one predicate.
+function Test-VaultDataDirTrusted {
+    param([string]$vaultRoot)
+
+    if ([string]::IsNullOrWhiteSpace($vaultRoot)) { return $false }
+    $dataDir = Split-Path -Path $vaultRoot -Parent
+    if ([string]::IsNullOrWhiteSpace($dataDir)) { return $false }
+
+    try {
+        $verdict = Test-VanishDataDirAcl -p @{ path = $dataDir }
+    } catch {
+        return $false
+    }
+    return ($verdict -and $verdict.success -eq $true -and $verdict.protected -eq $true)
+}
+
+function Test-RestorableProtectedPath {
+    param(
+        [string]$path,
+        [string]$vaultRoot,
+        [switch]$MustNotExist
+    )
+
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+
+    try { $full = [System.IO.Path]::GetFullPath($path) } catch { return $false }
+
+    $resolved = Resolve-DestinationTarget $full
+    if (-not $resolved) { return $false }
+
+    $roots = Get-RestorableProtectedRoots
+    if ($roots.Count -eq 0) { return $false }
+
+    # Both forms, against every allowed root, and the PARENT has to be the root
+    # itself - StartsWith would accept %SystemRoot%\Installer\..\System32 as
+    # readily as the cache, and GetFullPath is not the only way in.
+    foreach ($candidate in @($full, $resolved)) {
+        $parent = [System.IO.Path]::GetDirectoryName($candidate)
+        if ([string]::IsNullOrWhiteSpace($parent)) { return $false }
+
+        $ok = $false
+        foreach ($root in $roots) {
+            try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
+            if ($parent.TrimEnd('\').Equals($rootFull.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { $ok = $true; break }
+        }
+        if (-not $ok) { return $false }
+
+        $ext = [System.IO.Path]::GetExtension($candidate)
+        if (-not ($script:RestorableProtectedExtensions -contains $ext.ToLowerInvariant())) { return $false }
+    }
+
+    if ($MustNotExist -and (Test-Path -LiteralPath $full -ErrorAction SilentlyContinue)) { return $false }
+
+    return (Test-VaultDataDirTrusted -vaultRoot $vaultRoot)
+}
+
 function Get-ItemSizeBytes {
     param([string]$path)
     try {
@@ -3433,7 +3543,12 @@ function Invoke-QuarantineItems {
         #
         # Deliberately checked against the SAME predicate the restore uses
         # rather than a copy of its list, so the two can never drift apart.
-        if (Test-ProtectedDestination $src) {
+        # z3s open half, 2026-08-19: the narrow exception is asked FIRST and
+        # asked here too, so the symmetry survives the relaxation. If restore
+        # would accept this path back, quarantine may take it; if not, it may
+        # not. The two questions are still one function.
+        if ((Test-ProtectedDestination $src) -and
+            -not (Test-RestorableProtectedPath -path $src -vaultRoot $p.vaultRoot)) {
             $row.status = "failed"
             $row.error  = "Refused: this lives in a protected system location, and the vault could not put it back afterwards. Nothing was moved."
             $fileRows.Add($row)
@@ -3597,8 +3712,17 @@ function Invoke-VaultRestore {
             $res.error = "Rejected: vault payload path escapes the entry folder."
             $fileResults.Add($res); continue
         }
-        if (Test-ProtectedDestination $f.originalPath) {
-            $res.error = "Rejected: refusing to restore into a protected system location."
+        # z3s open half. The exception is deliberately evaluated against the
+        # path this loop is ABOUT TO WRITE, not against anything the manifest
+        # claims elsewhere, and -MustNotExist means a restore can only put
+        # back a file that is gone - never overwrite one that is there.
+        if ((Test-ProtectedDestination $f.originalPath) -and
+            -not (Test-RestorableProtectedPath -path $f.originalPath -vaultRoot $p.vaultRoot -MustNotExist)) {
+            $res.error = if (Test-Path -LiteralPath $f.originalPath -ErrorAction SilentlyContinue) {
+                "Rejected: something already exists at that protected system path, and overwriting it is not a restore."
+            } else {
+                "Rejected: refusing to restore into a protected system location."
+            }
             $fileResults.Add($res); continue
         }
 
@@ -5888,25 +6012,27 @@ function Find-OrphanInstallerCache {
             Where-Object { $_.Extension -in @('.msi', '.msp') })
     } catch { return $findings }
 
-    # AUDIT ONLY, and this is the honest answer rather than a cautious one.
+    # REMOVABLE as of 2026-08-19, and only because the promise can now be kept.
     #
-    # The cache lives under %SystemRoot%, which Test-ProtectedDestination blocks
-    # as a restore destination - so the vault can take these files and can NEVER
-    # put them back. Measured, not assumed: a planted orphan quarantined
-    # cleanly, the entry looked correct, and the restore returned "Rejected:
-    # refusing to restore into a protected system location" with the payload
-    # stranded in the vault.
+    # These were audit-only for a real reason: the cache lives under
+    # %SystemRoot%, Test-ProtectedDestination blocked it as a restore
+    # destination, and a vault that can take a file and never put it back is
+    # the exact thing this app exists to be the alternative to. That was
+    # measured rather than assumed - a planted orphan quarantined cleanly and
+    # the restore came back "Rejected", with the payload stranded.
     #
-    # Removing them anyway would mean shipping the one thing this app exists to
-    # be the alternative to - a deletion with no way back - and dressing it as a
-    # reversible one. The space is real (137 MB of 977 MB measured here) and it
-    # stays unclaimed until the restore path can honour the promise. That is a
-    # decision recorded in 7v3, not an oversight.
+    # z3s's open half was the operator decision that unblocks it, taken
+    # 2026-08-19: a restore may write into a protected location when the
+    # destination is the file's own recorded original path. Implemented as a
+    # narrow exception rather than a relaxed list - this directory only, .msi
+    # and .msp only, nothing already there, and only while the vault's own data
+    # directory still passes the SEC-3 ownership check. See
+    # Test-RestorableProtectedPath for why that last condition is the one
+    # holding the rest up.
     #
-    # Note what is NOT done here: relaxing the guard. The blocked list exists
-    # because writing into %SystemRoot% is how privileged execution gets
-    # planted, and a restore is still a write.
-    $protectedNote = 'Listed only. These sit inside a protected Windows folder, and Vanish will not remove anything it cannot put back - the vault refuses to restore into that location. The space is real; the promise comes first.'
+    # The note still says where these live. "Reversible" is a claim, and the
+    # user is entitled to know it is being made about a Windows folder.
+    $protectedNote = 'These sit inside a protected Windows folder. Vanish can move them to quarantine and put them back exactly where they came from - the only place it will write inside that folder - so nothing here is a one-way deletion.'
 
     foreach ($f in $files) {
         if ($referenced.Contains($f.Name)) { continue }
@@ -5919,7 +6045,7 @@ function Find-OrphanInstallerCache {
             kind      = "file"
             path      = $f.FullName
             sizeBytes = [long]$f.Length
-            removable = $false
+            removable = $true
             note      = $protectedNote
         })
     }
@@ -7423,11 +7549,20 @@ if ($Action) {
             # SEC-2 verification hook: ask the restore guard for its verdict on a
             # path without performing a restore. Read-only and side-effect free,
             # so the control is testable in Audit Mode as well as Full Mode.
+            # z3s: "protected" and "restorable" are different questions now, and
+            # the probe reports both. A path can be protected AND restorable -
+            # that pair is the whole exception, and a test that could only see
+            # the first would pass while the second was wide open.
+            $probeArgs = @{ path = ([string]$Params.path) }
+            if ($Params.vaultRoot) { $probeArgs.vaultRoot = [string]$Params.vaultRoot }
+            $mustNotExist = ($Params.mustNotExist -eq $true)
             @{
-                success   = $true
-                path      = [string]$Params.path
-                protected = [bool](Test-ProtectedDestination ([string]$Params.path))
-                resolved  = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
+                success    = $true
+                path       = [string]$Params.path
+                protected  = [bool](Test-ProtectedDestination ([string]$Params.path))
+                restorable = [bool](Test-RestorableProtectedPath -path ([string]$Params.path) -vaultRoot ([string]$Params.vaultRoot) -MustNotExist:$mustNotExist)
+                dataDirTrusted = [bool](Test-VaultDataDirTrusted -vaultRoot ([string]$Params.vaultRoot))
+                resolved   = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
             } | ConvertTo-Json -Depth 4 -Compress
         }
         "cleanerml-probe" {

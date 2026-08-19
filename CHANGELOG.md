@@ -10,6 +10,35 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added -- the installer cache is reclaimable, and the removal can be undone
+
+Windows keeps a copy of every installer it has ever run, so that Repair and
+Uninstall keep working. Copies belonging to products that are gone are dead
+weight -- **136.8 MB of them on the development machine**, measured, not
+estimated. Vanish has been able to identify them since 0.7 and has refused to
+remove them ever since, because they live inside a protected Windows folder
+that the vault could take a file OUT of and never put back. An offer to remove
+something is a promise to be able to restore it, and that promise could not be
+kept, so the offer was not made.
+
+It can be kept now. The restore guard has a **narrow** exception: a file may be
+put back into the Windows installer cache, and nowhere else protected, when
+every one of these holds -- directly in that one directory, a `.msi` or `.msp`,
+nothing already sitting at the destination, and the vault's own data directory
+still passing its ownership check. That last condition is the load-bearing one.
+The record of where a file came from lives in a file on disk; if that file is
+writable by a standard user then "put it back where it came from" is a claim an
+attacker controls, and the exception refuses to apply at all.
+
+What is deliberately **not** unlocked: System32, SysWOW64, WinSxS, INF, Boot,
+any Start Menu folder, any drive root, and Vanish's own directory. Those are
+where privileged execution gets planted, and none of them is where the 136.8 MB
+was sitting.
+
+The round trip is tested rather than reasoned about: a real cached installer
+goes into the vault, comes back to its original path, and is checked
+byte-for-byte by SHA256 -- and a file the exception does not cover, planted in
+the same directory, is still refused before anything moves.
 ### Added -- other people's cleaning rules, run through our vault (`7sl`)
 
 A new System Clean section, **Cleaning definitions**, that reads CleanerML --

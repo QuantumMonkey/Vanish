@@ -351,30 +351,63 @@ app.whenReady().then(async () => {
     const proposedReferenced = (msiScan.findings || []).filter((f) => referencedNames.has(String(f.label).toLowerCase()));
     assert(proposedReferenced.length === 0, `no still-referenced installer is proposed (${proposedReferenced.length} violation(s))`);
 
-    // The sweep is AUDIT ONLY, and these two assertions are why. The cache
-    // lives under %SystemRoot%, which the restore path blocks as a
-    // destination, so a removal here could never be undone.
-    assert(msiFinding && msiFinding.removable === false, 'the finding is NOT offered as removable - the vault cannot restore into %SystemRoot%');
-    assert(msiFinding && /cannot put it back|protected/i.test(String(msiFinding.note || '')), 'and it says why, rather than just being greyed out');
-
-    // INV-1 SYMMETRY: the vault must refuse to TAKE what it cannot RETURN.
-    // Sent straight at the IPC boundary with removable forced true, which is
-    // what a compromised or buggy renderer would do - the guard has to live
-    // below this line, not in the UI.
-    const forced = Object.assign({}, msiFinding, { removable: true });
-    const msiPurge = await invoke('cleaner-purge', { cleaner: 'installer-cache', items: [forced] });
-    const purgedFiles = (msiPurge && msiPurge.files) || [];
-    const refusal = purgedFiles.find((f) => String(f.originalPath).toLowerCase() === MSI_ORPHAN.toLowerCase());
-    assert(!!refusal, 'the engine reports on the file it was asked to take');
-    assert(refusal && refusal.status !== 'quarantined', `it was NOT quarantined (status '${refusal && refusal.status}')`);
+    // z3s OPEN HALF, operator decision 2026-08-19. This leg used to assert the
+    // opposite - that the finding was NOT removable and that the vault refused
+    // to take it - and that was correct while the restore path could not put it
+    // back. The decision was to allow a restore into a protected location when
+    // the destination is the file's own recorded original path, implemented as a
+    // narrow exception (this directory, .msi/.msp only, nothing already there,
+    // and only while the vault data directory passes the SEC-3 check).
+    //
+    // So what has to be proved here is the ROUND TRIP, on the real machine, into
+    // a directory that is still protected for every other purpose. An offer to
+    // remove something is a promise to be able to put it back, and this is the
+    // only place that promise gets tested rather than reasoned about.
+    assert(msiFinding && msiFinding.removable === true, 'the finding IS offered as removable now');
     assert(
-      refusal && /could not put it back|protected system location/i.test(String(refusal.error || '')),
-      `and the refusal names the reason (got '${(refusal && refusal.error) || ''}')`
+      msiFinding && /protected Windows folder/i.test(String(msiFinding.note || '')),
+      'and it still says these live inside a protected Windows folder, rather than quietly dropping the caveat'
     );
+
+    const msiHashBefore = ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`);
+    const msiPurge = await invoke('cleaner-purge', { cleaner: 'installer-cache', items: [msiFinding] });
+    assert(msiPurge && msiPurge.success === true, `the purge succeeds (${(msiPurge && msiPurge.error) || 'no error'})`);
+    assert(msiPurge && msiPurge.quarantinedCount === 1, 'the cached installer went into the vault');
+    assert(ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'False', 'and it is gone from the cache');
+
+    const msiRestore = await invoke('vault-restore', { entryId: msiPurge.entryId });
+    assert(msiRestore && msiRestore.success === true, `the restore succeeds (${(msiRestore && msiRestore.error) || 'no error'})`);
+    assert(msiRestore && msiRestore.failed === 0, 'with nothing rejected - the narrow exception applies to exactly this path');
     assert(
       ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'True',
-      'THE ASSERTION THIS EXISTS FOR: the file is still on disk. A refusal that had already moved it would strand it in the vault forever'
+      'THE ASSERTION THIS EXISTS FOR: the file is back inside %SystemRoot%\\Installer, where it came from'
     );
+    assert(
+      ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`) === msiHashBefore,
+      'and it is byte-identical - a restore that returned different bytes would be a different file with the right name'
+    );
+
+    // THE NARROWNESS, at the same boundary and in the same directory. A file
+    // the exception does not cover must still be refused, and refused BEFORE
+    // anything moves - a refusal that had already taken the file would strand
+    // it in the vault forever, which is the original z3s bug.
+    //
+    // Planted with a .exe extension rather than in a genuinely dangerous
+    // directory on purpose: this exercises the real guard at the real boundary
+    // without a test that does damage if the guard is broken.
+    const MSI_WRONG_EXT = `${MSI_CACHE}\\vanish-ipc-orphan-probe.exe`;
+    ps(`Set-Content -LiteralPath '${MSI_WRONG_EXT}' -Value 'probe' -Encoding ascii -Force`);
+    const forged = Object.assign({}, msiFinding, { path: MSI_WRONG_EXT, removable: true });
+    const wrongPurge = await invoke('cleaner-purge', { cleaner: 'installer-cache', items: [forged] });
+    const wrongRows = (wrongPurge && wrongPurge.files) || [];
+    const wrongRow = wrongRows.find((f) => String(f.originalPath).toLowerCase() === MSI_WRONG_EXT.toLowerCase());
+    assert(!!wrongRow, 'the engine reports on the file it was asked to take');
+    assert(wrongRow && wrongRow.status !== 'quarantined', `a file the exception does not cover is NOT quarantined (status '${wrongRow && wrongRow.status}')`);
+    assert(
+      ps(`Test-Path -LiteralPath '${MSI_WRONG_EXT}'`) === 'True',
+      'and it is still on disk - the refusal happens before anything moves'
+    );
+    ps(`Remove-Item -LiteralPath '${MSI_WRONG_EXT}' -Force -ErrorAction SilentlyContinue`);
     }
 
     console.log('');

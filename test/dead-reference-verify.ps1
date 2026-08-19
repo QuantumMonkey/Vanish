@@ -116,24 +116,37 @@ Assert-True (
     ($findings.Count -eq 0) -or (@($findings | Where-Object { [string]$_.path -like "$env:SystemRoot\Installer\*" }).Count -eq $findings.Count)
 ) "nothing outside the Windows installer cache is ever proposed"
 
-# AUDIT ONLY, deliberately, and this assertion pins the reason so nobody
-# 'restores' the removal later without also fixing the restore path.
+# REMOVABLE as of 2026-08-19 (z3s open half, operator decision), and this
+# assertion pins WHY - because the reason it was audit-only was good, and the
+# only thing that changed is that the vault can now honour the promise.
 #
-# The cache is under %SystemRoot%, which Test-ProtectedDestination blocks as a
-# restore DESTINATION. Measured 2026-08-18: a planted orphan quarantined
-# cleanly and the restore then returned 'Rejected: refusing to restore into a
-# protected system location', leaving the payload stranded in the vault. The
-# space is real and it stays unclaimed until the vault can honour the promise.
+# Measured 2026-08-18: a planted orphan quarantined cleanly and the restore
+# returned 'Rejected: refusing to restore into a protected system location',
+# leaving the payload stranded. What unblocks it is a NARROW exception - this
+# one directory, .msi and .msp only, nothing already at the destination, and
+# only while the vault data directory still passes the SEC-3 ownership check.
+# The round trip itself is asserted in phase4-ipc-verify, which is elevated;
+# what this suite pins is that the OFFER matches the capability.
 Assert-True (
-    ($findings.Count -eq 0) -or (@($findings | Where-Object { $_.removable -eq $false }).Count -eq $findings.Count)
-) "nothing is offered for removal - the vault cannot restore into %SystemRoot%, so Vanish will not take it"
+    ($findings.Count -eq 0) -or (@($findings | Where-Object { $_.removable -eq $true }).Count -eq $findings.Count)
+) "every finding is offered for removal - the vault can now put these back where they came from"
 
+# The note must still say where these live. "Reversible" is a claim, and a
+# user is entitled to know it is being made about a Windows folder.
 Assert-True (
-    ($findings.Count -eq 0) -or (@($findings | Where-Object { [string]$_.note -match 'put it back|protected' }).Count -eq $findings.Count)
-) "and every finding says WHY it is listed rather than actionable"
+    ($findings.Count -eq 0) -or (@($findings | Where-Object { [string]$_.note -match 'protected Windows folder' }).Count -eq $findings.Count)
+) "and every finding still says these sit inside a protected Windows folder"
+
+# The exception must not have widened the SWEEP. Everything proposed still has
+# to be a .msi or .msp in the cache itself - if the sweep ever proposed
+# something else in there, the restore guard would refuse it and the offer
+# would be a lie.
+Assert-True (
+    ($findings.Count -eq 0) -or (@($findings | Where-Object { [System.IO.Path]::GetExtension([string]$_.path) -in @('.msi', '.msp') }).Count -eq $findings.Count)
+) "and every one is a .msi or .msp, which is all the restore exception will take back"
 
 $reclaimable = (@($findings | Measure-Object -Property sizeBytes -Sum).Sum)
-Write-Host ("  (identified but NOT reclaimable yet: {0} MB)" -f [math]::Round($reclaimable / 1MB, 1))
+Write-Host ("  (reclaimable, reversibly: {0} MB)" -f [math]::Round($reclaimable / 1MB, 1))
 
 # ======================================================================
 # be8 - orphaned firewall rules
