@@ -29,6 +29,7 @@ does not depend on where the repo sits on the host.
 | Phase | Wall clock | Your attention |
 | --- | --- | --- |
 | Sandbox boots, maps folders, runs `npm test` | 15-25 min | **none** - walk away |
+| Sections 1 and 2 are HOST work, not sandbox work - see the note below | | |
 | Section 1 (`69a`) - three UAC branches | ~6 min | ~6 min, all of it |
 | Section 2 (`adg`) - piggybacks on section 1 | ~2 min | ~2 min |
 | Section 3 (`1qp`) - install Chrome, break it, force-uninstall | ~20 min | ~8 min (the rest is a download and an installer) |
@@ -55,6 +56,35 @@ P2 and is acceptance for a feature that already passes its automated tests.
    **973 passed, 0 failed** with three suites reporting NOT RUN (they need an
    elevated shell and the sandbox session starts unelevated - that is correct,
    not a failure).
+
+---
+
+## !! Sections 1 and 2 CANNOT be done in the sandbox !!
+
+**Corrected 2026-08-19, from the operator's own report.** The Windows Sandbox
+image runs `WDAGUtilityAccount` as an administrator **with UAC switched off** -
+measured, `EnableLUA = 0`. So Vanish always starts in Full Mode there, the Audit
+Mode banner never renders, and the button these two sections are about is never
+on screen. An earlier version of this file sent the operator into the sandbox to
+do exactly that, which was wrong.
+
+**Do sections 1 and 2 on the HOST**, with UAC on, launching the portable exe
+unelevated. The host path has no space, and `69a` is specifically about a spaced
+one, so copy the exe somewhere spaced first - the portable build is
+self-contained and `PORTABLE_EXECUTABLE_FILE` is its own location, which is
+exactly what the relaunch path reads:
+
+```
+$dest = "$env:USERPROFILE\Desktop\test folder"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+Copy-Item "D:\quickhelp\vanish-uninstaller\dist\Vanish-0.8.0-portable.exe" $dest
+```
+
+Then double-click it from that folder - do NOT run it from an elevated shell,
+because the whole point is to start unelevated and watch it elevate itself.
+
+Section 3 (`1qp`) is the opposite: it wants the throwaway machine, so do that one
+in the sandbox.
 
 ---
 
