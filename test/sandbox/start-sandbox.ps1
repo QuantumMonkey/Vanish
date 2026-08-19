@@ -60,14 +60,41 @@ $sandboxNode = 'C:\Users\WDAGUtilityAccount\Desktop\nodejs'
 # because a diagnostic that can go silent is the thing this repo keeps fixing.
 # Quotes are doubled ("" ) because the whole thing lives inside a double-quoted
 # XML attribute value.
+# 2026-08-19, THIRD silent failure of this hook and the last one it gets to
+# have. The operator reported the sandbox starting and nothing running, again,
+# with nothing anywhere to say why. Two changes, both aimed at that rather
+# than at a guess about the cause:
+#
+# 1. NO CALL OPERATOR. The payload used `& $s` to run the setup script, and a
+#    bare & inside XML element text is the start of an entity reference. It is
+#    escaped below, and it was escaped before, and it is STILL the single
+#    character in this file with a history of taking the whole document down
+#    silently. powershell.exe -File needs no & at all, so there is now none to
+#    escape.
+#
+# 2. A BREADCRUMB, written the moment the mapped folder is reachable and
+#    BEFORE anything else is attempted. It lands in the mapped folder, so it
+#    is readable from the HOST afterwards, and it separates the two failures
+#    that have so far looked identical from outside: no breadcrumb means the
+#    logon command never ran or the folder never mounted; a breadcrumb with no
+#    results after it means setup ran and died. Guessing between those two is
+#    what has cost three sessions.
+#
+# The wait is 120s rather than 60s: mounting is slower on a cold boot than the
+# first version assumed, and the cost of waiting too long is a slow start,
+# while the cost of waiting too little is another silent nothing.
 $logon = @(
-    "`$s = '$sandboxRepo\test\sandbox\sandbox-setup.ps1';",
+    "`$r = '$sandboxRepo';",
     "Write-Host 'Waiting for the mapped folder to mount...' -ForegroundColor Cyan;",
     "`$n = 0;",
-    "while (-not (Test-Path -LiteralPath `$s) -and `$n -lt 60) { Start-Sleep -Seconds 1; `$n++ };",
-    "if (Test-Path -LiteralPath `$s) { & `$s }",
-    "else {",
-    "Write-Host 'The repo never appeared at $sandboxRepo.' -ForegroundColor Red;",
+    "while (-not (Test-Path -LiteralPath `$r) -and `$n -lt 120) { Start-Sleep -Seconds 1; `$n++ };",
+    "if (Test-Path -LiteralPath `$r) {",
+    "`$b = Join-Path `$r 'test\logs\sandbox-run';",
+    "New-Item -ItemType Directory -Force -Path `$b | Out-Null;",
+    "Set-Content -LiteralPath (Join-Path `$b 'LOGON-RAN.txt') -Value ((Get-Date).ToString('s') + ' logon command reached the mapped folder after ' + `$n + 's');",
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\sandbox-setup.ps1')",
+    "} else {",
+    "Write-Host 'The repo never appeared at $sandboxRepo after 120s.' -ForegroundColor Red;",
     "Write-Host 'The host folder is probably missing or was renamed. Nothing ran.' -ForegroundColor Red",
     "}"
 ) -join ' '

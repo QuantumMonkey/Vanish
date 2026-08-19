@@ -6,6 +6,9 @@
 .vscode/
 dist/
 *.log
+# Suite output, per machine. Re-derivable, sometimes large, and the sandbox
+# run leaves .txt transcripts here that the *.log rule above does not catch.
+test/logs/
 .claude/settings.local.json
 .security-reports/
 

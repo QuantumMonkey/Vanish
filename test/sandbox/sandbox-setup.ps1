@@ -47,8 +47,13 @@ Write-Host "Node:  $(node --version)"
 Write-Host "Path:  $(Get-Location)"
 Write-Host "(path deliberately contains a space -- covers TASK-05/69a)"
 Write-Host ""
-Write-Host "Running the unelevated regression suite..." -ForegroundColor Cyan
-npm test
+# Through run-in-sandbox.ps1 rather than `npm test` directly, so the automatic
+# route and the manual one are the same code. That script also writes its
+# transcripts into the MAPPED folder, which is the only place a sandbox result
+# still exists after the VM is closed - `npm test` leaves them in test\logs
+# keyed by machine name, which survives, but the run's own stdout did not.
+Write-Host "Running the regression suite..." -ForegroundColor Cyan
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'run-in-sandbox.ps1')
 
 # 2026-08-07: the packaged portable exe is what the operator actually runs, and
 # a bug (blank window on elevated relaunch, commit e00f252) was specific to the
