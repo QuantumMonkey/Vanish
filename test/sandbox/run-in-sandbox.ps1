@@ -78,14 +78,26 @@ Write-Host ''
 
 # 2>&1 so a suite that dies on stderr still leaves its reason in the file. The
 # host reads these afterwards, and "it failed" without the text is a second run.
+#
+# NOT Tee-Object. PowerShell 5.1's Tee-Object has no -Encoding parameter and
+# writes UTF-16, so the first pass over the returned transcripts on the host
+# found nothing at all with grep - a file that is unreadable by the tools that
+# will read it is not a transcript, it is a second trip to the sandbox.
+# Streamed AND collected: the operator watches this window while it runs, so
+# buffering the whole suite into a variable first would leave it blank for
+# several minutes, which is its own kind of silent failure.
+$suiteOut = New-Object System.Collections.Generic.List[string]
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'test\run-all.ps1') 2>&1 |
-    Tee-Object -FilePath $fullLog
+    ForEach-Object { $line = [string]$_; Write-Host $line; $suiteOut.Add($line) }
 $suiteExit = $LASTEXITCODE
+$suiteOut | Out-File -FilePath $fullLog -Encoding ascii
 
 Write-Host ''
 Write-Host 'Collecting the environment report...' -ForegroundColor Cyan
+$repOut = New-Object System.Collections.Generic.List[string]
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $repoRoot 'test\sandbox\collect-report.ps1') 2>&1 |
-    Tee-Object -FilePath $repLog
+    ForEach-Object { $line = [string]$_; Write-Host $line; $repOut.Add($line) }
+$repOut | Out-File -FilePath $repLog -Encoding ascii
 
 # The marker is what tells a watcher on the host that this finished rather than
 # that the window is still running - the per-suite logs appear one at a time

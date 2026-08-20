@@ -29,7 +29,7 @@ const { execFileSync } = require('node:child_process');
 process.env.VANISH_DISABLE_AUTO_ELEVATE = '1';
 process.env.VANISH_HEADLESS_HARNESS = '1';
 
-require('../main.js');
+const main = require('../main.js');
 
 let pass = 0;
 let fail = 0;
@@ -98,9 +98,14 @@ app.whenReady().then(async () => {
   // check-admin and assigns currentTier in the callback (main.js:144), starting
   // from TIER_AUDIT. Reading get-tier the instant whenReady fires therefore
   // returns audit in an elevated process, and this suite refused itself out of
-  // the first elevated run it was ever part of. Same 3s the other IPC suites
-  // wait for the same reason.
-  await new Promise((resolve) => setTimeout(resolve, 3000));
+  // the first elevated run it was ever part of.
+  //
+  // The first fix was a 3-second sleep. That is a race with an unmeasured
+  // operation, and in Windows Sandbox on 2026-08-20 the other two suites
+  // using the same sleep lost it - elevated, they read audit and reported
+  // NOT RUN. main.js exports the bootstrap promise for exactly this reason;
+  // waiting on it is deterministic and free.
+  await main.bootstrapped;
 
   const tier = await invoke('get-tier');
   console.log(`Resolved tier: ${(tier && tier.tier) || 'unknown'} (isFullMode=${tier && tier.isFullMode})`);

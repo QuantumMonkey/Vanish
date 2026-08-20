@@ -27,7 +27,7 @@ process.env.VANISH_DISABLE_AUTO_ELEVATE = '1';
 // operator's real vault just by starting.
 process.env.VANISH_HEADLESS_HARNESS = '1';
 
-require('../main.js');
+const main = require('../main.js');
 
 let pass = 0;
 let fail = 0;
@@ -74,7 +74,22 @@ function ps(script) {
 const REG_KEY = 'HKCU:\\Software\\VanishIpcVerify';
 
 app.whenReady().then(async () => {
-  await new Promise((resolve) => setTimeout(resolve, 3000));
+  // main.js resolves the tier asynchronously and EXPORTS the promise for
+  // exactly this - "so a harness that require()s this file can wait for
+  // bootstrap - tier resolution in particular - instead of guessing with a
+  // sleep" (main.js:130). This waited 3 seconds instead.
+  //
+  // On the development machine, unelevated, 3s was always enough and the
+  // answer was right. In Windows Sandbox on 2026-08-20 it was not: an
+  // ELEVATED run resolved the tier as audit, this suite refused itself, and
+  // run-all reported NOT RUN - so the two things that run had been started
+  // for went untested while everything around them passed 1179/0.
+  //
+  // The failure is the house one: currentTier starts at TIER_AUDIT and is
+  // overwritten when check-admin returns, so "audit" read too early is not a
+  // measurement of the machine, it is the default with nothing behind it -
+  // and nothing in the payload distinguishes the two.
+  await main.bootstrapped;
 
   const tier = await invoke('get-tier');
   console.log('');
