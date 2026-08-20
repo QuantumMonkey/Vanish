@@ -39,6 +39,22 @@ $stamp    = Get-Date -Format 'yyyyMMdd-HHmmss'
 $fullLog  = Join-Path $outDir ("{0}-{1}-suite.txt"  -f $env:COMPUTERNAME, $stamp)
 $repLog   = Join-Path $outDir ("{0}-{1}-report.txt" -f $env:COMPUTERNAME, $stamp)
 $doneFile = Join-Path $outDir ("{0}-{1}-DONE.txt"   -f $env:COMPUTERNAME, $stamp)
+$startFile = Join-Path $outDir ("{0}-{1}-STARTED.txt" -f $env:COMPUTERNAME, $stamp)
+$failFile  = Join-Path $outDir ("{0}-{1}-FAILED.txt"  -f $env:COMPUTERNAME, $stamp)
+
+# WRITTEN BEFORE ANYTHING THAT CAN FAIL, and the reason is the one this
+# repository keeps relearning: on 2026-08-20 the operator reported running
+# this script and nothing at all appeared on the host. "It was never run",
+# "it died on line 1" and "it is still running" were indistinguishable from
+# outside, so the next hour went into guessing between them instead of
+# reading an answer. Same fix as the .wsb breadcrumb: make the two failures
+# look different.
+Set-Content -LiteralPath $startFile -Encoding ASCII -Value @(
+    "started  : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+    "machine  : $env:COMPUTERNAME",
+    "repo     : $repoRoot",
+    "user     : $env:USERNAME"
+)
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -75,6 +91,10 @@ Write-Host ("node      : {0}" -f (& node --version))
 Write-Host ''
 Write-Host 'Running the full suite. This takes several minutes; leave it alone.' -ForegroundColor Cyan
 Write-Host ''
+
+# Everything from here is wrapped, so a terminating error leaves its own text
+# on the host instead of only in a console window that gets closed with the VM.
+try {
 
 # 2>&1 so a suite that dies on stderr still leaves its reason in the file. The
 # host reads these afterwards, and "it failed" without the text is a second run.
@@ -123,3 +143,17 @@ Write-Host "   test\logs\sandbox-run\" -ForegroundColor Green
 Write-Host ' Nothing else is needed from this window - it can be closed,' -ForegroundColor Green
 Write-Host ' and the sandbox with it.' -ForegroundColor Green
 Write-Host '=======================================================' -ForegroundColor Green
+}
+catch {
+    $detail = @(
+        "failed   : $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')",
+        "machine  : $env:COMPUTERNAME",
+        "message  : $($_.Exception.Message)",
+        "at       : $($_.InvocationInfo.PositionMessage)"
+    )
+    Set-Content -LiteralPath $failFile -Encoding ASCII -Value $detail
+    Write-Host ''
+    Write-Host 'THIS RUN FAILED. The reason is on the host at:' -ForegroundColor Red
+    Write-Host "  $failFile" -ForegroundColor Red
+    $detail | ForEach-Object { Write-Host $_ -ForegroundColor Red }
+}
