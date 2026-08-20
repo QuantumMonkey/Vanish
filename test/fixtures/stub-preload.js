@@ -252,6 +252,7 @@ contextBridge.exposeInMainWorld('api', {
   listLockers: stub('listLockers', { success: true, holders: [] }),
   unlockPath: stub('unlockPath', { success: true, closedTargets: 0, totalTargets: 0, notes: [] }),
   browseForPath: stub('browseForPath', { canceled: true }),
+  processAttributionScan: stub('processAttributionScan', { success: true, results: [], counts: { owned: 0, orphaned: 0, unattributed: 0, system: 0 }, note: null }),
   snapshotBegin: stub('snapshotBegin', { success: true, takenAt: '2026-08-12T00:00:00.000Z' }),
   snapshotFinish: stub('snapshotFinish', {
     success: true,

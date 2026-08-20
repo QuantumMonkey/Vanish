@@ -10,6 +10,52 @@ full decision rules.
 
 ## [Unreleased]
 
+### Added -- which installed program a running process belongs to (`0bi`)
+
+Select a process in the Task Manager tab and Vanish now answers the question
+no other tool on the machine can:
+
+> **msedge is using 87 MB. Belongs to Microsoft Edge. It starts automatically,
+> and it is accepting connections on port 5353.**
+
+That is a real line from the development machine, not a mock-up. Task Manager
+and System Informer both answer "what is using CPU and RAM" better than Vanish
+would, and Vanish is not building a third one. Neither of them has an uninstall
+database, a startup inventory or a listener map to answer it *with*. Vanish has
+all three already; the join is the whole feature.
+
+**Every claim carries the command that produced it**, and an inferred
+attribution never reads like a measured one. "Belongs to Steam" and "Looks like
+it belongs to Steam, going by the folder name rather than by Steam's own
+records" are different sentences on purpose -- the first means the program's
+own registry entry points at the folder the binary is in, the second means a
+folder name matched. A process nothing claims is reported as **unexplained**,
+which is an admission rather than an accusation, and never as "orphaned" --
+that word stays reserved for the case where Vanish knows who owned something
+and knows they are gone.
+
+**No score, no "suspicious" label, nothing ranked by how bad it looks.** The
+list is ordered by memory used, because that is the question you opened the
+screen with, and it is a measurement rather than an opinion.
+
+One clause of the original design is deliberately missing: *"...which you have
+not opened since <date>"*. Nothing in Vanish knows that, Windows disables the
+file-access timestamps that would tell it, and the remaining routes are
+inference dressed as measurement. It is left out rather than invented.
+
+**Three things this got wrong against real data before it shipped**, each now a
+regression test:
+
+- Walking up from a Steam helper, the Steam folder answered "Dota 2" -- because
+  Dota 2 installs *underneath* Steam. Eleven processes were about to be
+  attributed to a game they have nothing to do with.
+- Twelve Store-app processes were labelled "Part of Windows itself", because a
+  Store package lives in a folder Vanish treats as a system path everywhere
+  else. Store apps are now read from the same list as everything else.
+- The first honest measurement reported "63% unattributed". 170 of those 182
+  processes were ones Windows would not name the binary for without
+  administrator rights -- a fact about permissions, not about the join. Counted
+  separately now: **every process this machine would name, it attributes.**
 ### Added -- the installer cache is reclaimable, and the removal can be undone
 
 Windows keeps a copy of every installer it has ever run, so that Repair and

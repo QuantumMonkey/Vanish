@@ -823,6 +823,95 @@ function indicatorShortLabel(kind) {
   return 'Indicator';
 }
 
+
+// 0bi: which installed program a process belongs to, plus the two facts
+// nothing else on this machine can pair with it.
+//
+// CACHED, and deliberately NOT on the sampling loop. The table re-samples
+// every two seconds; the join is four engine reads, and running it on that
+// cadence would turn an attribution layer into the third resource monitor the
+// operator explicitly said not to build. It runs once when a process is first
+// selected, and again only when the user asks.
+let processAttribution = null;
+let processAttributionLoading = false;
+let processAttributionNote = null;
+
+async function loadProcessAttribution(force) {
+  if (processAttributionLoading) return;
+  if (processAttribution && !force) return;
+  processAttributionLoading = true;
+  try {
+    const res = await window.api.processAttributionScan({ sampleMs: 300 });
+    if (res && res.success === true) {
+      processAttribution = new Map((res.results || []).map((r) => [r.pid, r]));
+      processAttributionNote = res.note || null;
+    } else {
+      processAttribution = new Map();
+      processAttributionNote = (res && res.error) || 'The attribution scan did not return a result.';
+    }
+  } finally {
+    processAttributionLoading = false;
+    if (selectedPid !== null) renderProcessDetails(processes.find((p) => p.pid === selectedPid));
+  }
+}
+
+// The sentence, assembled from facts that each carry the command that
+// produced them. The hedging is the engine's, not this function's - a
+// renderer that decided its own wording could present an inferred
+// attribution as a measured one, which is c0y.
+function processAttributionHtml(pid) {
+  if (processAttributionLoading && !processAttribution) {
+    return '<div class="indicator-detail-note">Working out which program this belongs to...</div>';
+  }
+  if (!processAttribution) return '';
+
+  const row = processAttribution.get(pid);
+  if (!row) {
+    return '<div class="indicator-detail-note">This process started after the last attribution scan.</div>';
+  }
+
+  const parts = [];
+  parts.push(`<div class="indicator-detail-title">${esc(row.attributionText)}</div>`);
+
+  if (row.owner && row.matchedPath) {
+    parts.push(
+      `<div class="indicator-detail-evidence">matched on ${esc(row.matchedPath)}` +
+        (row.viaAncestor ? ' (a folder above the program file, not the program file\'s own)' : '') +
+        `</div>`
+    );
+  }
+
+  if (row.startsAutomatically) {
+    parts.push(
+      `<div class="indicator-detail-evidence">Starts automatically` +
+        (row.startsAutomatically.via ? ` - ${esc(row.startsAutomatically.via)}` : '') +
+        `</div>`
+    );
+  }
+
+  if (row.listening && row.listening.ports.length > 0) {
+    // A busy game reported SIXTY ports on the development machine. The
+    // sentence is the feature; sixty numbers in the middle of it is not a
+    // sentence, and the count is the part that means something anyway.
+    const shown = row.listening.ports.slice(0, 6);
+    const ports = shown.join(", ") +
+      (row.listening.ports.length > shown.length ? ` and ${row.listening.ports.length - shown.length} more` : '');
+    const where = row.listening.exposure === 'all'
+      ? 'from anywhere on your network'
+      : row.listening.exposure === 'loopback'
+        ? 'from this PC only'
+        : 'on a specific address';
+    parts.push(
+      `<div class="indicator-detail-evidence">Accepting connections ${esc(where)} on port ${esc(ports)}</div>`
+    );
+  }
+
+  if (processAttributionNote) {
+    parts.push(`<div class="indicator-detail-note">${esc(processAttributionNote)}</div>`);
+  }
+
+  return `<div class="indicator-detail">${parts.join("")}</div>`;
+}
 function renderProcessDetails(proc) {
   const panel = document.getElementById('process-details');
   if (!proc) {
@@ -841,10 +930,13 @@ function renderProcessDetails(proc) {
   document.getElementById('proc-det-path').textContent = proc.imagePath || 'Not available';
   document.getElementById('proc-det-cmdline').textContent = proc.commandLine || 'Not available';
 
+  // 0bi: fetched on first selection, then served from the cache.
+  loadProcessAttribution(false);
+
   // Rule 7: indicators are displayed. Nothing here is wired to an action.
   const box = document.getElementById('proc-det-indicators');
   const indicators = proc.indicators || [];
-  box.innerHTML = indicators.length
+  box.innerHTML = processAttributionHtml(proc.pid) + (indicators.length
     ? indicators
         .map(
           (i) => `
@@ -855,7 +947,7 @@ function renderProcessDetails(proc) {
         </div>`
         )
         .join('')
-    : '';
+    : '');
 }
 
 async function killSelectedProcess() {

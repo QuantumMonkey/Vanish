@@ -9,6 +9,7 @@ const vault = require('./lib/vault');
 const queue = require('./lib/queue');
 const snapshot = require('./lib/snapshot'); // zrw: install snapshot diff
 const attribution = require('./lib/attribution'); // bu2: size attribution
+const processAttribution = require('./lib/process-attribution'); // 0bi: process attribution
 
 let mainWindow;
 
@@ -1660,6 +1661,78 @@ function lastKeySegment(value) {
   return parts.length ? parts[parts.length - 1].toLowerCase() : '';
 }
 
+
+// 0bi: the attribution join. Read-only in both tiers, and deliberately so -
+// "which program is this" is an audit question, and refusing to answer it
+// unelevated would make the panel useless on exactly the machines where
+// somebody is trying to work out what is running.
+//
+// Four engine reads, in parallel, joined in lib/process-attribution.js. The
+// join is the whole feature: Task Manager and System Informer both answer
+// "what is using CPU and RAM" better than we would, and neither has an
+// uninstall database, a startup inventory or a listener map to answer it
+// WITH. None of these four reads is new - all four already ship.
+ipcMain.handle('process-attribution-scan', async (event, params) => {
+  try {
+    const sampleMs = params && params.sampleMs ? params.sampleMs : 500;
+
+    // Promise.all rather than four awaits: they are independent reads and the
+    // process sample alone sleeps for its own window. Serialised, this panel
+    // took the sum of four PowerShell starts to say anything at all.
+    const [procs, apps, uwp, startup, listeners] = await Promise.all([
+      runPowerShell('list-processes', { sampleMs }),
+      runPowerShell('list-desktop', {}).catch(() => []),
+      runPowerShell('list-uwp', {}).catch(() => []),
+      runPowerShell('get-startup-items', {}).catch(() => ({ items: [] })),
+      runPowerShell('get-listeners', {}).catch(() => ({ programs: [] }))
+    ]);
+
+    // Store apps go into the SAME list, and this is not a convenience - it is
+    // the fix for a real misattribution. A Store package installs into
+    // C:\Program Files\WindowsApps, which bu2's classifier calls a system
+    // path (correctly, for bu2: nobody should be offered a delete button for
+    // WindowsApps). Applied to a running process that reads as "Part of
+    // Windows itself", which is wrong and visibly so - twelve Claude
+    // processes on the development machine were labelled as Windows. Their
+    // package records carry the exact install location, so feeding them in
+    // attributes them properly and beats the system-path rule on the way.
+    const installedApps = (Array.isArray(apps) ? apps : []).concat(Array.isArray(uwp) ? uwp : []);
+
+    if (!procs || procs.success !== true) {
+      return { success: false, error: (procs && procs.error) || 'The process list could not be read.' };
+    }
+
+    // Each of the three JOINED sources is optional and its absence is
+    // reported rather than hidden. A machine where the listener read failed
+    // is not a machine with no listeners, and a panel that quietly showed no
+    // ports would be making the stronger claim of the two.
+    const missing = [];
+    if (installedApps.length === 0) missing.push('the installed-programs list');
+    if (!startup || !Array.isArray(startup.items)) missing.push('the startup inventory');
+    if (!listeners || !Array.isArray(listeners.programs)) missing.push('the listener map');
+
+    const joined = processAttribution.attributeProcesses({
+      processes: Array.isArray(procs.items) ? procs.items : [],
+      installedApps,
+      recordedInstalls: store.recordedInstalls(),
+      startupItems: (startup && startup.items) || [],
+      listeners: (listeners && listeners.programs) || []
+    });
+
+    return {
+      success: true,
+      results: joined.results,
+      counts: joined.counts,
+      sampledMs: procs.sampledMs,
+      recordedInstallCount: store.recordedInstalls().length,
+      note: missing.length
+        ? `Some of the join could not be read on this machine (${missing.join(', ')}), so those columns are blank rather than empty.`
+        : null
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
 // bu2: the attribution scan.
 //
 // Three cheap inputs and one expensive one, in that order on purpose. The

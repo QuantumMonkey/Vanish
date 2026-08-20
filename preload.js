@@ -51,6 +51,8 @@ contextBridge.exposeInMainWorld('api', {
   listLockers: (params) => ipcRenderer.invoke('list-lockers', params),
   unlockPath: (params) => ipcRenderer.invoke('unlock-path', params),
   browseForPath: (options) => ipcRenderer.invoke('browse-for-path', options || {}),
+  // 0bi: which installed program each running process belongs to.
+  processAttributionScan: (params) => ipcRenderer.invoke('process-attribution-scan', params || {}),
 
   // Stage 6 - Bulk uninstall queue (REQ-10, REQ-12, REQ-13)
   queueGet: () => ipcRenderer.invoke('queue-get'),
