@@ -266,6 +266,14 @@ and `.msp` only, nothing already at the destination, and only while the vault
 data directory still passes the SEC-3 ownership check. `7v3` is removable as
 a result -- 136.8 MB measured here, reversibly.
 
+**Proved end to end 2026-08-20**, elevated on the dev host: a real cached
+installer into the vault, out of the cache, restored to its own path inside
+`%SystemRoot%\Installer`, byte-identical by SHA256 -- and a file the exception
+does not cover, planted in the same directory, refused before anything moved.
+Windows Sandbox cannot run that leg at all: a fresh VM has never installed
+anything by MSI, so the sweep correctly finds nothing to act on. The host is the
+venue.
+
 **What 1.0 still needs**, and none of it is code that can be written here:
 
 - `69a`, `adg` - a human at the app, unelevated, watching one relaunch.
