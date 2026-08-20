@@ -109,18 +109,25 @@ foreach ($suite in $suites) {
 
     $failLines = @($output | Select-String -Pattern '^\s*FAIL\b' | ForEach-Object { $_.Line.Trim() })
     $warnLines = @($output | Select-String -Pattern '^\s*WARN\b' | ForEach-Object { $_.Line.Trim() })
+    # A SKIP is not a pass, and until now nothing here said so. The sandbox run
+    # of 2026-08-20 finished 1320 passed / 0 failed with the one leg it had been
+    # started for - the installer-cache round trip - skipped, because a fresh VM
+    # has never installed anything by MSI and the sweep correctly finds nothing.
+    # A green total that hides a load-bearing skip is a number about something
+    # other than what it claims, which is this codebase's recurring defect.
+    $skipLines = @($output | Select-String -Pattern '^\s*SKIP\b' | ForEach-Object { $_.Line.Trim() })
 
     $summary = ($output | Select-String -Pattern '^Result: (\d+) passed, (\d+) failed' | Select-Object -Last 1)
     if ($summary) {
         $passed = [int]$summary.Matches[0].Groups[1].Value
         $failed = [int]$summary.Matches[0].Groups[2].Value
-        $results += @{ Name = $suite.Name; Passed = $passed; Failed = $failed; Ran = $true; FailLines = $failLines; WarnLines = $warnLines; Log = $logPath }
+        $results += @{ Name = $suite.Name; Passed = $passed; Failed = $failed; Ran = $true; FailLines = $failLines; WarnLines = $warnLines; SkipLines = $skipLines; Log = $logPath }
         $colour = if ($failed -gt 0) { "Red" } else { "Green" }
         Write-Host ("  {0} passed, {1} failed" -f $passed, $failed) -ForegroundColor $colour
         foreach ($w in $warnLines) { Write-Host ("  " + $w) -ForegroundColor Yellow }
         foreach ($f in $failLines) { Write-Host ("  " + $f) -ForegroundColor Red }
     } else {
-        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; FailLines = $failLines; WarnLines = $warnLines; Log = $logPath }
+        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; FailLines = $failLines; WarnLines = $warnLines; SkipLines = $skipLines; Log = $logPath }
         Write-Host ("  did not report a result (needs Full Mode, or it crashed) - full output: {0}" -f $logPath) -ForegroundColor DarkYellow
     }
 }
@@ -140,7 +147,9 @@ foreach ($r in $results) {
     $totalPassed += $r.Passed
     $totalFailed += $r.Failed
     $colour = if ($r.Failed -gt 0) { "Red" } else { "Green" }
-    Write-Host ("  {0,-32} {1,3} passed  {2,3} failed" -f $r.Name, $r.Passed, $r.Failed) -ForegroundColor $colour
+    $skipped = if ($r.SkipLines) { @($r.SkipLines).Count } else { 0 }
+    $suffix = if ($skipped -gt 0) { "  ({0} skipped)" -f $skipped } else { "" }
+    Write-Host ("  {0,-32} {1,3} passed  {2,3} failed{3}" -f $r.Name, $r.Passed, $r.Failed, $suffix) -ForegroundColor $colour
 }
 
 Write-Host ""
@@ -158,6 +167,20 @@ if ($withFailures.Count -gt 0) {
         Write-Host ("  {0}" -f $r.Name) -ForegroundColor Red
         foreach ($f in $r.FailLines) { Write-Host ("      " + $f) -ForegroundColor Red }
         Write-Host ("      full output: {0}" -f $r.Log) -ForegroundColor DarkGray
+    }
+}
+
+# Named, in full, at the bottom where the reader already is - for the same
+# reason failures are. "43 passed, 0 failed" on a suite whose central leg did
+# not run is the most expensive kind of green there is.
+$withSkips = @($results | Where-Object { $_.SkipLines -and $_.SkipLines.Count -gt 0 })
+if ($withSkips.Count -gt 0) {
+    Write-Host ""
+    Write-Host " Skipped, named (these did NOT run - they are not passes)" -ForegroundColor DarkYellow
+    Write-Host " --------------------------------------------------------" -ForegroundColor DarkYellow
+    foreach ($r in $withSkips) {
+        Write-Host ("  {0}" -f $r.Name) -ForegroundColor DarkYellow
+        foreach ($k in $r.SkipLines) { Write-Host ("      " + $k) -ForegroundColor DarkYellow }
     }
 }
 
