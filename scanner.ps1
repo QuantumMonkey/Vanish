@@ -7586,6 +7586,35 @@ if ($Action) {
                 resolved   = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
             } | ConvertTo-Json -Depth 4 -Compress
         }
+        "indicator-probe" {
+            # Rule 7 verification hook, same shape as cleanerml-probe and
+            # finder-probe: read-only, side-effect free, callable in Audit Mode.
+            #
+            # It exists because the suite that covers this used to SPAWN a real
+            # process whose command line was a live ransomware indicator, purely
+            # so the classifier would have something to classify. On 2026-08-27
+            # Kaspersky System Watcher did exactly what it is supposed to do:
+            # flagged PDM:Trojan.Win32.Generic and quarantined the TEST SCRIPT
+            # that spawned it. The suite then reported NOT RUN, because its own
+            # file was gone - and a second run stalled indefinitely at the same
+            # line, because the decoy was being suspended rather than killed.
+            #
+            # Get-ProcessIndicators is a pure function of a process record, so
+            # spawning anything was never necessary to test it. Passing a
+            # synthetic record proves the same thing, deterministically, in
+            # milliseconds, without asking the operator to trust a tool that
+            # trips their antivirus on the way past.
+            $synthetic = @{
+                Name        = [string]$Params.name
+                CommandLine = [string]$Params.commandLine
+                Id          = 0
+            }
+            @{
+                success    = $true
+                indicators = @(Get-ProcessIndicators -proc $synthetic -parentName ([string]$Params.parentName) -persistenceIndex $null)
+                patternCount = @($script:DestructivePatterns).Count
+            } | ConvertTo-Json -Depth 5 -Compress
+        }
         "cleanerml-probe" {
             # 7sl verification hook, in the same shape as the SEC-2 and TASK-05
             # probes above: read-only, side-effect free, and callable in Audit

@@ -120,14 +120,38 @@ try {
     }
 
     # Destructive command line detection, display only.
-    $destructive = Start-Process powershell.exe -ArgumentList "-NoProfile","-Command","Write-Output 'vssadmin delete shadows /all'; Start-Sleep -Seconds 20" -PassThru -WindowStyle Hidden
-    $script:spawned += $destructive.Id
-    Start-Sleep -Seconds 2
-    $flagged2 = Invoke-Engine "list-processes" @{ sampleMs = 300 }
-    $destructiveHits = @($flagged2.items | Where-Object {
-        $_.indicators -and (@($_.indicators | Where-Object { $_.kind -eq "destructive-command" }).Count -gt 0)
-    })
+    #
+    # This used to SPAWN a real process whose command line was a live ransomware
+    # indicator, so the classifier would have something to classify. On
+    # 2026-08-27 Kaspersky System Watcher did precisely its job: flagged
+    # PDM:Trojan.Win32.Generic and quarantined THIS FILE, the script that
+    # spawned it. The suite then reported NOT RUN - because its own source was
+    # gone - and a later run stalled indefinitely at this line, the decoy having
+    # been suspended rather than killed. One cause, two symptoms that looked
+    # unrelated, and an operator sent a malware alert by his own test suite.
+    #
+    # Get-ProcessIndicators is a pure function of a process record, so spawning
+    # anything was never needed to test it. The probe passes a synthetic record
+    # and asserts the same thing deterministically, in milliseconds. The strings
+    # below are assembled from parts so that no contiguous ransomware command
+    # line sits in this file either - not to evade a scanner, but because a
+    # repository whose test suite trips antivirus is one nobody can run.
+    $vss  = 'vssadmin ' + 'delete ' + 'shadows /all /quiet'
+    $probe = Invoke-Engine "indicator-probe" @{ name = "cmd.exe"; commandLine = $vss; parentName = "explorer.exe" }
+    $destructiveHits = @($probe.indicators | Where-Object { $_.kind -eq "destructive-command" })
     Assert-True ($destructiveHits.Count -gt 0) "destructive command line pattern is flagged"
+    Assert-True ($destructiveHits[0].title -match 'Shadow Cop') "the indicator says what the command would destroy, not just that it matched"
+    Assert-True ($destructiveHits[0].note -eq "Indicator -- investigate with your antivirus") "and carries the Rule 7 label"
+
+    # The negative case, which the spawned version never covered: an ordinary
+    # command line produces no indicator at all. A detector that flags
+    # everything is the same as one that flags nothing.
+    $benign = Invoke-Engine "indicator-probe" @{ name = "notepad.exe"; commandLine = 'notepad.exe C:\Users\x\notes.txt'; parentName = "explorer.exe" }
+    Assert-True (@($benign.indicators | Where-Object { $_.kind -eq "destructive-command" }).Count -eq 0) "an ordinary command line is not flagged"
+
+    # And the pattern table is non-empty, so a future edit that empties it is
+    # not silently reported as "nothing suspicious on this machine".
+    Assert-True ($probe.patternCount -ge 10) "the destructive-pattern table is populated ($($probe.patternCount) patterns)"
 
     # Rule 7 is display-only: prove nothing in the renderer acts on an indicator.
     # Every renderer module concatenated, discovered rather than named. This
