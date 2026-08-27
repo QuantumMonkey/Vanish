@@ -352,9 +352,7 @@ function renderNetworkActivity(net) {
            <i class="fa-solid fa-ethernet net-rate-icon"></i>
            <div class="net-rate-text">
              <div class="net-rate-value">${esc(primary.name)}</div>
-             <div class="net-rate-label" title="${primary.linkSpeedBps ? esc('Negotiated link rate to your router: ' + formatBytes(primary.linkSpeedBps / 8, 0) + '/s. This is the speed between this PC and the router, not the speed of the internet connection behind it - those are usually very different numbers.') : ''}">${primary.isWireless ? 'Wi-Fi' : 'Wired'}${
-               primary.linkSpeedBps ? ` &middot; link ${esc(formatBytes(primary.linkSpeedBps / 8, 0))}/s` : ''
-             }${
+             <div class="net-rate-label" title="${primary.linkSpeedBps ? esc('Negotiated link rate to your router: ' + formatBytes(primary.linkSpeedBps / 8, 0) + '/s. This is the speed between this PC and the router, not the speed of the internet connection behind it - those are usually very different numbers, which is why it is not shown on the tile.') : ''}">${primary.isWireless ? 'Wi-Fi' : 'Wired'}${
                net.signalPercent != null ? ` &middot; signal ${esc(net.signalPercent)}%` : ''
              }</div>
            </div>
@@ -364,16 +362,26 @@ function renderNetworkActivity(net) {
        </div>`
     : '';
 
+  // Operator report 2026-08-27: "the metrics from measure again are a bit too
+  // much". They were. Five tiles and a four-part footnote is a lot of numbers
+  // to answer one question, and most of it repeated something already on
+  // screen: the program count restated the length of the table directly below
+  // it, and link speed restated a figure the tooltip itself calls misleading.
+  //
+  // Only the two things this line can say that nothing else on the panel can
+  // are kept - both are traffic NOT attributable to any row in the table, so
+  // without them a busy adapter above an idle-looking table has no
+  // explanation. Anything already visible elsewhere is not a metric, it is
+  // repetition, and repetition is what made this read as noise.
   const examined = [
-    // anc: adapter name and the up/down rates moved into the tiles above -
-    // repeating them here would just be the old inline text back again.
-    `${processes.length} program(s) with a connection open`,
-    net.updateTransfers != null
-      ? `Windows Update: ${net.updateTransfers === 0 ? 'not downloading' : `${net.updateTransfers} download(s) running`}`
+    net.updateTransfers != null && net.updateTransfers > 0
+      ? `Windows Update: ${net.updateTransfers} download(s) running`
       : null,
-    net.bitsJobs != null
-      ? `background transfers: ${net.bitsJobs === 0 ? 'none' : net.bitsJobs}`
-      : 'background transfers: needs administrator to see every account'
+    net.bitsJobs == null
+      ? 'background transfers: needs administrator to see every account'
+      : net.bitsJobs > 0
+        ? `background transfers: ${net.bitsJobs}`
+        : null
   ].filter(Boolean);
 
   const signalLine =
@@ -449,7 +457,9 @@ function renderNetworkActivity(net) {
 
     ${rateTiles}
 
-    <div class="panel-inline-note">Looked at: ${examined.map(esc).join(' &middot; ')}${signalLine ? ` &middot; ${esc(signalLine)}` : ''}</div>
+    ${examined.length || signalLine
+      ? `<div class="panel-inline-note">${examined.map(esc).join(' &middot; ')}${examined.length && signalLine ? ' &middot; ' : ''}${signalLine ? esc(signalLine) : ''}</div>`
+      : ''}
 
     <div id="network-hold-row"></div>
 
@@ -698,15 +708,29 @@ function pingTileHtml() {
   // edits it, Vanish no longer knows what the address is and must not say it
   // does - "your router" pointing at 8.8.8.8 would be a confident wrong answer
   // of exactly the kind this app refuses everywhere else.
+  // An IPv6 link-local gateway defeats the reassurance above by being
+  // unreadable. On the operator's machine the detected gateway is
+  // fe80::a832:78ff:fe0d:8256%5 - thirty characters that look far more
+  // alarming than 192.168.1.1, and he asked what it was. It is his own Wi-Fi
+  // router, and fe80::/10 is the one address range that CANNOT be routed off
+  // the local link, so the strongest thing that can be said about this packet
+  // is true and was going unsaid. Machines with no IPv4 default route at all
+  // - a phone hotspot, an IPv6-only carrier link - see this every time.
+  const linkLocal = !!pingDestination && /^fe80:/i.test(pingDestination);
   const label = !pingDestination
     ? 'no gateway found'
     : pingDestinationIsGateway
-      ? `your router (${esc(pingDestination)})`
+      ? linkLocal
+        ? 'your router, on this network only'
+        : `your router (${esc(pingDestination)})`
       : esc(pingDestination);
+  const labelTitle = linkLocal && pingDestinationIsGateway
+    ? ` title="${esc(pingDestination)} -- your router's link-local IPv6 address. Addresses starting fe80: are defined to be non-routable: this packet physically cannot leave your local network, and no server on the internet ever sees it. Vanish shows this one rather than a 192.168.x.x address because this machine has no IPv4 default route."`
+    : '';
   const editRow = pingEditing
     ? `<input type="text" class="net-ping-dest-input" id="net-ping-dest-input" value="${esc(pingDestination || '')}"
          placeholder="IP address or hostname" spellcheck="false">`
-    : `<div class="net-rate-label">
+    : `<div class="net-rate-label"${labelTitle}>
          to ${label}
          <button class="net-ping-edit-btn" id="net-ping-edit-btn" title="Change what Ping tests against">
            <i class="fa-solid fa-pen"></i>

@@ -576,6 +576,54 @@ app.whenReady().then(async () => {
       restored.includes('your router'),
       `retyping the detected gateway is recognised as the router again (got: "${restored}")`
     );
+
+    // An IPv6 link-local gateway, which is what the operator's own machine
+    // actually has: fe80::a832:78ff:fe0d:8256%5. He asked what the "random IP"
+    // was, which is the whole failure - the address is his own router, and
+    // fe80::/10 is the one range that cannot be routed off the local link, so
+    // the strongest true thing about that packet was going unsaid because the
+    // address was thirty unreadable characters.
+    //
+    // Driven by setting the module globals and re-rendering rather than by
+    // restubbing the adapter, so the IPv4 assertions above keep testing the
+    // ordinary case. These are top-level `let`s in a classic script, so they
+    // are assignable from here - see the IIFE note in the harness memo.
+    const linkLocal = await win.webContents.executeJavaScript(`(() => {
+      pingDestination = 'fe80::a832:78ff:fe0d:8256%5';
+      pingDestinationIsGateway = true;
+      document.getElementById('net-ping-tile-container').innerHTML = pingTileHtml();
+      const el = document.querySelector('#net-ping-tile .net-rate-label');
+      return { text: el.textContent.replace(/\\s+/g, ' ').trim(), title: el.getAttribute('title') || '' };
+    })()`);
+
+    assert(
+      linkLocal.text.includes('your router'),
+      `a link-local gateway is still named as the router (got: "${linkLocal.text}")`
+    );
+    assert(
+      !linkLocal.text.includes('fe80:'),
+      'the raw thirty-character address is kept off the tile face, where it reads as an unexplained destination'
+    );
+    assert(
+      linkLocal.text.includes('this network only'),
+      'and the tile says the packet cannot leave the local network'
+    );
+    assert(
+      linkLocal.title.includes('fe80::a832:78ff:fe0d:8256%5'),
+      'the full address is still available on hover - shortened, never hidden'
+    );
+    assert(
+      /non-routable|cannot leave/i.test(linkLocal.title),
+      'and the tooltip states why fe80: addresses stay local, rather than asking for trust'
+    );
+
+    // Restore, so nothing after this inherits a fake gateway.
+    await win.webContents.executeJavaScript(`(() => {
+      pingDestination = '192.168.1.1';
+      pingDestinationIsGateway = true;
+      document.getElementById('net-ping-tile-container').innerHTML = pingTileHtml();
+      return true;
+    })()`);
   }
 
   console.log('');
