@@ -280,7 +280,64 @@ Register-Finder -name 'collide' -title 'Collide' -module 'hygiene' -handler {
 
     # ==================================================================
     Write-Host ""
-    Write-Host "vw4.4 the shipped finders directory loads clean" -ForegroundColor Cyan
+    Write-Host "vw4.4 a finder's helper functions must be script-scoped, and the rule is tested" -ForegroundColor Cyan
+
+    # Import-Finders dot-sources each finder file from INSIDE its own function
+    # body, and dot-sourcing runs in the caller's scope - which is that
+    # function's scope, gone the moment it returns. So a plain top-level
+    # `function Name { }` in a finder file exists only during the import.
+    #
+    # What makes this expensive is that everything in between looks right. The
+    # registration survives (Register-Finder writes to $script:FinderRegistry),
+    # so the file loads, appears in finder-probe list, and reports no load
+    # error. It fails later, when the handler calls the helper - and
+    # Invoke-HygieneScan converts that throw into 'could-not-look', so the
+    # symptom is "my finder found nothing it could read" on a fixture that
+    # obviously has findings. Two layers from the cause.
+    #
+    # Found while writing the gitignored-unique finder (sgn). Asserted here in
+    # both directions so it is a rule with a failing test behind it rather than
+    # a comment somebody will read after losing the afternoon.
+    $scoped = Join-Path $work "scope-finders"
+    New-Item -ItemType Directory -Path $scoped -Force | Out-Null
+    Set-Content -Encoding ASCII -LiteralPath (Join-Path $scoped "plain.finder.ps1") -Value @'
+function PlainHelper { return 'alive' }
+Register-Finder -name 'plain-helper' -title 'Plain' -module 'hygiene' -handler {
+    param($p)
+    New-FinderResult -finder 'plain-helper' -title 'Plain' -findings @((New-Finding -id (PlainHelper) -title 'x')) -examined 1
+}
+'@
+    Set-Content -Encoding ASCII -LiteralPath (Join-Path $scoped "scoped.finder.ps1") -Value @'
+function script:ScopedHelper { return 'alive' }
+Register-Finder -name 'scoped-helper' -title 'Scoped' -module 'hygiene' -handler {
+    param($p)
+    New-FinderResult -finder 'scoped-helper' -title 'Scoped' -findings @((New-Finding -id (ScopedHelper) -title 'x')) -examined 1
+}
+'@
+
+    Import-Finders -directory $scoped -Force | Out-Null
+
+    $plainRun = Invoke-HygieneScan -p @{ finderDir = $scoped; finders = @('plain-helper') }
+    Assert-True (@($plainRun.results)[0].state -eq 'could-not-look') "a plain top-level function is gone by the time the handler runs"
+    Assert-True ((@($plainRun.results)[0].unreadable)[0].detail -match 'PlainHelper') "and the failure names the helper, rather than reporting an empty machine"
+
+    $scopedRun = Invoke-HygieneScan -p @{ finderDir = $scoped; finders = @('scoped-helper') }
+    Assert-True (@($scopedRun.results)[0].state -eq 'found') "'function script:Name' survives the import and the handler works"
+
+    # The rule, enforced on the shipped files rather than only demonstrated on
+    # fixtures. A finder that declares a plain helper passes every other test
+    # in this suite and fails in use.
+    foreach ($ff in @(Get-ChildItem -LiteralPath $finders -Filter '*.finder.ps1' -File -ErrorAction SilentlyContinue)) {
+        $bad = @(Select-String -LiteralPath $ff.FullName -Pattern '^\s*function\s+(?!script:)[A-Za-z]' -AllMatches)
+        Assert-True ($bad.Count -eq 0) "$($ff.Name) declares no unscoped top-level helper functions"
+        if ($bad.Count -gt 0) {
+            foreach ($b in $bad) { Write-Host ("        line " + $b.LineNumber + ": " + $b.Line.Trim()) -ForegroundColor Red }
+        }
+    }
+
+    # ==================================================================
+    Write-Host ""
+    Write-Host "vw4.5 the shipped finders directory loads clean" -ForegroundColor Cyan
 
     $live = Invoke-Engine "finder-probe" @{ mode = 'list' }
     Assert-True ($live.success -eq $true) "the engine can enumerate its own finders"

@@ -50,6 +50,28 @@ function Register-Finder {
         anything: finders find. Deciding is a separate step precisely so that
         the zero-result case has somewhere to be a named state instead of an
         empty success.
+
+    .NOTES
+        HELPER FUNCTIONS IN A FINDER FILE MUST BE DECLARED `function script:Name`.
+
+        Import-Finders dot-sources each file from INSIDE its own function body,
+        and dot-sourcing runs in the caller's scope - which here is that
+        function's scope, torn down the moment it returns. A plain
+        `function Name { }` at a finder file's top level therefore exists only
+        during the import and is gone before any handler runs. The registration
+        survives because Register-Finder writes to $script:FinderRegistry, so
+        the finder loads, lists, and looks entirely healthy; it fails later,
+        when the handler calls a helper that no longer exists.
+
+        `function script:Name` writes into the script scope instead, and
+        survives - the same trick $script:NeverTouchPaths already relies on.
+        Both halves are asserted in test/finder-contract-verify.ps1 so this is
+        a rule with a failing test behind it rather than a comment.
+
+        Found the hard way while writing the gitignored-unique finder (sgn),
+        which is exactly the shape of trap this project keeps paying for: the
+        symptom appears one layer away from the cause, and the intermediate
+        state looks correct.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$name,
