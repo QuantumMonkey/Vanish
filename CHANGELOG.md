@@ -10,6 +10,80 @@ full decision rules.
 
 ## [Unreleased]
 
+### Fixed -- a failed leftover scan told you the program had uninstalled cleanly (`aeu`)
+
+If the post-uninstall scan crashed, timed out, or returned something Vanish
+could not parse, the error was swallowed and the screen showed a green tick and
+the words **"No leftovers found. This program removed itself cleanly."**
+
+Nothing was left behind by that -- but nothing had been *checked*, either, and
+you had no way to tell the two apart. It happened on the most-used path in the
+application.
+
+"Could not look" and "there is nothing there" are now different states with
+different screens. A scan that did not finish says so, and says how many
+locations it could not read.
+
+### Fixed -- "Move to quarantine" acted as a Next button when there was nothing to quarantine (`dga`)
+
+Reported by the operator on 2026-08-21. When the leftover scan found nothing,
+the red **Move to quarantine** button was still on screen. Clicking it asked
+"Finish without moving anything?" and closed the wizard -- a destructive-looking
+control doing navigation it does not name, on a screen with nothing to advance
+to.
+
+The button is now **absent** rather than disabled, because its existence is
+computed from what the scan actually found. It used to exist because of *which
+screen this was*, which is why it appeared in a state where it meant nothing.
+
+### Added -- the machine-hygiene suite: rescue before reclaim (`5p5`, `4rn`, `ho2`, `sgn`, `30i`, `z22`)
+
+Six new checks, built in the order that earns trust rather than the order that
+frees the most space. **A tool that cannot yet delete anything, but can tell you
+what a delete would destroy, is already the most useful thing on the machine.**
+Everything here is audit-only: it reports, and removes nothing.
+
+**Local-only credentials.** Files that are on your disk, are gitignored, and are
+therefore on no remote anywhere -- `key.properties`, `.env.local`, `*.jks`,
+`*.keystore`. On the machine this was written for, that was **two keystore
+passwords existing nowhere else in the world**, sitting inside folders a
+"delete it and re-clone" would have destroyed. A signed Android app whose
+keystore is gone can never be updated under the same listing again.
+
+Vanish never reads those files. It reports the path, the size, and git's own
+verdict -- nothing else. A tool that prints your keystore password in order to
+warn you about losing it has become the problem.
+
+**What a re-clone would not bring back.** For any repository: uncommitted
+changes, commits you never pushed, branches with no upstream at all, and
+**stashes** -- which are invisible to every other check and are pure local-only
+work. That set is the real blast radius of "just re-clone it", the sentence
+everyone says before deleting a working tree and almost nobody checks first.
+
+**Duplicates by content, with a receipt.** Identical files across different
+trees, matched by content and never by name or size -- two files can share both
+and be completely different. Every removal writes a manifest recording what went
+and **the path of the identical copy that survived**, so afterwards you can still
+answer "where did that file go" without restoring anything.
+
+**One report per run**, which ends with the part no other cleaner has: *the N
+things that are wrong but free*. Unset redirect variables, duplicated PATH
+entries, repositories that cannot be read -- none of it reclaims a single byte,
+and all of it is worth more than the bytes.
+
+**Three things Vanish now refuses to touch, by name and with a reason.**
+`C:\inetpub` looks like an abandoned IIS leftover and is actually a security
+mitigation (CVE-2025-21204); deleting it weakens the machine. Two installs
+sharing a name are never called redundant on their own -- on this machine that
+pair was deliberate. And a toolchain is never called unused until Vanish has
+looked for the projects that depend on it.
+
+**Every check answers in three states, never two: found, found nothing, or
+could not look.** The third one is the point. A check that cannot tell "clean"
+from "could not read" will eventually authorise deleting your work, and during
+the two-day cleanup this suite was specified from, that exact confusion happened
+five times in two days -- twice immediately before a recursive delete.
+
 ### Added -- which installed program a running process belongs to (`0bi`)
 
 Select a process in the Task Manager tab and Vanish now answers the question

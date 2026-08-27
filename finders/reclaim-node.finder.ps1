@@ -1,0 +1,294 @@
+# ==========================================
+# RECLAIM: NODE.JS / JAVASCRIPT BUILD ARTIFACTS (piu)
+# ==========================================
+# From docs/history/HANDOFF-2026-08-21.md Module 1 (RECLAIM), bd issue
+# vanish-uninstaller-piu. Two rules decide this whole file:
+#
+#   RULE 1 - DETECT BY PROJECT MARKER, NEVER BY FOLDER NAME. A folder named
+#   node_modules with no package.json beside it is somebody's DATA, not a
+#   build output, and offering to delete it is the difference between a
+#   cleaner and an accident. This finder never matches on the name
+#   "node_modules" alone - it matches on package.json, and only THEN looks
+#   for the regenerable folders that sit beside it.
+#
+#   RULE 2 - EVERY PROPOSAL STATES ITS REBUILD COST, IN WORDS A HUMAN CAN
+#   CHECK. "npm install, ~2 min" vs "re-download 12.9 GB" - that number
+#   decides, not the byte count. Real-machine evidence: one repo carried
+#   23 GB in node_modules/build output and 614 MB after a clean reinstall -
+#   37x cruft, entirely regenerable, entirely safe to classify 'cheap'.
+#
+# AUDIT-ONLY (Module 1 / aeu). This finder proposes; it does not remove. The
+# vault is the only removal path in this application (INV-1).
+#
+# All script-scoped names in this file are prefixed PiuNode on purpose.
+# Finder files are dot-sourced into ONE shared scope by finders/_loader.ps1's
+# Import-Finders (every *.finder.ps1 in the directory loads into the same
+# call, every time - confirmed against finders/local-only-credentials.finder.ps1's
+# own header, bd ho2), so a generically named helper here would collide with
+# an identically-tempting name in a sibling finder written by a different
+# agent in this same tree at the same time. The prefix is the whole
+# mitigation, same convention ho2 (Ho2*) and sgn (Sgn*) already ship.
+#
+# NOTE ON Set-StrictMode: deliberately NOT set here, matching every other
+# file in this directory - dot-sourcing runs in scanner.ps1's caller scope,
+# and scanner.ps1's 7,870 lines were never written under strict mode.
+
+# Directories the walk never descends into while LOOKING FOR package.json.
+# This is the second half of rule 1, read backwards: once a directory is
+# known to be a dependency/build tree, any package.json inside it belongs to
+# a dependency, not to a project of the user's, and descending into it would
+# turn "detect by project marker" into "detect by folder name, recursively" -
+# exactly the defect rule 1 exists to prevent. It is also a speed bound: a
+# real node_modules tree can hold thousands of nested package.json files.
+$script:PiuNodeSkipDirs = @(
+    'node_modules', '.git', 'dist', 'build', '.expo', '.next', 'out',
+    'vendor', '.venv', 'venv', '__pycache__', '.gradle', '.dart_tool',
+    '$RECYCLE.BIN', 'System Volume Information'
+)
+
+function script:Get-PiuNodeDirBytes {
+    <#
+    .SYNOPSIS
+        Sum file bytes under a directory, and say so honestly when the walk
+        could not finish - never as if a partial sum were the total (aeu).
+    #>
+    param([Parameter(Mandatory = $true)][string]$path)
+
+    $err = $null
+    $files = @(Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
+    $bytes = 0L
+    foreach ($f in $files) { $bytes += [long]$f.Length }
+
+    $hadError = @($err).Count -gt 0
+    $detail = ''
+    if ($hadError) { $detail = (@($err) | Select-Object -First 1).Exception.Message }
+
+    return @{ bytes = $bytes; fileCount = $files.Count; hadError = $hadError; detail = $detail }
+}
+
+function script:Format-PiuNodeBytes {
+    param([long]$bytes)
+    if ($bytes -ge 1GB) { return "{0:N2} GB" -f ($bytes / 1GB) }
+    if ($bytes -ge 1MB) { return "{0:N1} MB" -f ($bytes / 1MB) }
+    if ($bytes -ge 1KB) { return "{0:N0} KB" -f ($bytes / 1KB) }
+    return "$bytes bytes"
+}
+
+function script:Find-PiuNodeProjectDirs {
+    <#
+    .SYNOPSIS
+        One bounded, error-tracked walk under $root for directories that
+        directly contain a package.json - rule 1's positive test.
+
+    .DESCRIPTION
+        Hand-written stack walk rather than Get-ChildItem -Recurse, for the
+        same reason finders/local-only-credentials.finder.ps1 (ho2) gives:
+        -Recurse cannot PRUNE a subtree from descent, only filter it out of
+        the output after walking it anyway, and walking every node_modules
+        tree anyway is exactly the runtime rule 1's skip list exists to avoid.
+
+        A directory that could not be enumerated becomes New-Unreadable with
+        the real path and the real .NET message, captured via -ErrorVariable
+        +err rather than trusted from $? - the pipe-scoring defect named
+        twice in HANDOFF-2026-08-21 section 4, the second time immediately
+        before an rm -rf.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$root,
+        [Parameter(Mandatory = $true)][int]$maxDepth,
+        [int]$maxDirs = 15000
+    )
+
+    $projects    = [System.Collections.Generic.List[string]]::new()
+    $unreadable  = [System.Collections.Generic.List[object]]::new()
+    $dirsVisited = 0
+
+    $stack = [System.Collections.Generic.Stack[object]]::new()
+    $stack.Push(@{ Path = $root; Depth = 0 })
+
+    while ($stack.Count -gt 0) {
+        $cur = $stack.Pop()
+
+        if ($dirsVisited -ge $maxDirs) {
+            # The cap itself is the aeu case, not an edge around it: a
+            # subtree never visited has established NOTHING, and reporting
+            # this run as complete would be exactly the defect this suite
+            # exists to make unrepresentable.
+            $unreadable.Add((New-Unreadable -path $cur.Path -reason 'scan-capped' `
+                -detail "The scan visited $maxDirs directories under '$root' and stopped early so a run never hangs. Pass a narrower 'roots' list to cover what was skipped."))
+            continue
+        }
+        $dirsVisited++
+
+        $err = $null
+        $children = @(Get-ChildItem -LiteralPath $cur.Path -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
+        foreach ($e in @($err)) {
+            if ($null -eq $e) { continue }
+            $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $cur.Path }
+            $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
+        }
+
+        $hasMarker = @($children | Where-Object { -not $_.PSIsContainer -and $_.Name -eq 'package.json' }).Count -gt 0
+        if ($hasMarker) { $projects.Add($cur.Path) }
+
+        if ($cur.Depth -ge $maxDepth) { continue }
+        foreach ($child in $children) {
+            if (-not $child.PSIsContainer) { continue }
+            # A junction/symlink is not this subtree - it is somewhere
+            # else's, and following one can loop forever (same guard
+            # scanner.ps1's Measure-Paths uses for the same reason).
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if ($script:PiuNodeSkipDirs -contains $child.Name) { continue }
+            $stack.Push(@{ Path = $child.FullName; Depth = $cur.Depth + 1 })
+        }
+    }
+
+    return @{ projects = @($projects); unreadable = @($unreadable); dirsVisited = $dirsVisited }
+}
+
+Register-Finder -name 'reclaim-node' `
+    -title 'Node.js/JavaScript build artifacts regenerable from package.json' `
+    -module 'reclaim' `
+    -auditOnly $true `
+    -description 'node_modules, .expo, dist and build directories found beside a package.json that regenerates them. Never matches on folder name alone (piu rule 1) - see bd vanish-uninstaller-piu.' `
+    -handler {
+        param($p)
+
+        $roots = @(Get-FieldValue -record $p -name 'roots' -default @())
+        $roots = @($roots | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if ($roots.Count -eq 0) {
+            # Deliberately narrow rather than a machine-wide drive scan like
+            # ho2's Get-Ho2DefaultRoots: this issue (piu) is proving the
+            # marker-detection SHAPE on the finders below, not machine-wide
+            # coverage. "Split into per-finder issues once piu has proved the
+            # shape" (the issue text) is where a broader default belongs.
+            $roots = @($env:USERPROFILE) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        }
+
+        $maxDepth = 0
+        try { $maxDepth = [int](Get-FieldValue -record $p -name 'maxDepth' -default 8) } catch { $maxDepth = 8 }
+        if ($maxDepth -le 0) { $maxDepth = 8 }
+
+        # name -> (costClass, rebuild-cost template). node_modules is 'cheap'
+        # by the contract's own worked example. dist/build are 'moderate',
+        # not 'cheap' - not because anything is lost, but because a full
+        # production build's WALL-CLOCK TIME is not bounded the way a
+        # dependency install is (webpack/tsc/vite builds on a large project
+        # can run minutes, not seconds), and rule 2 ranks by that cost, not
+        # by whether data survives. .expo is 'cheap': it is Metro/Expo's own
+        # local dev cache and nothing in it is hand-configured.
+        $candidateSpecs = @(
+            @{ name = 'node_modules'; costClass = 'cheap' }
+            @{ name = '.expo';        costClass = 'cheap' }
+            @{ name = 'dist';         costClass = 'moderate' }
+            @{ name = 'build';        costClass = 'moderate' }
+        )
+
+        $findings   = [System.Collections.Generic.List[object]]::new()
+        $unreadable = [System.Collections.Generic.List[object]]::new()
+        $withheld   = [System.Collections.Generic.List[string]]::new()
+        $dirsTotal  = 0
+        $projectsSeen = 0
+
+        foreach ($root in $roots) {
+            $rootVerdict = Test-NeverTouchPath $root
+            if ($null -ne $rootVerdict) {
+                $withheld.Add("$root ($($rootVerdict.reason))")
+                continue
+            }
+            if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) {
+                $unreadable.Add((New-Unreadable -path $root -reason 'root-missing' -detail 'Scan root does not exist or is not a directory.'))
+                continue
+            }
+
+            $walk = Find-PiuNodeProjectDirs -root $root -maxDepth $maxDepth
+            $dirsTotal += $walk.dirsVisited
+            foreach ($u in $walk.unreadable) { $unreadable.Add($u) }
+
+            foreach ($proj in $walk.projects) {
+                $projectsSeen++
+
+                # Which lockfile(s) regenerate this exactly, so the rebuild
+                # cost names a real command rather than a generic one.
+                $lockNotes = [System.Collections.Generic.List[string]]::new()
+                if (Test-Path -LiteralPath (Join-Path $proj 'package-lock.json') -ErrorAction SilentlyContinue) { $lockNotes.Add('package-lock.json present (npm ci)') }
+                if (Test-Path -LiteralPath (Join-Path $proj 'pnpm-lock.yaml') -ErrorAction SilentlyContinue)    { $lockNotes.Add('pnpm-lock.yaml present (pnpm install --frozen-lockfile)') }
+                if (Test-Path -LiteralPath (Join-Path $proj 'yarn.lock') -ErrorAction SilentlyContinue)         { $lockNotes.Add('yarn.lock present (yarn install --frozen-lockfile)') }
+                $lockDesc = if ($lockNotes.Count -gt 0) { $lockNotes -join '; ' } else { 'no lockfile found beside package.json - npm install still works but exact transitive versions may drift from what was previously installed' }
+
+                foreach ($spec in $candidateSpecs) {
+                    $fullPath = Join-Path $proj $spec.name
+                    if (-not (Test-Path -LiteralPath $fullPath -PathType Container -ErrorAction SilentlyContinue)) { continue }
+
+                    $guard = Test-NeverTouchPath $fullPath
+                    if ($null -ne $guard) {
+                        # 4rn: surface the refusal, do not silently drop the
+                        # candidate. Bytes are deliberately NOT measured into
+                        # the reclaimable total for a never-touch item - the
+                        # size is real but this path will never be offered,
+                        # so counting it would overstate what is reclaimable.
+                        $findings.Add((New-Finding `
+                            -id          "reclaim-node|$fullPath|never-touch" `
+                            -title       "$($spec.name) under '$proj' is protected and will not be offered" `
+                            -path        $fullPath `
+                            -bytes       0 `
+                            -evidence    "Matches package.json project marker at '$proj', but '$fullPath' also matches the never-touch guard '$($guard.path)': $($guard.reason)" `
+                            -rebuildCost "N/A - refused by never-touch, not offered for removal." `
+                            -costClass   'irreplaceable' `
+                            -action      'never'))
+                        continue
+                    }
+
+                    $size = Get-PiuNodeDirBytes -path $fullPath
+                    if ($size.hadError) {
+                        # A size that hit access-denial partway through must
+                        # NOT be reported as if it were the total (aeu).
+                        $unreadable.Add((New-Unreadable -path $fullPath -reason 'access-denied' `
+                            -detail "Could not fully measure '$fullPath': $($size.detail)"))
+                        continue
+                    }
+
+                    $rebuildCost = switch ($spec.name) {
+                        'node_modules' {
+                            "Regenerates entirely from '$proj\package.json'. $lockDesc. Real-machine evidence (HANDOFF-2026-08-21): one repo measured 23 GB before reinstall and 614 MB after - a 37x difference, and the reinstall itself was on the order of minutes."
+                        }
+                        '.expo' {
+                            "Local Expo/Metro bundler cache; regenerates automatically the next time 'expo start' or 'npx expo prebuild' runs in '$proj'. No re-download beyond what a normal dev session already does."
+                        }
+                        'dist' {
+                            "Runs from '$proj's own build script (commonly 'npm run build'); needs node_modules already restored first. Classified moderate, not cheap, because full builds on larger projects can take several minutes and that wait is real even though nothing is lost."
+                        }
+                        'build' {
+                            "Same as dist: rebuilt by '$proj's own build script once dependencies are installed. Classified moderate because build time is not bounded the way a dependency install is."
+                        }
+                        default { 'Regenerable from the project marker beside it.' }
+                    }
+
+                    $findings.Add((New-Finding `
+                        -id          "reclaim-node|$fullPath" `
+                        -title       "$($spec.name) ($(Format-PiuNodeBytes $size.bytes)) - regenerable from package.json" `
+                        -path        $fullPath `
+                        -bytes       $size.bytes `
+                        -evidence    "package.json found at '$proj\package.json' (rule 1's positive marker); '$fullPath' contains $($size.fileCount) file(s) totalling $(Format-PiuNodeBytes $size.bytes)." `
+                        -rebuildCost $rebuildCost `
+                        -costClass   $spec.costClass `
+                        -action      'audit'))
+                }
+            }
+        }
+
+        $projWord = if ($projectsSeen -eq 1) { 'project' } else { 'projects' }
+        $dirWord  = if ($dirsTotal -eq 1) { 'directory' } else { 'directories' }
+        $note = "Examined $dirsTotal $dirWord under $($roots.Count) root(s); found $projectsSeen Node/JS $projWord by package.json. Never proposes node_modules, .expo, dist or build without the package.json that regenerates them visible in the same directory (piu rule 1)."
+        if ($withheld.Count -gt 0) {
+            $note += " $($withheld.Count) path(s) withheld by the never-touch list: " + ($withheld -join '; ') + "."
+        }
+
+        return New-FinderResult `
+            -finder 'reclaim-node' `
+            -title 'Node.js/JavaScript build artifacts regenerable from package.json' `
+            -findings @($findings) `
+            -unreadable @($unreadable) `
+            -examined $dirsTotal `
+            -note $note
+    }
