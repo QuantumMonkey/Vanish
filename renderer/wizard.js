@@ -644,7 +644,7 @@ function renderLeftoversTree() {
     const clean = decision.state === window.VanishFindings.UI_NOTHING_FOUND;
     tree.innerHTML = `
       <div class="empty-leftovers">
-        <i class="fa-solid ${clean ? 'fa-circle-check' : 'fa-circle-question'}"></i>
+        <i class="fa-solid ${clean ? 'fa-circle-check' : 'fa-triangle-exclamation'}"></i>
         <h4 style="font-family: var(--font-title); font-weight: 700;">${clean ? 'No leftovers found' : 'The scan did not finish'}</h4>
         <p style="font-size: 12px; color: var(--text-gray);">${esc(decision.headline)}</p>
         ${clean ? '<p style="font-size: 12px; color: var(--text-gray);">This program removed itself cleanly.</p>' : ''}
