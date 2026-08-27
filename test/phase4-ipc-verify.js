@@ -6,6 +6,7 @@
 
 const { app, ipcMain } = require('electron');
 const { execFileSync } = require('node:child_process');
+const path = require('node:path');
 
 // This loads the REAL main.js below, including its startup elevation logic.
 // Never let a startupMode:'full' setting left on this machine from real use
@@ -35,6 +36,14 @@ function assert(condition, label) {
     console.log(`  FAIL  ${label}`);
     fail += 1;
   }
+}
+
+// A SKIP is not a pass and not a failure - it is "this machine could not be
+// put into the state the check needs". run-all.ps1 collects these and names
+// them at the bottom, so a skipped leg is visible rather than hidden inside a
+// green total. Printed in the same shape the PowerShell suites use.
+function skip(reason) {
+  console.log(`  SKIP  ${reason}`);
 }
 
 // Same watchdog as vault-ipc-verify: a hang is an outcome to report, not a
@@ -384,22 +393,61 @@ app.whenReady().then(async () => {
       'and it still says these live inside a protected Windows folder, rather than quietly dropping the caveat'
     );
 
-    const msiHashBefore = ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`);
-    const msiPurge = await invoke('cleaner-purge', { cleaner: 'installer-cache', items: [msiFinding] });
-    assert(msiPurge && msiPurge.success === true, `the purge succeeds (${(msiPurge && msiPurge.error) || 'no error'})`);
-    assert(msiPurge && msiPurge.quarantinedCount === 1, 'the cached installer went into the vault');
-    assert(ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'False', 'and it is gone from the cache');
-
-    const msiRestore = await invoke('vault-restore', { entryId: msiPurge.entryId });
-    assert(msiRestore && msiRestore.success === true, `the restore succeeds (${(msiRestore && msiRestore.error) || 'no error'})`);
-    assert(msiRestore && msiRestore.failed === 0, 'with nothing rejected - the narrow exception applies to exactly this path');
-    assert(
-      ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'True',
-      'THE ASSERTION THIS EXISTS FOR: the file is back inside %SystemRoot%\\Installer, where it came from'
+    // ASSERT THE PREMISE BEFORE THE BEHAVIOUR, and this block is the reason
+    // that rule exists.
+    //
+    // The z3s exception is gated on the vault data directory passing the SEC-3
+    // check - it must not be owned by the interactive user, because a
+    // user-owned vault means anything running as the user can plant a file and
+    // then have a PRIVILEGED restore write it into %SystemRoot%\Installer.
+    // On a machine where that gate is closed, the purge is refused, correctly,
+    // and nothing moves.
+    //
+    // Which is how this block used to report FOUR FAILURES AND A VACUOUS PASS:
+    // the four round-trip assertions failed, and then the one labelled "THE
+    // ASSERTION THIS EXISTS FOR" passed - because a file that never left is
+    // trivially still where it came from. The single most important assertion
+    // in this suite was green while the feature had done nothing at all.
+    // Observed 2026-08-27 on the operator's own machine (AGP-17).
+    const guard = JSON.parse(
+      ps(`$p = @{ path = '${MSI_ORPHAN}'; vaultRoot = (Join-Path $env:APPDATA 'vanish-uninstaller') } | ConvertTo-Json -Compress; ` +
+         `$b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($p)); ` +
+         `powershell -NoProfile -File '${path.join(__dirname, '..', 'scanner.ps1')}' -Action protected-destination-probe -ParamsBase64 $b`)
     );
+
+    if (guard.dataDirTrusted !== true) {
+      skip(
+        `the z3s round trip needs a vault directory that passes the SEC-3 check, and this one does not ` +
+        `(dataDirTrusted=false - %APPDATA%\\vanish-uninstaller is owned by the interactive user). The guard is ` +
+        `REFUSING CORRECTLY; run the app's "secure data dir" step in Full Mode to close it. Asserted first ` +
+        `because with the gate shut every assertion below either fails or passes for the wrong reason.`
+      );
+    } else {
+      const msiHashBefore = ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`);
+      const msiPurge = await invoke('cleaner-purge', { cleaner: 'installer-cache', items: [msiFinding] });
+      assert(msiPurge && msiPurge.success === true, `the purge succeeds (${(msiPurge && msiPurge.error) || 'no error'})`);
+      assert(msiPurge && msiPurge.quarantinedCount === 1, 'the cached installer went into the vault');
+      assert(ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'False', 'and it is gone from the cache');
+
+      const msiRestore = await invoke('vault-restore', { entryId: msiPurge.entryId });
+      assert(msiRestore && msiRestore.success === true, `the restore succeeds (${(msiRestore && msiRestore.error) || 'no error'})`);
+      assert(msiRestore && msiRestore.failed === 0, 'with nothing rejected - the narrow exception applies to exactly this path');
+      assert(
+        ps(`Test-Path -LiteralPath '${MSI_ORPHAN}'`) === 'True',
+        'THE ASSERTION THIS EXISTS FOR: the file is back inside %SystemRoot%\\Installer, where it came from'
+      );
+      assert(
+        ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`) === msiHashBefore,
+        'and it is byte-identical - a restore that returned different bytes would be a different file with the right name'
+      );
+    }
+
+    // The REFUSAL is asserted either way, and deliberately outside the gate
+    // above: "a file the exception does not cover is not taken" must hold on
+    // every machine, including one where the exception can never apply at all.
     assert(
-      ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`) === msiHashBefore,
-      'and it is byte-identical - a restore that returned different bytes would be a different file with the right name'
+      guard.protected === true,
+      'the installer cache is still a protected location whatever the vault gate says'
     );
 
     // THE NARROWNESS, at the same boundary and in the same directory. A file
