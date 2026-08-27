@@ -23,6 +23,10 @@ function openUninstallWizard(app) {
   wizState.runSilently = appSettings.preferSilentUninstall !== false;
   wizState.scanMode = appSettings.defaultScanMode || 'Moderate';
   wizState.leftovers = { files: [], registry: [] };
+  // Null until the scan runs. showScreen reads this as "nothing to
+  // quarantine", never as permission - an unresolved state must not share a
+  // representation with a real answer (aeu).
+  wizState.leftoverDecision = null;
   wizState.selectedFiles = [];
   wizState.selectedRegistry = [];
   wizState.spaceReclaimedBytes = 0;
@@ -56,6 +60,14 @@ function closeUninstallWizard() {
   loadApplications(); // Refresh app lists
 }
 
+// The decided state of the leftover screen (5p5). One accessor, so no caller
+// re-derives it and none of them can disagree about which screen this is.
+// Null before the scan has run, which is itself a state showScreen treats as
+// "nothing to quarantine" rather than as permission.
+function leftoverDecision() {
+  return wizState.leftoverDecision || null;
+}
+
 function showScreen(index) {
   wizState.currentScreenIndex = index;
   const screenId = wizState.screens[index];
@@ -71,8 +83,22 @@ function showScreen(index) {
   elements.btnWizCancel.style.display = 'block';
   elements.btnWizBack.style.display = (index > 0 && index !== 1 && index !== 3 && index !== 5 && index !== 6) ? 'block' : 'none'; // Hide back button in loading/complete screens
   elements.btnWizNext.style.display = (index < 4) ? 'block' : 'none';
-  elements.btnWizPurge.style.display = (index === 4) ? 'block' : 'none';
-  elements.btnWizFinish.style.display = (index === 6) ? 'block' : 'none';
+
+  // D-1. This used to read `(index === 4) ? 'block' : 'none'` - the leftover
+  // screen always offered "Move to quarantine", whatever the scan found. When
+  // it found nothing, clicking it asked "Finish without moving anything?" and
+  // closed the wizard: a destructive-looking control performing navigation it
+  // does not name, in a state where navigation is not meaningful.
+  //
+  // The fix is not a guard inside the click handler. The button's existence is
+  // now a function of the SCREEN'S STATE, and that state is computed from the
+  // scan's evidence by lib/findings.js - which has no path from "nothing
+  // found" to canAdvance. There is nowhere left to put the bug.
+  const decision = (index === 4) ? leftoverDecision() : null;
+  const canQuarantine = decision ? decision.canAdvance : false;
+  elements.btnWizPurge.style.display = canQuarantine ? 'block' : 'none';
+  elements.btnWizFinish.style.display = (index === 6 || (index === 4 && !canQuarantine)) ? 'block' : 'none';
+  if (elements.btnSelectAll) elements.btnSelectAll.style.display = canQuarantine ? '' : 'none';
 
   // Specific screen configuration
   if (screenId === 'scr-native-run') {
@@ -249,11 +275,20 @@ function setupWizardControls() {
         });
         
         wizState.leftovers = result;
+        // Decide BEFORE rendering, and render from the decision. The order
+        // matters: the previous code rendered a tree and then let the buttons
+        // decide for themselves what the screen meant (D-1).
+        wizState.leftoverDecision = window.VanishFindings.fromLeftovers(result);
         renderLeftoversTree();
         showScreen(4); // Show tree checklist
       } catch (err) {
-        toast(`Could not scan for leftovers: ${err.message}`, 'error');
-        showScreen(2);
+        // A throw here is the same class of event as a failed scan inside the
+        // engine, so it produces the same state rather than dumping the user
+        // back two screens with a toast they can miss.
+        wizState.leftovers = { files: [], registry: [] };
+        wizState.leftoverDecision = window.VanishFindings.fromLeftovers({ success: false, error: err.message });
+        renderLeftoversTree();
+        showScreen(4);
       }
     }
   });
@@ -598,15 +633,26 @@ function renderLeftoversTree() {
   const files = wizState.leftovers.files || [];
   const registry = wizState.leftovers.registry || [];
   
-  if (files.length === 0 && registry.length === 0) {
+  // D-1: the zero-finding case is a NAMED TERMINAL STATE, and there are two of
+  // them, not one. "This program removed itself cleanly" and "the scan did not
+  // finish" both used to render as the green tick above - which meant a
+  // crashed scan congratulated the user on a clean uninstall. The state comes
+  // from lib/findings.js so that this screen and the buttons underneath it
+  // cannot reach different conclusions about the same scan.
+  const decision = leftoverDecision();
+  if (decision && !decision.canAdvance) {
+    const clean = decision.state === window.VanishFindings.UI_NOTHING_FOUND;
     tree.innerHTML = `
       <div class="empty-leftovers">
-        <i class="fa-solid fa-circle-check"></i>
-        <h4 style="font-family: var(--font-title); font-weight: 700;">No leftovers found</h4>
-        <p style="font-size: 12px; color: var(--text-gray);">This program removed itself cleanly.</p>
+        <i class="fa-solid ${clean ? 'fa-circle-check' : 'fa-circle-question'}"></i>
+        <h4 style="font-family: var(--font-title); font-weight: 700;">${clean ? 'No leftovers found' : 'The scan did not finish'}</h4>
+        <p style="font-size: 12px; color: var(--text-gray);">${esc(decision.headline)}</p>
+        ${clean ? '<p style="font-size: 12px; color: var(--text-gray);">This program removed itself cleanly.</p>' : ''}
       </div>
     `;
-    elements.lblLeftoversSummary.textContent = '0 leftovers found';
+    elements.lblLeftoversSummary.textContent = clean
+      ? '0 leftovers found'
+      : `0 found, ${decision.unreadableCount} location(s) unreadable`;
     return;
   }
 

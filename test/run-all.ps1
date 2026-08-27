@@ -79,7 +79,23 @@ $suites = @(
     @{ Name = "Column filters (5b0)";          Kind = "electron"; Path = "test/column-filter-verify.js" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
     @{ Name = "Clean All (zl4)";               Kind = "electron-full"; Path = "test/clean-all-verify.js" },
-    @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" }
+    @{ Name = "UI interaction (Full Mode)";    Kind = "electron-full"; Path = "test/ui-interaction-full-verify.js" },
+    # ---- MACHINE-HYGIENE SUITE (HANDOFF-2026-08-21) ----
+    # Registered here in one edit, deliberately, BEFORE the finders they cover
+    # exist. Six of these were written in parallel; had each author added their
+    # own row, this list would have been the one file every one of them touched
+    # and the only place they could collide. A suite whose file is missing is
+    # reported as NOT RUN, which is the correct and visible answer - the runner
+    # names skips and non-runs at the bottom for exactly this reason.
+    @{ Name = "Finder contract (aeu/4rn)";     Kind = "ps";       Path = "test\finder-contract-verify.ps1" },
+    @{ Name = "Seam decider (5p5)";            Kind = "node";     Path = "test/findings-verify.js" },
+    @{ Name = "Wizard leftover state (dga)";   Kind = "electron"; Path = "test/wizard-state-verify.js" },
+    @{ Name = "Local-only credentials (ho2)";  Kind = "ps";       Path = "test\finder-credentials-verify.ps1" },
+    @{ Name = "Gitignored-and-unique (sgn)";   Kind = "ps";       Path = "test\finder-gitignored-verify.ps1" },
+    @{ Name = "Content-hash dedup (30i)";      Kind = "ps";       Path = "test\finder-dedup-verify.ps1" },
+    @{ Name = "Machine hygiene (pko)";         Kind = "ps";       Path = "test\finder-hygiene-verify.ps1" },
+    @{ Name = "Reclaim by marker (piu)";       Kind = "ps";       Path = "test\finder-reclaim-verify.ps1" },
+    @{ Name = "Hygiene report (z22)";          Kind = "node";     Path = "test/hygiene-report-verify.js" }
 )
 
 $results = @()

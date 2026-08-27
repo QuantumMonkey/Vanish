@@ -515,10 +515,18 @@ fullModeOnly('create-restore-point', async () => {
 
 ipcMain.handle('scan-leftovers', async (event, { appName, publisher, installLocation, mode }) => {
   try {
-    return await runPowerShell('scan-leftovers', { appName, publisher, installLocation, mode });
+    const res = await runPowerShell('scan-leftovers', { appName, publisher, installLocation, mode });
+    return Object.assign({ success: true }, res);
   } catch (error) {
     console.error('Error scanning leftovers:', error);
-    return { files: [], registry: [] };
+    // aeu, and this was live: the catch used to return `{ files: [], registry: [] }`,
+    // which the wizard renders as "No leftovers found - this program removed
+    // itself cleanly." An engine crash, a timeout or a bad-JSON payload was
+    // therefore reported to the user as a clean uninstall, on the most-used
+    // path in the application. "Could not look" and "there is nothing there"
+    // must not share a representation; lib/findings.js turns the pair below
+    // into the `incomplete` terminal state instead of the clean one.
+    return { success: false, error: error.message, files: [], registry: [] };
   }
 });
 

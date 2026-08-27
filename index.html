@@ -1452,6 +1452,10 @@
   <!-- 8ns: shared with the main process rather than duplicated. Same file,
        same patterns, same test suite, loaded here as a classic script. -->
   <script src="lib/platforms.js"></script>
+  <!-- 5p5: the seam. Dual-mode like platforms.js above - the wizard asks it
+       what state the leftover screen is in rather than deciding for itself,
+       which is what D-1 was. Must load before renderer/wizard.js. -->
+  <script src="lib/findings.js"></script>
   <!-- The renderer, split by feature. Classic scripts sharing one global
        lexical environment, so load order is for human reading order rather
        than for resolution. -->

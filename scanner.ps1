@@ -7464,6 +7464,27 @@ function Find-BrokenUninstallEntries {
     }
 }
 
+# ==========================================
+# THE HYGIENE SUITE FINDERS (5p5 / aeu / vw4)
+# ==========================================
+# docs/history/HANDOFF-2026-08-21.md measured this file at 7,870 lines - 41%
+# of all production code - and identified that as the structural reason a
+# zero-result case has no distinct type here. So the machine-hygiene suite
+# does NOT land in this file. Each finder is its own file under finders/,
+# registering itself with the loader below, and adding the twenty-first
+# finder touches nothing that already exists.
+#
+# Dot-sourced rather than imported as a module because the engine ships as a
+# single script invoked with -Action, and a module manifest would be a second
+# packaging contract for no gain. Guarded by Test-Path so a trimmed install
+# that omits finders/ still answers every pre-existing action - a missing
+# suite must degrade to "that check did not run", never to a silent pass.
+$script:FinderDir = Join-Path $PSScriptRoot 'finders'
+foreach ($support in @('_contract.ps1', '_never-touch.ps1', '_loader.ps1')) {
+    $supportPath = Join-Path $script:FinderDir $support
+    if (Test-Path -LiteralPath $supportPath -PathType Leaf) { . $supportPath }
+}
+
 # Command dispatching logic
 if ($Action) {
     $Params = $null
@@ -7862,6 +7883,61 @@ if ($Action) {
         }
         "network-speedtest" {
             Invoke-NetworkSpeedTest -p $Params | ConvertTo-Json -Depth 4 -Compress
+        }
+        "hygiene-scan" {
+            # 5p5: the finder half of the seam. Returns TYPED results - three
+            # states per finder, computed from evidence - and decides nothing.
+            # lib/findings.js consumes this and produces the UI state, which is
+            # the only place a zero-finding case is named.
+            Invoke-HygieneScan -p $Params | ConvertTo-Json -Depth 9 -Compress
+        }
+        "finder-probe" {
+            # Verification hook in the same shape as cleanerml-probe and
+            # protected-destination-probe above: read-only, side-effect free,
+            # callable in Audit Mode. The contract is what needs testing here,
+            # and a suite that could only call hygiene-scan would be testing it
+            # through whatever happens to be on the machine that day.
+            $mode = [string]$Params.mode
+            $result = switch ($mode) {
+                'list' {
+                    $load = Import-Finders
+                    @{
+                        success    = $true
+                        loaded     = @($load.loaded)
+                        loadErrors = @($load.loadErrors)
+                        finders    = @(Get-RegisteredFinders | ForEach-Object {
+                            @{ name = $_.name; title = $_.title; module = $_.module; auditOnly = $_.auditOnly; needsElevation = $_.needsElevation }
+                        })
+                    }
+                }
+                'state' {
+                    # Hand the contract a findings list and an unreadable list
+                    # and ask what state that IS. The pair (0 findings, >0
+                    # unreadable) must never come back as 'nothing' - that is
+                    # the assertion aeu exists for, and it is cheaper to prove
+                    # here than through any real scan.
+                    $fs = @()
+                    foreach ($x in @($Params.findings)) { if ($null -ne $x) { $fs += ,(New-Finding -id ([string]$x) -title ([string]$x)) } }
+                    $us = @()
+                    foreach ($x in @($Params.unreadable)) { if ($null -ne $x) { $us += ,(New-Unreadable -path ([string]$x) -reason 'probe') } }
+                    $r = New-FinderResult -finder 'probe' -title 'probe' -findings $fs -unreadable $us -examined ([int]$Params.examined)
+                    $r['success'] = $true
+                    $r
+                }
+                'never-touch' {
+                    $verdict = Test-NeverTouchPath ([string]$Params.path)
+                    @{ success = $true; path = [string]$Params.path; neverTouch = ($null -ne $verdict); reason = $(if ($verdict) { $verdict.reason } else { '' }) }
+                }
+                'consumers' {
+                    $r = Find-ToolchainConsumers -markers @($Params.markers) -roots @($Params.roots)
+                    $r['success'] = $true
+                    $r
+                }
+                default {
+                    @{ success = $false; error = "Unknown finder-probe mode '$mode'" }
+                }
+            }
+            $result | ConvertTo-Json -Depth 8 -Compress
         }
         default {
             @{ success = $false; error = "Unknown action '$Action'" } | ConvertTo-Json
