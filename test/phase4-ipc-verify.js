@@ -409,18 +409,29 @@ app.whenReady().then(async () => {
     // trivially still where it came from. The single most important assertion
     // in this suite was green while the feature had done nothing at all.
     // Observed 2026-08-27 on the operator's own machine (AGP-17).
+    // ASK THE APP where its vault is; never guess. The first version of this
+    // gate guessed %APPDATA%\vanish-uninstaller and was wrong in a way that
+    // looked right: the harness runs through `npx electron`, so
+    // app.getPath('userData') resolves to %APPDATA%\Electron instead, and the
+    // probe cheerfully answered a question about a directory the app does not
+    // use. Two separate wrong-target measurements in one session - Defender
+    // instead of Kaspersky, then the wrong data root - both of which produced
+    // a confident answer about something adjacent to what was asked.
+    const vaultInfo = await invoke('vault-list');
     const guard = JSON.parse(
-      ps(`$p = @{ path = '${MSI_ORPHAN}'; vaultRoot = (Join-Path $env:APPDATA 'vanish-uninstaller') } | ConvertTo-Json -Compress; ` +
+      ps(`$p = @{ path = '${MSI_ORPHAN}'; vaultRoot = '${vaultInfo.vaultRoot}' } | ConvertTo-Json -Compress; ` +
          `$b = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($p)); ` +
          `powershell -NoProfile -File '${path.join(__dirname, '..', 'scanner.ps1')}' -Action protected-destination-probe -ParamsBase64 $b`)
     );
 
     if (guard.dataDirTrusted !== true) {
       skip(
-        `the z3s round trip needs a vault directory that passes the SEC-3 check, and this one does not ` +
-        `(dataDirTrusted=false - %APPDATA%\\vanish-uninstaller is owned by the interactive user). The guard is ` +
-        `REFUSING CORRECTLY; run the app's "secure data dir" step in Full Mode to close it. Asserted first ` +
-        `because with the gate shut every assertion below either fails or passes for the wrong reason.`
+        `the z3s round trip needs a vault directory that passes the SEC-3 check, and ${vaultInfo.vaultRoot} ` +
+        `does not (dataDirTrusted=false). The guard is REFUSING CORRECTLY - the usual cause is a file left ` +
+        `owned by the interactive user by an earlier UNELEVATED run, since an owner keeps WRITE_DAC whatever ` +
+        `the DACL says, which is the escalation SEC-3 exists to stop. Run check-data-dir on the parent to see ` +
+        `which file, then secure-data-dir in Full Mode. Asserted first because with the gate shut every ` +
+        `assertion below either fails or passes for the wrong reason.`
       );
     } else {
       const msiHashBefore = ps(`(Get-FileHash -LiteralPath '${MSI_ORPHAN}' -Algorithm SHA256).Hash`);
