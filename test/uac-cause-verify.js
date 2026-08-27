@@ -121,6 +121,7 @@ function causeFor(nativeCode, uac) {
   if (nativeCode === 1223) return 'declined';
   if (uac.isGroupMember === false) return 'not-admin';
   if (uac.enableLua === false) return uac.lockLikely ? 'uac-disabled-locked' : 'uac-disabled';
+  if (uac.silentElevation === true) return 'elevation-silent-failed';
   return 'unknown';
 }
 
@@ -132,7 +133,45 @@ const cases = [
   { label: 'UAC off and likely enforced by policy', code: 5, uac: { isGroupMember: true, enableLua: false, lockLikely: true }, expect: 'uac-disabled-locked' },
   { label: 'facts that explain nothing stay unknown', code: 5, uac: { isGroupMember: true, enableLua: true }, expect: 'unknown' },
   { label: 'unknown group membership is not read as not-admin', code: 5, uac: { isGroupMember: null, enableLua: true }, expect: 'unknown' },
-  { label: 'unknown enableLua is not read as UAC being off', code: 5, uac: { isGroupMember: true, enableLua: null }, expect: 'unknown' }
+  { label: 'unknown enableLua is not read as UAC being off', code: 5, uac: { isGroupMember: true, enableLua: null }, expect: 'unknown' },
+
+  // adg, measured on the operator's machine 2026-08-28: EnableLUA=1 with
+  // ConsentPromptBehaviorAdmin=0. UAC is ON - the token is still filtered, so
+  // Vanish opens in Audit Mode - but elevation is auto-approved with no dialog.
+  // Every branch above misses (enableLua true, account IS an admin, and no
+  // 1223 because there is no prompt to cancel), so this used to fall through
+  // to 'unknown' and the user got a shrug from the one screen whose whole job
+  // is explaining itself.
+  {
+    label: 'ADG: UAC on but prompts suppressed is its own cause, not unknown',
+    code: 5,
+    uac: { isGroupMember: true, enableLua: true, silentElevation: true },
+    expect: 'elevation-silent-failed'
+  },
+  {
+    label: 'a real decline still outranks it - a prompt that WAS shown and cancelled is a decline',
+    code: 1223,
+    uac: { isGroupMember: true, enableLua: true, silentElevation: true },
+    expect: 'declined'
+  },
+  {
+    label: 'not-admin outranks it - no prompt setting makes a standard account an administrator',
+    code: 5,
+    uac: { isGroupMember: false, enableLua: true, silentElevation: true },
+    expect: 'not-admin'
+  },
+  {
+    label: 'prompts configured normally is not this cause',
+    code: 5,
+    uac: { isGroupMember: true, enableLua: true, silentElevation: false },
+    expect: 'unknown'
+  },
+  {
+    label: 'an UNREADABLE prompt setting is not read as suppressed - Rule 24',
+    code: 5,
+    uac: { isGroupMember: true, enableLua: true, silentElevation: null },
+    expect: 'unknown'
+  }
 ];
 
 console.log('');
@@ -179,7 +218,7 @@ const fnStart = core.indexOf('function elevationFailureMessage');
 const messages = core.slice(fnStart, core.indexOf('\nfunction ', fnStart + 10));
 
 const seen = new Map();
-for (const cause of ['not-admin', 'uac-disabled', 'uac-disabled-locked', 'declined']) {
+for (const cause of ['not-admin', 'uac-disabled', 'uac-disabled-locked', 'declined', 'elevation-silent-failed']) {
   const re = new RegExp(`case '${cause}':([\\s\\S]*?)(?=case '|default:|\\n\\s*\\})`);
   const m = messages.match(re);
   const text = m ? m[1] : '';

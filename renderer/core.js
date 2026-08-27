@@ -622,6 +622,23 @@ function elevationFailureMessage(cause) {
         'prompt to accept - and this looks like a managed machine where that setting is likely enforced ' +
         "by your organisation's policy rather than chosen locally, so changing it by hand would probably " +
         'be undone. Vanish stays in Audit Mode. Ask whoever administers this PC.';
+    case 'elevation-silent-failed':
+      // adg: UAC is ON, so the token is filtered and Vanish opens in Audit
+      // Mode - but ConsentPromptBehaviorAdmin is 0, so Windows grants
+      // elevation with no dialog at all. The user therefore sees nothing
+      // happen and lands back where they started, which reads as the button
+      // being broken. Naming the setting matters: told "UAC is off" they
+      // would go looking for a switch that is already on.
+      //
+      // The second sentence is not a lecture, it is the security fact that
+      // follows from the setting: on this machine ANY program that asks to
+      // elevate is granted it silently, and someone who set this once a year
+      // ago has no reason to remember.
+      return 'Windows is set to grant administrator rights without asking, so no permission prompt ' +
+        'appeared and nothing was shown to accept - the relaunch itself failed. User Account Control ' +
+        'is still switched on; it is the prompt that is turned off (Consent Prompt Behavior for ' +
+        'Administrators is set to "Elevate without prompting"). Worth knowing either way: with that ' +
+        'setting, any program on this PC can gain administrator rights without showing you anything.';
     case 'engine-error':
       return "Vanish couldn't reach its own scanning engine to request elevation. Try restarting Vanish.";
     case 'declined':

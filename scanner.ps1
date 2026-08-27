@@ -1169,6 +1169,40 @@ function Get-UacDiagnostics {
         $enableLua = $null   # missing key (some Server SKUs) or unreadable -- unknown, not "off"
     }
 
+    # EnableLUA is not the only way for the consent prompt to never appear, and
+    # reading it alone produced a wrong answer on the operator's own machine.
+    #
+    # Measured 2026-08-28: EnableLUA = 1, ConsentPromptBehaviorAdmin = 0. UAC is
+    # ON - processes still start with a filtered token, which is why Vanish
+    # opens in Audit Mode - but an administrator's elevation request is
+    # AUTO-APPROVED with no dialog. The operator reported this as "the prompt
+    # won't show because uac is disabled". It is not disabled; prompts are
+    # suppressed, and those are different machines to give advice to.
+    #
+    # It matters for the cause codes below. With EnableLUA true, isGroupMember
+    # true and no Win32 1223 (there is no prompt to cancel), every specific
+    # branch misses and a failed relaunch reports cause = 'unknown' - which is
+    # exactly the "comes back in Audit Mode and says nothing useful" of adg.
+    #
+    #   0 = elevate with no prompt at all
+    #   1 = prompt for credentials on the secure desktop
+    #   2 = prompt for consent on the secure desktop
+    #   3 = prompt for credentials
+    #   4 = prompt for consent
+    #   5 = prompt for consent for non-Windows binaries (Windows default)
+    $consentPromptAdmin = $null
+    try {
+        $cval = Get-ItemProperty -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' -Name ConsentPromptBehaviorAdmin -ErrorAction Stop
+        $consentPromptAdmin = [int]$cval.ConsentPromptBehaviorAdmin
+    } catch {
+        $consentPromptAdmin = $null   # unreadable or absent -- unknown, not "prompts normally"
+    }
+
+    # The one fact the UI actually needs: will the user SEE anything when
+    # Vanish asks for elevation? Left $null when the value could not be read,
+    # because "no prompt will appear" is a claim, not a default.
+    $silentElevation = if ($null -eq $consentPromptAdmin) { $null } else { ($consentPromptAdmin -eq 0) }
+
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $isElevatedNow = ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -1232,12 +1266,14 @@ function Get-UacDiagnostics {
     $lockLikely = ($partOfDomain -eq $true -and $policyWritable -eq $false)
 
     return @{
-        enableLua      = $enableLua
-        isElevatedNow  = $isElevatedNow
-        isGroupMember  = $isGroupMember
-        partOfDomain   = $partOfDomain
-        policyWritable = $policyWritable
-        lockLikely     = $lockLikely
+        enableLua          = $enableLua
+        consentPromptAdmin = $consentPromptAdmin
+        silentElevation    = $silentElevation
+        isElevatedNow      = $isElevatedNow
+        isGroupMember      = $isGroupMember
+        partOfDomain       = $partOfDomain
+        policyWritable     = $policyWritable
+        lockLikely         = $lockLikely
     }
 }
 
@@ -7862,6 +7898,23 @@ if ($Action) {
                     # machine and useless on a managed one, where the setting
                     # reverts on the next policy refresh.
                     $cause = if ($uac.lockLikely) { 'uac-disabled-locked' } else { 'uac-disabled' }
+                } elseif ($uac.silentElevation -eq $true) {
+                    # adg: the third machine, and until now it fell through to
+                    # 'unknown'. UAC is ON (EnableLUA=1, so the token is still
+                    # filtered and Vanish still opens in Audit Mode) but
+                    # ConsentPromptBehaviorAdmin=0 auto-approves without a
+                    # dialog. Measured on the operator's machine 2026-08-28,
+                    # who described it as "the prompt won't show because uac is
+                    # disabled" - a reasonable reading of the symptom and not
+                    # what the registry says.
+                    #
+                    # None of the branches above can fire here: enableLua is
+                    # true, the account IS an administrator, and there is no
+                    # Win32 1223 because there is no prompt to cancel. So every
+                    # failure on this configuration reported cause 'unknown',
+                    # and the user got a shrug from the one screen that exists
+                    # to explain itself.
+                    $cause = 'elevation-silent-failed'
                 }
                 @{
                     success         = $false
