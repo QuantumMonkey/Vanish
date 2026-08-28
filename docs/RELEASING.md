@@ -84,6 +84,7 @@ MAJOR.
 | `0.7.0` | 2026-08-18 | Space you can actually recover |
 | `0.8.0` | 2026-08-18 | Other people's tools, used properly |
 | `0.9.0` | 2026-08-28 | Rescue before reclaim -- the machine-hygiene suite, the finder/decider seam, and Health Advisor as the landing dashboard |
+| `0.9.1` | 2026-08-28 | The hygiene scan finishes: over ten minutes to 103 seconds, measured per check before anything was changed |
 
 `0.9` previously named the pre-release chore list (the elevated confirmations,
 the demo recording, signing, a second machine, a final docs pass). Those are

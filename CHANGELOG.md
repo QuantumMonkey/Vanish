@@ -12,6 +12,62 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
+## [0.9.1] - 2026-08-28
+
+### Fixed -- Machine Hygiene: over ten minutes, to 103 seconds
+
+0.9.0 shipped the hygiene checks and said plainly in this file that a full run
+took over ten minutes. It was worse than that: one of the thirteen checks did
+not finish at all. Profiling it needed a 240-second cap to stop it, and it hit
+the cap while the next-slowest check finished in sixty seconds.
+
+| | before | after |
+|---|---|---|
+| all thirteen checks, as the app runs them | over ten minutes | **103 seconds** |
+| the same work one check at a time | over 8 minutes, one never finishing | 265 seconds |
+| the slowest single check | never completed | 56 seconds |
+
+Nothing here was guessed at. Each check was timed in one process, in its own
+runspace under a cap, and the profile disagreed with every prediction that had
+been written down beforehand.
+
+**The slowest check in the whole suite was one that examines five things.** It
+reports whether `ANDROID_HOME` and `ANDROID_SDK_ROOT` are set, and where the
+Android SDK is sitting if they are not. On a machine where neither is set both
+name the *same* folder -- so it measured 129,198 files twice, to print 13 GB
+twice, and took 59.6 seconds doing it. Sizes are now remembered for the length
+of one scan.
+
+Six near-identical copies of "add up the bytes under this folder" had grown
+across the checks. They are now one, and it reads the folder directly instead
+of building a full file record per file to look at one number: same totals,
+same file counts, less than half the time.
+
+**The check that never finished** was reading every single file under your
+profile, including every `node_modules`, every `.git`, and all of AppData. It
+now skips those -- and *says which ones it skipped*, by name, in the "Could not
+look here" list. That distinction is the whole point: this check reports
+duplicate PAIRS, so skipping a folder can hide a real finding, and a scan that
+quietly narrowed itself would be reporting "nothing found" about somewhere it
+never went. With nothing found and something skipped, the verdict is now
+**"the checks did not finish"** rather than "nothing found".
+
+That check went from never completing to 56 seconds -- and then returned 4,035
+findings, which is its own problem. Each module now lists the first 100 and
+says how many there are in total. That is only safe because the list is ranked
+by what it would cost to get something back, so the ones you cannot rebuild are
+at the top and the tail is the part a single command regenerates.
+
+### Known, and not fixed here
+
+Four of the reclaim checks each walk the same folders separately and each stop
+at the same 15,000-directory limit. That is four passes over one disk. Fixing
+it means the checks sharing a single walk, which means running them in one
+engine call instead of thirteen -- a bigger change than this one, and tracked
+separately.
+
+---
+
 ## [0.9.0] - 2026-08-28
 
 Named on the day it shipped: **rescue before reclaim**, and the dashboard that
@@ -60,6 +116,8 @@ ten minutes -- they walk your profile and hash file contents. Running each
 check separately makes that legible rather than shorter: you see which check is
 working and findings appear as they are found. It is not a fix, and nobody runs
 a ten-minute scan twice. Tracked, with the measurements, as a P1.
+
+> Fixed in 0.9.1, the same day: **103 seconds** for all thirteen. See below.
 
 ### Changed -- Vanish opens on Health Advisor
 

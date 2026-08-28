@@ -135,7 +135,7 @@ Status vocabulary follows this project's own **promptgate Rule 10**: *Implemente
 - A `/cso` security audit found and fixed four issues in the destructive paths (command injection, a restore-destination guard bypassable by a directory junction, an ACL fix that didn't survive the app's own normal startup order, and an untracked lockfile) — see the **Security** section of [CHANGELOG.md](CHANGELOG.md)
 
 **Not yet done, honestly:**
-- **Machine Hygiene is slow.** One module takes about 90 seconds on the machine it was built on and all thirteen checks take over ten minutes — they walk your profile and hash file contents. Running each check separately makes the wait legible, not shorter, and nobody runs a ten-minute scan twice. It is a tracked P1, with the measurements attached.
+- **Machine Hygiene takes about a minute and a half.** All thirteen checks measured **103 seconds** end to end on the machine it was built on — they walk your profile and hash file contents, so this scales with how much is on your disk. It was over ten minutes before 0.9.1, with one check that never finished at all. The floor now is a single check (duplicate content) at 56 seconds, and getting under that needs the checks to share one walk of the disk rather than taking four.
 - The UAC accept/decline/cancel branches of both the startup elevation offer and the auto-elevate setting — these need a human at the actual consent prompt, which cannot be automated
 - Six elevated confirmations of already-built features (startup actions, Store-leftover purge/restore, network hold revert, Force Uninstall acceptance) — see `bd list` for the current set
 - Driver Store package *removal*. This one is not "not yet" — it is **cut**, deliberately: `pnputil /delete-driver` destroys the copy a restore would need, so Vanish cannot promise reversibility there, and `pnputil` and Disk Cleanup already do the job. Listing works today and stays.
@@ -154,7 +154,7 @@ get to be vague about its own shipping standard.
 | **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate for this release. |
 | **No clean-VM acceptance pass** | Vanish has not been tested on a fresh Windows 10 or Windows 11 install. Breakage specific to clean machines — missing runtimes, different UAC defaults, no developer tooling present — would not have been caught. |
 | **Single-user acceptance** | One person has used this end to end: the person who wrote it. Every "works" claim carries that caveat. |
-| **Machine Hygiene takes minutes** | A full run of all thirteen checks took over ten minutes on the machine it was built on. The screen shows you which check is working and findings appear as they land, so the wait is legible — but it is still a wait, and it is the first thing that needs fixing. |
+| **Machine Hygiene takes ~103 seconds** | Measured on the machine it was built on, for all thirteen checks. It scales with the size of your profile, and one check accounts for over half of it. The screen shows which check is working and findings appear as they land, so the wait is legible — but it is still a wait. |
 
 The first two reverse the moment there is a certificate and a VM run; the
 third reverses the moment someone else uses it. Reopen `1w0` and `442` in the
