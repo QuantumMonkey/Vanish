@@ -96,6 +96,11 @@ $suites = @(
     @{ Name = "Machine hygiene (pko)";         Kind = "ps";       Path = "test\finder-hygiene-verify.ps1" },
     @{ Name = "Reclaim by marker (piu)";       Kind = "ps";       Path = "test\finder-reclaim-verify.ps1" },
     @{ Name = "Hygiene report (z22)";          Kind = "node";     Path = "test/hygiene-report-verify.js" },
+    # Needs an ELEVATED shell: only an elevated token can take ownership or
+    # re-secure a directory, so unelevated it skips with the reason named
+    # rather than passing vacuously. Carries its own negative control - it
+    # reproduces isp with the fix off before asserting the fix defeats it.
+    @{ Name = "Data-dir ownership (isp)";      Kind = "node";     Path = "test/data-dir-ownership-verify.js" },
     # Needs an ELEVATED shell to have anything to drop from, and asserts that
     # premise first - on an unelevated run it skips with the reason rather than
     # passing vacuously. Last in the list because it registers and removes a

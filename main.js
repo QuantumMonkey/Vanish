@@ -245,6 +245,14 @@ const bootstrapped = app.whenReady().then(async () => {
 
   elevationOfferPending = !isFullMode();
 
+  // isp: turn on ownership enforcement for our own state writes now that the
+  // tier is known, and BEFORE the first oplog append below - otherwise the
+  // very next line creates oplog.jsonl owned by the interactive user and the
+  // SEC-3 check that runs a few lines further down reports the directory as
+  // unprotected because of something we just did. Only an elevated process
+  // can take ownership, so this is a no-op in Audit Mode by construction.
+  store.setOwnershipEnforcement(isFullMode());
+
   store.appendOplog({
     action: 'app-start',
     tier: currentTier,
