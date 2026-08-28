@@ -54,6 +54,7 @@
       "corrections.json",
       "assets/**/*",
       "lib/**/*",
+      "finders/**/*",
       "LICENSE",
       "!test/**/*",
       "!docs/**/*",
@@ -67,6 +68,10 @@
       {
         "from": "corrections.json",
         "to": "corrections.json"
+      },
+      {
+        "from": "finders",
+        "to": "finders"
       }
     ],
     "win": {

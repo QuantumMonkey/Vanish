@@ -25,6 +25,35 @@ belonged, and `docs/RELEASING.md` was rewritten so this does not recur: one
 milestone, one bump, and the numbers keep moving past 1.0 rather than counting
 down to it.
 
+### Added -- Machine Hygiene has a screen
+
+The thirteen checks behind "rescue before reclaim" were built, tested and
+**completely invisible**: nothing in the application had ever referenced them.
+They now have a tab of their own, second after Health Advisor, laid out in the
+order that is the whole argument -- what a delete would destroy, then what is
+merely wrong, then bytes.
+
+Every check is audit-only. There is no remove button on that screen in either
+mode, and that is deliberate rather than unfinished: a check that can tell you
+a keystore exists nowhere else on earth is worth having years before anything
+is allowed to delete it.
+
+Findings lead with **what it would cost to get back**, not with how big they
+are. A 23 GB `node_modules` that rebuilds in two minutes and a 40 MB keystore
+that exists nowhere else are not the same offer, and sorting by size gets that
+exactly backwards.
+
+Three things the screen refuses to blur:
+
+* **Arriving does not start anything.** These checks walk your profile and hash
+  file contents. Opening a tab is not consent to that, and an empty result you
+  never asked for looks exactly like a clean one.
+* **A partial run gets no verdict.** Checks arrive one at a time -- a full run
+  takes minutes -- so the panel reports progress and says nothing about your
+  machine until every check is back.
+* **"Found nothing" and "did not run" get different rows.** On a screen that
+  only lists findings those two are the same blank space.
+
 ### Changed -- Vanish opens on Health Advisor
 
 The landing screen is the dashboard, not the program list. Vanish is not a list

@@ -61,6 +61,10 @@ $suites = @(
     @{ Name = "Platform uninstalls (8ns)";     Kind = "node";     Path = "test/platforms-verify.js" },
     @{ Name = "Relaunch intent (1dq)";          Kind = "node";     Path = "test/elevation-intent-verify.js" },
     @{ Name = "Icon set";                      Kind = "node";     Path = "test/icon-verify.js" },
+    # A runtime dependency resolved by PATH rather than by require() is invisible
+    # to every suite that runs from the source tree. The 0.9.0 build shipped
+    # without finders/ and nothing failed, because everything degraded politely.
+    @{ Name = "Packaging contract";            Kind = "node";     Path = "test/packaging-verify.js" },
     @{ Name = "Shared runtimes (ht8)";         Kind = "electron"; Path = "test/runtimes-verify.js" },
     @{ Name = "Windows updates (ag0)";         Kind = "electron"; Path = "test/updates-verify.js" },
     @{ Name = "Missing engine (frr)";          Kind = "electron"; Path = "test/engine-missing-verify.js" },

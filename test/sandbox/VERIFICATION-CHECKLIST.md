@@ -50,7 +50,7 @@ P2 and is acceptance for a feature that already passes its automated tests.
 1. **Turn UAC back on** (you offered - it is genuinely needed for sections 1 and
    2, which test the consent branches themselves). Any level that prompts is
    fine; the default is fine.
-2. On the **host**, confirm a fresh build exists: `dist\Vanish-0.8.0-portable.exe`.
+2. On the **host**, confirm a fresh build exists: `dist\Vanish-0.9.0-portable.exe`.
    The sandbox setup script prints whether it found one and how old it is.
 3. Launch the sandbox with the command above and let `npm test` finish. Expect
    **973 passed, 0 failed** with three suites reporting NOT RUN (they need an
@@ -89,7 +89,7 @@ path reads):
 ```
 $dest = "$env:USERPROFILE\Desktop\test folder"
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-Copy-Item "D:\quickhelp\vanish-uninstaller\dist\Vanish-0.8.0-portable.exe" $dest
+Copy-Item "D:\quickhelp\vanish-uninstaller\dist\Vanish-0.9.0-portable.exe" $dest
 ```
 
 Either way, launch it by double-clicking - never from an elevated shell, because
@@ -113,7 +113,7 @@ Run the **packaged portable exe**, not `npm start`. `PORTABLE_EXECUTABLE_FILE`
 is only set for a real packaged exe, and that variable is what the relaunch path
 prefers.
 
-- [ ] **Accept branch.** Launch `dist\Vanish-0.8.0-portable.exe` unelevated.
+- [ ] **Accept branch.** Launch `dist\Vanish-0.9.0-portable.exe` unelevated.
       Confirm the chip bottom-left reads **STANDARD USER** and the Audit Mode
       banner is on screen. Click **Restart as administrator**. Accept the UAC
       prompt.
