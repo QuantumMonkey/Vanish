@@ -86,6 +86,39 @@ const COST_LABEL = {
   unknown: 'rebuild cost unknown'
 };
 
+// costClass DOES NOT MEAN THE SAME THING IN EVERY MODULE, and rendering it as
+// though it did put a real lie on screen. Caught by looking at a screenshot of
+// a real run, 2026-08-28:
+//
+//     Repo is dirty: 1 uncommitted change(s)     [CHEAP TO REBUILD]
+//
+// which reads as "your uncommitted work is cheap to recreate" - the exact
+// opposite of true, and the exact opposite of what this application exists to
+// say. The finder was not wrong. In the hygiene module costClass describes the
+// cost of ACTING ON THE ADVICE ('cheap' because setting an environment
+// variable is free, as redirect-variables' own header says), not the cost of
+// losing the thing. Only rescue and reclaim are talking about what a delete
+// would destroy.
+//
+// So a hygiene finding gets no rebuild badge at all. lib/hygiene-report.js
+// draws the same line for the same reason: module === 'hygiene' IS the
+// definition of wrong-but-free, and it is what FOUND the item that decides
+// that, never what the item would reclaim.
+function hygieneShowsRebuildCost(f) {
+  return f.module !== 'hygiene';
+}
+
+// The same trap, on the size. A hygiene finding's bytes are what is ALREADY
+// sitting somewhere - 13 GB at the Android SDK's default location because
+// ANDROID_HOME was never set - not bytes anything here would free. A bare
+// "13 GB" in the slot the other two modules use for reclaimable size is a
+// number the reader will finish the sentence of, wrongly.
+function hygieneBytesLabel(f) {
+  const size = hygieneBytes(f.bytes);
+  if (!size) return '';
+  return f.module === 'hygiene' ? `${size} already there` : size;
+}
+
 function hygieneEsc(value) {
   return String(value === null || value === undefined ? '' : value)
     .replace(/&/g, '&amp;')
@@ -552,12 +585,17 @@ function renderHygieneModules(decision, partial) {
 
 function renderHygieneFinding(f) {
   const cost = String(f.costClass || 'unknown');
-  const bytes = hygieneBytes(f.bytes);
+  const showsCost = hygieneShowsRebuildCost(f);
+  const bytes = hygieneBytesLabel(f);
   return `
-    <div class="hygiene-finding cost-${hygieneEsc(cost)}">
+    <div class="hygiene-finding ${showsCost ? `cost-${hygieneEsc(cost)}` : 'wrong-but-free'}">
       <div class="hygiene-finding-head">
         <span class="hygiene-finding-title">${hygieneEsc(f.title)}</span>
-        <span class="hygiene-cost cost-${hygieneEsc(cost)}">${hygieneEsc(COST_LABEL[cost] || COST_LABEL.unknown)}</span>
+        ${
+          showsCost
+            ? `<span class="hygiene-cost cost-${hygieneEsc(cost)}">${hygieneEsc(COST_LABEL[cost] || COST_LABEL.unknown)}</span>`
+            : '<span class="hygiene-cost wrong-but-free">nothing to remove</span>'
+        }
         ${bytes ? `<span class="hygiene-finding-bytes">${hygieneEsc(bytes)}</span>` : ''}
       </div>
       ${f.path ? `<div class="hygiene-finding-path mono">${hygieneEsc(f.path)}</div>` : ''}

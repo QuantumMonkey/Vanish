@@ -274,6 +274,76 @@ app.whenReady().then(async () => {
     'and the panel carries no destructive control at all, in either tier'
   );
 
+  // costClass does not mean the same thing in every module, and this is the
+  // assertion that keeps them apart. A HYGIENE finding carrying costClass
+  // 'cheap' means "the fix is free" - setting an environment variable, making
+  // a commit - not "this is cheap to lose". Rendering the reclaim reading of it
+  // put "Repo is dirty: 1 uncommitted change [CHEAP TO REBUILD]" on screen in a
+  // real run, which tells the user their uncommitted work is disposable.
+  const hygieneModule = await decideAndRender([
+    RESULT({
+      finder: 'repo-health',
+      module: 'hygiene',
+      findings: [
+        {
+          id: 'dirty1',
+          title: 'Repo is dirty: 1 uncommitted change(s)',
+          path: 'C:\\repo',
+          bytes: 4096,
+          evidence: 'git status --porcelain reports 1 changed path not committed.',
+          costClass: 'cheap',
+          action: 'audit'
+        }
+      ]
+    })
+  ]);
+  const hygieneMarkup = await run(`document.getElementById('hygiene-modules').innerHTML`);
+  assert(
+    !/cheap to rebuild/i.test(hygieneMarkup),
+    'a HYGIENE finding is never labelled "cheap to rebuild", whatever costClass it carries - that reading would call uncommitted work disposable',
+    hygieneMarkup.slice(0, 300)
+  );
+  assert(
+    /nothing to remove/i.test(hygieneMarkup),
+    'it says "nothing to remove" instead, which is what wrong-but-free actually means'
+  );
+  assert(
+    /already there/.test(hygieneMarkup),
+    'and its bytes are labelled as what is ALREADY sitting there, not as size the finding would free'
+  );
+  void hygieneModule;
+
+  // The same costClass in a RECLAIM finding keeps the rebuild reading, because
+  // there it is the true one. Without this leg the assertion above could be
+  // satisfied by never showing a cost anywhere.
+  await decideAndRender([
+    RESULT({
+      finder: 'reclaim-node',
+      module: 'reclaim',
+      findings: [
+        {
+          id: 'nm1',
+          title: 'node_modules beside a package.json',
+          path: 'C:\\repo\\node_modules',
+          bytes: 1024 * 1024,
+          evidence: 'package.json is present in the parent directory.',
+          rebuildCost: 'npm install, about two minutes',
+          costClass: 'cheap',
+          action: 'audit'
+        }
+      ]
+    })
+  ]);
+  const reclaimMarkup = await run(`document.getElementById('hygiene-modules').innerHTML`);
+  assert(
+    /cheap to rebuild/i.test(reclaimMarkup),
+    'a RECLAIM finding with the same costClass DOES say "cheap to rebuild" - there the rebuild reading is the true one'
+  );
+  assert(
+    !/already there/.test(reclaimMarkup),
+    'and its bytes are plain reclaimable size, with no hygiene-module qualifier'
+  );
+
   const failed = await decideAndRender([]);
   assert(/The checks did not run/.test(failed.text), 'no results at all is FAILED - not "nothing found"');
   assert(/blank, not as a result/.test(failed.text), 'and it says the screen is blank rather than a verdict');

@@ -3725,3 +3725,16 @@ input:checked + .slider:before {
 .hygiene-check-row.blind   i { color: var(--color-warning); }
 .hygiene-check-row.error   i { color: var(--color-danger); }
 .hygiene-check-row.error   .hygiene-check-note { color: var(--color-danger); }
+
+/* A hygiene-module finding gets NO rebuild badge. costClass means "the fix is
+   cheap" there, not "the thing is cheap to lose", and rendering the reclaim
+   reading of it put "Repo is dirty: 1 uncommitted change [CHEAP TO REBUILD]"
+   on screen -- the opposite of true. Neutral, and deliberately not green:
+   nothing here is being offered for removal, so nothing here is reassuring. */
+.hygiene-finding.wrong-but-free { border-left-color: var(--border-glass-active); }
+.hygiene-cost.wrong-but-free {
+  color: var(--text-gray);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
