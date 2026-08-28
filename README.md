@@ -131,9 +131,11 @@ Status vocabulary follows this project's own **promptgate Rule 10**: *Implemente
 - Locked files reported and skipped, never forced; a Task Manager + unlocker tab can close or suspend the holder first
 - A bulk uninstall queue, a System Clean pass across seven leftover categories, and Force Uninstall for entries that can no longer uninstall themselves — all routed through the same vault
 - Elevation state detected via the `WindowsPrincipal` API, never `net session`
+- Thirteen machine-hygiene checks across rescue / hygiene / reclaim, all audit-only, each computing one of three states from evidence rather than asserting one, and a decider that turns the set into exactly one named terminal state ([finders/](finders/), [lib/findings.js](lib/findings.js))
 - A `/cso` security audit found and fixed four issues in the destructive paths (command injection, a restore-destination guard bypassable by a directory junction, an ACL fix that didn't survive the app's own normal startup order, and an untracked lockfile) — see the **Security** section of [CHANGELOG.md](CHANGELOG.md)
 
 **Not yet done, honestly:**
+- **Machine Hygiene is slow.** One module takes about 90 seconds on the machine it was built on and all thirteen checks take over ten minutes — they walk your profile and hash file contents. Running each check separately makes the wait legible, not shorter, and nobody runs a ten-minute scan twice. It is a tracked P1, with the measurements attached.
 - The UAC accept/decline/cancel branches of both the startup elevation offer and the auto-elevate setting — these need a human at the actual consent prompt, which cannot be automated
 - Six elevated confirmations of already-built features (startup actions, Store-leftover purge/restore, network hold revert, Force Uninstall acceptance) — see `bd list` for the current set
 - Driver Store package *removal*. This one is not "not yet" — it is **cut**, deliberately: `pnputil /delete-driver` destroys the copy a restore would need, so Vanish cannot promise reversibility there, and `pnputil` and Disk Cleanup already do the job. Listing works today and stays.
@@ -152,6 +154,7 @@ get to be vague about its own shipping standard.
 | **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate for this release. |
 | **No clean-VM acceptance pass** | Vanish has not been tested on a fresh Windows 10 or Windows 11 install. Breakage specific to clean machines — missing runtimes, different UAC defaults, no developer tooling present — would not have been caught. |
 | **Single-user acceptance** | One person has used this end to end: the person who wrote it. Every "works" claim carries that caveat. |
+| **Machine Hygiene takes minutes** | A full run of all thirteen checks took over ten minutes on the machine it was built on. The screen shows you which check is working and findings appear as they land, so the wait is legible — but it is still a wait, and it is the first thing that needs fixing. |
 
 The first two reverse the moment there is a certificate and a VM run; the
 third reverses the moment someone else uses it. Reopen `1w0` and `442` in the

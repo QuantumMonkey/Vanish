@@ -54,6 +54,13 @@ Three things the screen refuses to blur:
 * **"Found nothing" and "did not run" get different rows.** On a screen that
   only lists findings those two are the same blank space.
 
+**And the cost, said plainly: this is slow.** Measured on the machine it was
+built on, one module takes about 90 seconds and all thirteen checks take over
+ten minutes -- they walk your profile and hash file contents. Running each
+check separately makes that legible rather than shorter: you see which check is
+working and findings appear as they are found. It is not a fix, and nobody runs
+a ten-minute scan twice. Tracked, with the measurements, as a P1.
+
 ### Changed -- Vanish opens on Health Advisor
 
 The landing screen is the dashboard, not the program list. Vanish is not a list
