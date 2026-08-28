@@ -1315,9 +1315,16 @@ const TAB_PANELS = {
 };
 
 function switchTab(tabName) {
+  // The All Programs area is the one .content-area with no id, so it is
+  // identified by excluding every panel that has one. That list must stay
+  // complete: querySelector returns the FIRST match, and today the apps area
+  // happens to come first in the document, so a forgotten exclusion would not
+  // break anything until someone moved a panel above it - at which point
+  // switchTab would start hiding and showing the wrong element with no error
+  // anywhere. Adding a panel means adding it here.
   const appsContentArea = document.querySelector(
-    '.content-area:not(#audit-panel):not(#quarantine-panel):not(#process-panel):not(#clean-panel)' +
-      ':not(#settings-panel):not(#about-panel):not(#force-panel)'
+    '.content-area:not(#audit-panel):not(#hygiene-panel):not(#quarantine-panel):not(#process-panel)' +
+      ':not(#clean-panel):not(#settings-panel):not(#about-panel):not(#force-panel)'
   );
   const panelIds = Object.values(TAB_PANELS).filter(Boolean);
 

@@ -55,7 +55,9 @@ environment, so these files reference each other directly; the order in
 | [renderer/core.js](renderer/core.js) | Module state, `esc`/`toast`, the tier guards (`guardFullMode`, `guardProtected`), the All Programs table with filters and multi-select, tab routing |
 | [renderer/settings-about.js](renderer/settings-about.js) | Settings and About panels |
 | [renderer/wizard.js](renderer/wizard.js) | The uninstall wizard state machine |
-| [renderer/audit.js](renderer/audit.js) | Health Advisor: startup, storage, network activity, GPU, the manual-tap ping |
+| [renderer/audit.js](renderer/audit.js) | Health Advisor -- the landing page: startup, storage, network activity, GPU, the manual-tap ping. Each section loads and fails independently |
+| [renderer/hygiene.js](renderer/hygiene.js) | Machine Hygiene: renders the decided state from `lib/findings.js`, one check at a time, and refuses to name a terminal state before every check is back |
+| [renderer/updates.js](renderer/updates.js) | The Windows Update list inside Health Advisor |
 | [renderer/quarantine-tasks.js](renderer/quarantine-tasks.js) | Quarantine manager, Task Manager, unlocker |
 | [renderer/queue-clean.js](renderer/queue-clean.js) | Bulk queue, System Clean, install snapshot, size attribution |
 | [renderer/force-tour.js](renderer/force-tour.js) | Force Uninstall, guided tour |
@@ -71,6 +73,22 @@ is why the suite can drive it directly:
 | [lib/snapshot.js](lib/snapshot.js) | Install snapshot diff, and what a reading *means* | `snapshot-verify.js` |
 | [lib/attribution.js](lib/attribution.js) | Directory ownership: owned / orphaned / unattributed / system | `attribution-verify.js` |
 | [lib/platforms.js](lib/platforms.js) | Storefront-managed uninstalls (dual-mode: also loaded by the page) | `platforms-verify.js` |
+| [lib/findings.js](lib/findings.js) | THE SEAM. Typed finder results in, exactly one named UI state out (dual-mode: also loaded by the page) | `findings-verify.js`, `wizard-state-verify.js`, `hygiene-panel-verify.js` |
+| [lib/hygiene-report.js](lib/hygiene-report.js) | Formats decided findings as a report, rescue before reclaim | `hygiene-report-verify.js` |
+| [lib/process-attribution.js](lib/process-attribution.js) | Which installed program a running process belongs to | `process-attribution-verify.js` |
+
+`finders/` is a third category, and deliberately not part of `scanner.ps1`.
+Each check is its own file registering itself with `finders/_loader.ps1`, so
+adding the fourteenth touches nothing that already exists. The contract in
+`finders/_contract.ps1` is what makes the seam work: `New-FinderResult` has no
+`-state` parameter, so a finder cannot assert one -- the three states are
+COMPUTED from the evidence it returns, and `lib/findings.js` recomputes them
+again off the wire rather than trusting the label.
+
+They are loaded by path, not by `require`, which means the build system cannot
+see them: `finders/` has to be declared in `package.json` `build.extraResources`
+or the packaged app registers zero checks and says so politely. See
+`test/packaging-verify.js`.
 
 The split exists so decisions are testable apart from rendering. `lib/attribution.js`
 never touches the disk — it is handed directory names, an installed-program map
