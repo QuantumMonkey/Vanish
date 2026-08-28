@@ -3738,3 +3738,15 @@ input:checked + .slider:before {
   letter-spacing: 0.02em;
   text-transform: none;
 }
+
+/* The list stops; the count does not. A cap that showed 100 and reported 100
+   would be this suite's own defect class wearing a scrollbar. */
+.hygiene-render-cap {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-glass-active);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-gray);
+}

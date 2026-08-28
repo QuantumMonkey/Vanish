@@ -344,6 +344,50 @@ app.whenReady().then(async () => {
     'and its bytes are plain reclaimable size, with no hygiene-module qualifier'
   );
 
+  // A real run of duplicate-content on the operator's machine returned 4,035
+  // findings once it was made to finish at all. Rendering every one of them
+  // freezes the page; rendering 100 and REPORTING 100 would be this suite's own
+  // defect class with a scrollbar on it. Both halves are asserted.
+  const many = [];
+  for (let i = 0; i < 250; i += 1) {
+    many.push({
+      id: `f${i}`,
+      title: `Finding number ${i}`,
+      path: `C:\\big\\file${i}`,
+      bytes: 1000 + i,
+      evidence: 'constructed for the cap test',
+      rebuildCost: 'trivial',
+      costClass: 'cheap',
+      action: 'audit'
+    });
+  }
+  await decideAndRender([RESULT({ finder: 'many', module: 'reclaim', findings: many })]);
+
+  const capped = await run(`(() => ({
+    rendered: document.querySelectorAll('#hygiene-modules .hygiene-finding').length,
+    summary: document.querySelector('#hygiene-modules .hygiene-module-summary').textContent,
+    notice: (document.querySelector('#hygiene-modules .hygiene-render-cap') || {}).textContent || '',
+    verdict: document.getElementById('hygiene-verdict').textContent
+  }))()`);
+
+  assert(
+    capped.rendered === 100,
+    `250 findings render as 100 cards, not 250 (${capped.rendered})`
+  );
+  assert(
+    /250 findings/.test(capped.summary) && /250 thing/.test(capped.verdict),
+    `but the COUNT stays the real total in both the module header and the verdict (header: "${capped.summary.trim()}")`
+  );
+  assert(
+    /first 100 of 250/.test(capped.notice.replace(/\s+/g, ' ')),
+    'and the list says outright how many it is showing out of how many there are',
+    capped.notice.replace(/\s+/g, ' ').slice(0, 160)
+  );
+  assert(
+    /ranked by what it would cost/.test(capped.notice.replace(/\s+/g, ' ')),
+    'including why these hundred are the right hundred - the ranking is cost-first, so the tail is the regenerable part'
+  );
+
   const failed = await decideAndRender([]);
   assert(/The checks did not run/.test(failed.text), 'no results at all is FAILED - not "nothing found"');
   assert(/blank, not as a result/.test(failed.text), 'and it says the screen is blank rather than a verdict');

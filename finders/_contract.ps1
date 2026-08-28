@@ -266,3 +266,159 @@ function Assert-RemovalPrecondition {
         }
     }
 }
+
+# ==========================================
+# ONE DIRECTORY SIZER, MEASURED (lhf)
+# ==========================================
+# Six near-identical copies of "sum the bytes under a path" existed across the
+# finders -- four of them byte-for-byte identical -- and every one of them was
+# `Get-ChildItem -Recurse -File -Force` plus a loop over .Length. That builds a
+# full FileInfo PSObject for every file on the way to reading one field.
+#
+# MEASURED on the operator's machine 2026-08-28, profiling each finder in one
+# process:
+#
+#   redirect-variables      59592 ms   to examine FIVE things
+#   reclaim-package-caches  52252 ms   to examine THREE
+#
+# Neither walks a tree looking for anything. Both just size a handful of very
+# large directories, and between them they were 112 seconds of a scan that
+# takes over ten minutes.
+#
+# Two separate wastes, both fixed here:
+#
+# 1. THE SAME DIRECTORY, SIZED REPEATEDLY. redirect-variables reports
+#    ANDROID_HOME and ANDROID_SDK_ROOT separately -- correctly, they are two
+#    different variables -- and on a machine where neither is set they name the
+#    SAME default path. It sized 129,198 files twice to print 13 GB twice.
+#    Results are memoised by normalised path for the life of one scan.
+#
+# 2. THE PSOBJECT TAX. A hand-rolled walk over DirectoryInfo.EnumerateFiles is
+#    2.2x faster on the same tree with a byte-identical, file-count-identical
+#    answer (Android SDK: 25916 ms -> 11589 ms, 129,198 files, sums equal).
+#
+# NOT EnumerateFiles(..., AllDirectories): on .NET Framework that throws on the
+# first unauthorised subdirectory and abandons everything after it, which is
+# precisely why Get-ChildItem -ErrorAction SilentlyContinue was used. The
+# per-directory try/catch below keeps going AND records the real path that
+# failed -- strictly better evidence than -ErrorVariable, which the old copies
+# reduced to a single message with no path attached.
+#
+# ONE DELIBERATE DIVERGENCE, and it is an improvement rather than a shortcut:
+# this skips reparse points (junctions and symlinks). A junction is not part of
+# this subtree - it is a second name for somewhere else - so following one
+# double-counts at best and loops forever at worst. scanner.ps1's Measure-Paths
+# already refuses to follow them for the same reason.
+#
+# AEU DISCIPLINE IS UNCHANGED. A partial sum is still returned rather than a
+# zero, because an under-count is a safer lie than an invented one - but
+# `unreadable` now carries every directory that could not be enumerated, by
+# path, so the caller can turn a partial walk into New-Unreadable instead of
+# trusting the number silently.
+$script:FinderSizeCache = @{}
+
+function Clear-FinderSizeCache {
+    <#
+    .SYNOPSIS
+        Drop every memoised size. Called at the start of each scan.
+
+    .DESCRIPTION
+        Scoped to a scan, not to the process, and that is the whole point: a
+        cached size is a claim about the disk as it was, and a second run
+        exists precisely because the operator changed something. A sizer that
+        remembered across runs would report the state before the change and be
+        impossible to tell apart from one that had looked.
+    #>
+    $script:FinderSizeCache = @{}
+}
+
+function Measure-FinderPathBytes {
+    <#
+    .SYNOPSIS
+        Bytes under a path, memoised, with every unreadable directory named.
+
+    .OUTPUTS
+        @{
+            bytes       = [long]   sum of file lengths, partial if anything was unreadable
+            fileCount   = [int]    files actually counted
+            existed     = [bool]   the path was there at all
+            isFile      = [bool]   it was a file, not a directory
+            unreadable  = [string[]] directories that could not be enumerated
+            detail      = [string] the first real exception message, or ''
+            hadError    = [bool]   shorthand for unreadable.Count -gt 0
+        }
+    #>
+    param([string]$path)
+
+    $empty = @{ bytes = 0L; fileCount = 0; existed = $false; isFile = $false; unreadable = @(); detail = ''; hadError = $false }
+    if ([string]::IsNullOrWhiteSpace($path)) { return $empty }
+
+    # Normalised so 'C:\X' and 'C:\X\' are one cache entry rather than two.
+    $key = $path.TrimEnd('\', '/').ToLowerInvariant()
+    if ($script:FinderSizeCache.ContainsKey($key)) { return $script:FinderSizeCache[$key] }
+
+    $result = $empty.Clone()
+
+    try {
+        if (-not (Test-Path -LiteralPath $path -ErrorAction SilentlyContinue)) {
+            $script:FinderSizeCache[$key] = $result
+            return $result
+        }
+        $result.existed = $true
+
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer) {
+            $result.isFile = $true
+            $result.bytes = [long]$item.Length
+            $result.fileCount = 1
+            $script:FinderSizeCache[$key] = $result
+            return $result
+        }
+    } catch {
+        $result.detail = $_.Exception.Message
+        $result.unreadable = @($path)
+        $result.hadError = $true
+        $script:FinderSizeCache[$key] = $result
+        return $result
+    }
+
+    $sum = 0L
+    $count = 0
+    $blind = [System.Collections.Generic.List[string]]::new()
+    $firstDetail = ''
+
+    $stack = [System.Collections.Generic.Stack[System.IO.DirectoryInfo]]::new()
+    $stack.Push([System.IO.DirectoryInfo]::new($path))
+
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+        try {
+            foreach ($f in $dir.EnumerateFiles()) {
+                $sum += $f.Length
+                $count++
+            }
+        } catch {
+            $blind.Add($dir.FullName)
+            if (-not $firstDetail) { $firstDetail = $_.Exception.Message }
+            continue
+        }
+        try {
+            foreach ($d in $dir.EnumerateDirectories()) {
+                if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                $stack.Push($d)
+            }
+        } catch {
+            $blind.Add($dir.FullName)
+            if (-not $firstDetail) { $firstDetail = $_.Exception.Message }
+        }
+    }
+
+    $result.bytes = $sum
+    $result.fileCount = $count
+    $result.unreadable = @($blind)
+    $result.detail = $firstDetail
+    $result.hadError = ($blind.Count -gt 0)
+
+    $script:FinderSizeCache[$key] = $result
+    return $result
+}

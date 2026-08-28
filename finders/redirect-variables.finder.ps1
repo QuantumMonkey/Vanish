@@ -91,23 +91,26 @@ function script:Measure-PkoDirectoryBytes {
         invented one -- but errorDetail is set so the caller can mark the
         result incomplete via New-Unreadable rather than trusting the number
         silently.
+
+        Now a wrapper over Measure-FinderPathBytes (finders/_contract.ps1),
+        and THIS finder is the reason that function exists. Profiled on the
+        operator's machine 2026-08-28 it took 59,592 ms to examine five
+        things -- the slowest check in the whole suite -- because on a
+        machine where neither ANDROID_HOME nor ANDROID_SDK_ROOT is set, both
+        variables name the SAME default path, and it sized 129,198 files
+        twice to print 13 GB twice. The shared sizer memoises by path, so
+        the second call is free, and is 2.2x faster on the first.
+
+        Return shape unchanged.
     #>
     param([string]$path)
     $out = @{ bytes = 0L; existed = $false; errorDetail = $null }
     if ([string]::IsNullOrWhiteSpace($path)) { return $out }
-    if (-not (Test-Path -LiteralPath $path -ErrorAction SilentlyContinue)) { return $out }
-    $out.existed = $true
-    try {
-        $err = $null
-        $items = @(Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
-        $sum = 0L
-        foreach ($i in $items) { $sum += [long]$i.Length }
-        $out.bytes = $sum
-        $firstErr = @($err | Where-Object { $_ }) | Select-Object -First 1
-        if ($firstErr) { $out.errorDetail = $firstErr.Exception.Message }
-    } catch {
-        $out.errorDetail = $_.Exception.Message
-    }
+
+    $m = Measure-FinderPathBytes -path $path
+    $out.existed = [bool]$m.existed
+    $out.bytes = [long]$m.bytes
+    if ($m.hadError -and $m.detail) { $out.errorDetail = [string]$m.detail }
     return $out
 }
 

@@ -159,19 +159,26 @@ function script:Find-SgnGitRepoRoots {
 }
 
 function script:Get-SgnPathBytes {
+    <#
+    .SYNOPSIS
+        Bytes at a path, whether it is a file or a directory. 0 when it is
+        neither, or when nothing could be read.
+
+    .DESCRIPTION
+        Wraps Measure-FinderPathBytes (finders/_contract.ps1) rather than
+        running its own Get-ChildItem -Recurse walk. Same answer, memoised,
+        and it matters here more than anywhere: Test-SgnPathHasBytes calls
+        this purely to ask "is it bigger than zero", and every reported
+        finding then calls it AGAIN for the number.
+
+        Still returns a bare [long] and still returns 0 rather than throwing:
+        this one is used inside boolean tests, and a caller that has to
+        handle an exception to ask about a size would grow a catch block
+        that swallows the difference between empty and unreadable.
+    #>
     param([string]$path)
-    try {
-        if (Test-Path -LiteralPath $path -PathType Leaf) {
-            return [long](Get-Item -LiteralPath $path -Force -ErrorAction Stop).Length
-        }
-        if (Test-Path -LiteralPath $path -PathType Container) {
-            $sum = 0L
-            Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue |
-                ForEach-Object { $sum += $_.Length }
-            return [long]$sum
-        }
-    } catch { }
-    return 0L
+    if ([string]::IsNullOrWhiteSpace($path)) { return 0L }
+    return [long](Measure-FinderPathBytes -path $path).bytes
 }
 
 # The size/marker heuristic named in the issue, applied to gitignored,

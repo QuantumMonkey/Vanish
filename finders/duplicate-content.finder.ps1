@@ -224,6 +224,117 @@ function script:Read-SurvivorManifest {
 }
 
 
+# ---- WHY THIS FINDER PRUNES, AND WHY IT SAYS SO (lhf) --------------------
+#
+# Profiled on the operator's machine 2026-08-28 with every finder timed in
+# one process, this was the only check that could not be measured at all: it
+# was still running when a 240-SECOND cap stopped it, while the next-slowest
+# finished in 60. It enumerated every file under $env:USERPROFILE with
+# Get-ChildItem -File -Recurse and materialised the whole set into memory
+# before grouping any of it.
+#
+# Pruning is not free honesty. For local-only-credentials, skipping
+# node_modules is safe by construction - a credential does not live there, so
+# nothing that was true before becomes unknown. THIS finder is different: it
+# reports PAIRS, so removing candidates can remove real findings. A duplicate
+# spanning a pruned tree is a duplicate this run will not report.
+#
+# So every pruned subtree is recorded ONCE, at its own root, as a place that
+# was not searched. That is what turns a narrowed scan from a quiet lie into a
+# stated scope: with no findings, the result is could-not-look rather than
+# nothing, and the UI already words that correctly ("No findings in the N
+# locations that could be read, and M that could not. This is NOT the same as
+# clean."). One record per pruned root, never one per file - a thousand
+# identical entries would bury the fifteen that mean something.
+#
+# The list is the intersection of two questions: is a duplicate found in here
+# something a person would act on, and is this tree regenerable by a tool that
+# already owns it. node_modules is BOTH - every package with two versions in
+# the tree is a "duplicate" nobody should touch by hand, and reclaim-node
+# already reports the directory itself.
+$script:D30PruneSegments = @(
+    'node_modules', '.git', '.hg', '.svn', 'vendor', '.venv', 'venv', '__pycache__',
+    '.gradle', '.cache', '.npm', '.nuget', 'packages', '.pub-cache',
+    'AppData', '$Recycle.Bin', 'System Volume Information',
+    'Windows', 'WindowsApps', 'ProgramData', 'Recovery', 'PerfLogs'
+)
+
+function script:Invoke-D30FileWalk {
+    <#
+    .SYNOPSIS
+        Every file under $root worth comparing, grouped by size as it goes.
+
+    .DESCRIPTION
+        Streams into the size map instead of materialising a FileInfo array
+        of the whole profile first, and PRUNES rather than walking trees it
+        will only throw away. Hand-written for the reason every walk in this
+        directory is hand-written: Get-ChildItem -Recurse cannot prune, only
+        filter after the fact.
+
+        Three kinds of not-looked-at, kept apart because they license
+        different things:
+          not-searched  a subtree this finder deliberately skips (see above)
+          scan-capped   the run hit its directory budget and stopped
+          access-denied Windows would not let us enumerate it
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$root,
+        [Parameter(Mandatory = $true)][hashtable]$bySize,
+        [Parameter(Mandatory = $true)][object]$unreadable,
+        [int]$maxDirs = 20000
+    )
+
+    $examined = 0
+    $dirsVisited = 0
+    $stack = [System.Collections.Generic.Stack[System.IO.DirectoryInfo]]::new()
+    $stack.Push([System.IO.DirectoryInfo]::new($root))
+
+    while ($stack.Count -gt 0) {
+        $dir = $stack.Pop()
+
+        if ($dirsVisited -ge $maxDirs) {
+            $unreadable.Add((New-Unreadable -path $dir.FullName -reason 'scan-capped' `
+                -detail "The scan visited $maxDirs directories under '$root' and stopped early so a run never hangs. Pass a narrower 'roots' list to cover what was skipped."))
+            continue
+        }
+        $dirsVisited++
+
+        try {
+            foreach ($f in $dir.EnumerateFiles()) {
+                $examined++
+                $key = [long]$f.Length
+                if (-not $bySize.ContainsKey($key)) { $bySize[$key] = [System.Collections.Generic.List[object]]::new() }
+                $bySize[$key].Add($f)
+            }
+        } catch {
+            $unreadable.Add((New-Unreadable -path $dir.FullName -reason 'access-denied' -detail $_.Exception.Message))
+            continue
+        }
+
+        try {
+            foreach ($d in $dir.EnumerateDirectories()) {
+                # A junction is a second name for somewhere else. Following
+                # one reports a file as a duplicate of itself.
+                if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    $unreadable.Add((New-Unreadable -path $d.FullName -reason 'not-searched' `
+                        -detail 'A junction or symbolic link. Following it would report a file as a duplicate of itself.'))
+                    continue
+                }
+                if ($script:D30PruneSegments -contains $d.Name) {
+                    $unreadable.Add((New-Unreadable -path $d.FullName -reason 'not-searched' `
+                        -detail "Skipped by name: a duplicate inside '$($d.Name)' is what a package manager or a build is supposed to produce, and is reported by the reclaim checks rather than here. A duplicate that spans this directory will not be found by this run."))
+                    continue
+                }
+                $stack.Push($d)
+            }
+        } catch {
+            $unreadable.Add((New-Unreadable -path $dir.FullName -reason 'access-denied' -detail $_.Exception.Message))
+        }
+    }
+
+    return $examined
+}
+
 Register-Finder -name 'duplicate-content' -title 'Files duplicated by content across trees' -module 'rescue' -auditOnly $true -handler {
     param($p)
 
@@ -247,24 +358,11 @@ Register-Finder -name 'duplicate-content' -title 'Files duplicated by content ac
             continue
         }
 
-        # -ErrorVariable +err, never bare $? after this pipeline -- aeu binding
-        # rule 1. A subtree that returns access-denied here has not been
-        # examined and must not be allowed to read as "no duplicates below."
-        $err = $null
-        $files = @(Get-ChildItem -LiteralPath $root -File -Recurse -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
-
-        foreach ($e in @($err)) {
-            if ($null -eq $e) { continue }
-            $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $root }
-            $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
-        }
-
-        foreach ($f in $files) {
-            $examined++
-            $key = [long]$f.Length
-            if (-not $bySize.ContainsKey($key)) { $bySize[$key] = [System.Collections.Generic.List[object]]::new() }
-            $bySize[$key].Add($f)
-        }
+        # Every directory that could not be read, and every subtree that was
+        # deliberately skipped, is added to $unreadable BY PATH inside the
+        # walk -- aeu binding rule 1. A subtree nothing looked at must never
+        # be allowed to read as "no duplicates below".
+        $examined += Invoke-D30FileWalk -root $root -bySize $bySize -unreadable $unreadable
     }
 
     # ---- pass 2: hash ONLY within a size group that has more than one file ----

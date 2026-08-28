@@ -394,6 +394,74 @@ try {
     try { Assert-RemovalPrecondition -survivorPath $mismatchFile -expectedBytes $actualBytes -expectedSha256 $correctHash }
     catch { $noThrowOnMatch = $false }
     Assert-True $noThrowOnMatch "and does NOT throw when size and hash both genuinely match -- this is a precondition check, not a check that always fails"
+    # ==================================================================
+    # 7. The prune list narrows the search - and SAYS SO. (lhf)
+    # ==================================================================
+    # This finder used to enumerate every file under the root with
+    # Get-ChildItem -Recurse. Profiled on a real machine 2026-08-28 it was
+    # the only check that could not be measured at all: still running when a
+    # 240-second cap stopped it, while the next-slowest finished in 60.
+    #
+    # It now prunes. Pruning is not free honesty HERE the way it is in the
+    # credentials finder: that one asks "is there a credential in this tree",
+    # and a credential does not live in node_modules, so nothing true becomes
+    # unknown. This finder reports PAIRS, so removing candidates removes real
+    # findings - a duplicate spanning a pruned tree will not be reported.
+    #
+    # That is only acceptable because the prune is DECLARED. Both halves are
+    # asserted below, and the second is the one that matters: a scan that
+    # quietly stopped looking would pass the first half on its own.
+    Write-Host ""
+    Write-Host "30i.7 pruning narrows the search, and the narrowing is declared" -ForegroundColor Cyan
+
+    $case7 = Join-Path $work "case7"
+    $visible = Join-Path $case7 "src"
+    $pruned  = Join-Path (Join-Path $case7 "node_modules") "somepkg"
+    $null = New-Item -ItemType Directory -Path $visible -Force
+    $null = New-Item -ItemType Directory -Path $pruned -Force
+
+    # One duplicate pair entirely inside the pruned tree, and one entirely
+    # outside it. The outside pair proves the finder still works at all -
+    # without it, "no findings" would satisfy the first assertion for the
+    # wrong reason.
+    Set-Content -LiteralPath (Join-Path $pruned "dup1.txt")  -Value ("P" * 512) -Encoding ASCII -NoNewline
+    Set-Content -LiteralPath (Join-Path $pruned "dup2.txt")  -Value ("P" * 512) -Encoding ASCII -NoNewline
+    Set-Content -LiteralPath (Join-Path $visible "keep1.txt") -Value ("V" * 640) -Encoding ASCII -NoNewline
+    Set-Content -LiteralPath (Join-Path $visible "keep2.txt") -Value ("V" * 640) -Encoding ASCII -NoNewline
+
+    $r7 = Get-DedupFinderResult -fixtureRoot $case7
+    $allPaths7 = @()
+    foreach ($f in @($r7.findings)) {
+        # Survivor AND copies. Reading only `copies` would miss the survivor,
+        # and in a two-file group exactly one of the pair IS the survivor - so
+        # the control leg would have failed while the finder was working.
+        $allPaths7 += [string]$f.detail.survivor.path
+        foreach ($c in @($f.detail.copies)) { $allPaths7 += [string]$c.path }
+    }
+
+    Assert-True (@($allPaths7 | Where-Object { $_ -like "*keep*" }).Count -ge 2) `
+        "the pair OUTSIDE the pruned tree is still found - otherwise the next assertion passes for the wrong reason"
+    Assert-True (@($allPaths7 | Where-Object { $_ -like "*node_modules*" }).Count -eq 0) `
+        "and the pair inside node_modules is NOT reported"
+
+    $notSearched = @($r7.unreadable | Where-Object { $_.reason -eq "not-searched" })
+    Assert-True (@($notSearched | Where-Object { $_.path -like "*node_modules*" }).Count -eq 1) `
+        "THE ASSERTION THIS BLOCK EXISTS FOR: the pruned directory is named ONCE as not-searched, so a narrowed scan is a stated scope rather than a quiet lie"
+    Assert-True (@($notSearched | Where-Object { $_.path -like "*node_modules*" -and $_.detail -match "will not be found" }).Count -eq 1) `
+        "and its detail says outright that a duplicate spanning it will be missed"
+
+    # The state has to follow. With no findings at all and something pruned,
+    # the answer is could-not-look, never nothing - that is aeu, and it is the
+    # reason the prune has to be recorded rather than just documented.
+    $case7b = Join-Path $work "case7b"
+    $pruned7b = Join-Path (Join-Path $case7b "node_modules") "pkg"
+    $null = New-Item -ItemType Directory -Path $pruned7b -Force
+    Set-Content -LiteralPath (Join-Path $pruned7b "a.txt") -Value ("Q" * 90) -Encoding ASCII -NoNewline
+    Set-Content -LiteralPath (Join-Path $pruned7b "b.txt") -Value ("Q" * 90) -Encoding ASCII -NoNewline
+    $r7b = Get-DedupFinderResult -fixtureRoot $case7b
+    Assert-True (@($r7b.findings).Count -eq 0) "a root whose only duplicates are inside a pruned tree yields no findings"
+    Assert-True ($r7b.state -eq "could-not-look") `
+        "and its state is could-not-look, NOT nothing - the scan did not look everywhere and refuses to say the tree is clean (got: $($r7b.state))"
 }
 finally {
     Remove-TestTree $work

@@ -46,6 +46,22 @@ let hygieneLoadErrors = [];
 // on screen without finishing the set any sooner.
 const HYGIENE_CONCURRENCY = 3;
 
+// How many findings a module renders before it stops and says so.
+//
+// Not a guess. Once duplicate-content was made to actually finish (it used to
+// run past a 240-second cap without completing), one real run on the operator's
+// machine returned 4,035 findings -- and every one of them is a card with a
+// path, an evidence sentence and a cost badge. Rendering all of them freezes
+// the page to produce a list nobody scrolls.
+//
+// The cap is safe to apply BECAUSE the list is already ranked by rebuild cost
+// rather than by size (lib/findings.js rankFindings): the ones you cannot get
+// back are at the top, and the tail is the part a single command regenerates.
+// The count in the module header stays the REAL total, and the notice says
+// plainly that the rest exist. A cap that quietly showed 100 and reported 100
+// would be this suite's own defect class wearing a scrollbar.
+const HYGIENE_RENDER_CAP = 100;
+
 // Rescue, then hygiene, then reclaim. The ORDER IS THE ARGUMENT: what a delete
 // would destroy, then what is merely wrong, then bytes. A cleaner that leads
 // with bytes is how people lose keystores.
@@ -575,7 +591,18 @@ function renderHygieneModules(decision, partial) {
           <span class="hygiene-module-summary">${hygieneEsc(summary)}</span>
         </div>
         <div class="hygiene-module-lede">${hygieneEsc(mod.lede)}</div>
-        ${found.length > 0 ? found.map(renderHygieneFinding).join('') : ''}
+        ${found.length > 0 ? found.slice(0, HYGIENE_RENDER_CAP).map(renderHygieneFinding).join('') : ''}
+        ${
+          found.length > HYGIENE_RENDER_CAP
+            ? `<div class="hygiene-render-cap">
+                 Showing the first ${HYGIENE_RENDER_CAP} of ${found.length}. They are the first
+                 ${HYGIENE_RENDER_CAP} for a reason -- everything here is ranked by what it would cost
+                 to get back, so the ones you cannot rebuild are at the top and the ones a command
+                 regenerates are at the bottom. The count above is the real total; nothing was
+                 discarded, only left off this list.
+               </div>`
+            : ''
+        }
       </div>
     `);
   }

@@ -201,6 +201,12 @@ function Invoke-HygieneScan {
         $selected = @($selected | Where-Object { @($only) -contains $_.name })
     }
 
+    # lhf: sizes are memoised for the life of ONE scan, never across scans.
+    # A second run exists because the operator changed something; a sizer that
+    # remembered would report the disk as it was and be indistinguishable from
+    # one that had looked.
+    if (Get-Command Clear-FinderSizeCache -ErrorAction SilentlyContinue) { Clear-FinderSizeCache }
+
     $results = [System.Collections.Generic.List[object]]::new()
 
     foreach ($finder in $selected) {
