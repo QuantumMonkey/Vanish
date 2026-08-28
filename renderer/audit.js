@@ -30,48 +30,154 @@ let startupFilterUiWired = false;
 // repeated values, and Action is a column of buttons.
 const STARTUP_COLUMN_FILTERS = ['startup.source', 'startup.status'];
 
+// PROGRESSIVE LOAD. This panel used to Promise.all its six engine calls and
+// show one full-panel spinner until the LAST one landed. Measured on the
+// operator's machine 2026-08-28, per call:
+//
+//   get-startup-items      7413 ms      get-listeners            3456 ms
+//   get-windows-updates    5293 ms      get-software-redundancy  1215 ms
+//   get-network-activity   5019 ms      get-system-diagnostics   1019 ms
+//
+// So the machine overview - which is ready in one second - was held off screen
+// for seven, waiting on a signature-checking walk of the startup list that has
+// nothing to do with it. Health Advisor is the landing page now, which makes
+// that the first thing anyone sees of Vanish.
+//
+// Each query renders its own section the moment it answers, and each failure is
+// reported in the section it belongs to. A section that is still working says
+// so IN PLACE; nothing is hidden behind a global spinner, and one dead query no
+// longer blanks five healthy panels.
+//
+// The counter is not decoration. auditLoaded must mean "everything on screen is
+// real" - switchTab uses it to decide whether returning to this tab needs a
+// re-read - so it is only set once every section has settled, not on first
+// paint.
+function auditSectionPending(elementId, what) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.innerHTML = `
+    <div class="audit-pending">
+      <i class="fa-solid fa-spinner fa-spin"></i>
+      <span>${what}</span>
+    </div>
+  `;
+}
+
+function auditRowPending(tbodyId, colspan, what) {
+  const el = document.getElementById(tbodyId);
+  if (!el) return;
+  el.innerHTML = `
+    <tr><td colspan="${colspan}" class="audit-pending-cell">
+      <i class="fa-solid fa-spinner fa-spin"></i> <span>${what}</span>
+    </td></tr>
+  `;
+}
+
+function auditRowFailed(tbodyId, colspan, what, message) {
+  const el = document.getElementById(tbodyId);
+  if (!el) return;
+  el.innerHTML = `
+    <tr><td colspan="${colspan}" class="audit-pending-cell failed">
+      <i class="fa-solid fa-circle-xmark"></i> <span>Could not ${what}: ${message}</span>
+    </td></tr>
+  `;
+}
+
+function auditSectionFailed(elementId, what, message) {
+  const el = document.getElementById(elementId);
+  if (!el) return;
+  el.innerHTML = `
+    <div class="audit-pending failed">
+      <i class="fa-solid fa-circle-xmark"></i>
+      <span>Could not ${what}: ${message}</span>
+    </div>
+  `;
+}
+
 async function loadAuditData(force = false) {
   if (auditLoaded && !force) return;
 
   const loadingEl = document.getElementById('audit-loading');
   const contentEl = document.getElementById('audit-content');
-  loadingEl.style.display = 'flex';
-  contentEl.style.display = 'none';
   auditLoaded = false;
 
-  try {
-    // Fire every PowerShell query in parallel. The network read spends most of
-    // its time asleep between two counter samples, so running it alongside the
-    // others costs the load almost nothing in wall-clock time.
-    // ag0 joins the same Promise.all rather than getting its own await: the
-    // update read is a Get-HotFix plus one DISM call, and serialising it would
-    // add its whole duration to a panel people already wait on.
-    const [diag, startup, redundancy, network, listeners, updates] = await Promise.all([
-      window.api.getSystemDiagnostics(),
-      window.api.getStartupItems(),
-      window.api.getSoftwareRedundancy(),
-      window.api.getNetworkActivity(),
-      window.api.getListeners(),
-      window.api.getWindowsUpdates()
-    ]);
+  // The frame the user actually gets: the panel, with every section labelled
+  // and each one saying what it is doing. Not a spinner where the page is.
+  loadingEl.style.display = 'none';
+  contentEl.style.display = 'flex';
 
-    renderSysInfoCards(diag);
-    renderDiskBars(diag.disks || [], diag.disksError);
-    renderNetworkActivity(network);
-    renderListeners(listeners);
-    renderWindowsUpdates(updates);
-    renderStartupTable(startup);
-    renderRedundancyGroups(redundancy);
+  auditSectionPending('audit-sysinfo-grid', 'reading this machine');
+  auditSectionPending('audit-disk-list', 'reading your drives');
+  auditSectionPending('audit-network-body', 'sampling the adapter');
+  auditSectionPending('audit-listeners-body', 'checking what is listening');
+  auditSectionPending('audit-updates-body', 'asking Windows Update');
+  auditSectionPending('audit-redundancy-list', 'grouping installed programs');
+  auditRowPending('audit-startup-tbody', 5, 'reading startup items and checking their signatures');
 
-    auditLoaded = true;
-    loadingEl.style.display = 'none';
-    contentEl.style.display = 'flex';
-  } catch (err) {
-    loadingEl.innerHTML = `
-      <i class="fa-solid fa-circle-xmark" style="font-size: 28px; color: var(--color-danger);"></i>
-      <div style="color: var(--color-danger);">Could not read your system information: ${err.message}</div>
-    `;
-  }
+  // Each section owns its own query, its own render and its own failure. Named
+  // rather than inlined so the list reads as what it is: six independent
+  // questions about the machine that happen to share a screen.
+  const sections = [
+    {
+      run: () => window.api.getSystemDiagnostics(),
+      draw: (diag) => {
+        renderSysInfoCards(diag);
+        renderDiskBars(diag.disks || [], diag.disksError);
+      },
+      fail: (msg) => {
+        auditSectionFailed('audit-sysinfo-grid', 'read this machine', msg);
+        auditSectionFailed('audit-disk-list', 'read your drives', msg);
+      }
+    },
+    {
+      run: () => window.api.getNetworkActivity(),
+      draw: (network) => renderNetworkActivity(network),
+      fail: (msg) => auditSectionFailed('audit-network-body', 'measure network activity', msg)
+    },
+    {
+      run: () => window.api.getListeners(),
+      draw: (listeners) => renderListeners(listeners),
+      fail: (msg) => auditSectionFailed('audit-listeners-body', 'check what is listening', msg)
+    },
+    {
+      run: () => window.api.getWindowsUpdates(),
+      draw: (updates) => renderWindowsUpdates(updates),
+      fail: (msg) => auditSectionFailed('audit-updates-body', 'ask Windows Update', msg)
+    },
+    {
+      run: () => window.api.getSoftwareRedundancy(),
+      draw: (redundancy) => renderRedundancyGroups(redundancy),
+      fail: (msg) => auditSectionFailed('audit-redundancy-list', 'group installed programs', msg)
+    },
+    {
+      // Slowest by a wide margin, and deliberately last so it is started last.
+      // Its placeholder is a table ROW, not a replacement for the wrapper:
+      // renderStartupTable fills audit-startup-tbody and returns silently if
+      // that element has gone, so overwriting the wrapper would leave this
+      // section blank forever with no error raised anywhere.
+      run: () => window.api.getStartupItems(),
+      draw: (startup) => renderStartupTable(startup),
+      fail: (msg) => auditRowFailed('audit-startup-tbody', 5, 'read your startup items', msg)
+    }
+  ];
+
+  const settled = sections.map((section) =>
+    section
+      .run()
+      .then((data) => {
+        try {
+          section.draw(data);
+        } catch (err) {
+          // A render that throws is OUR bug, not the machine's, and saying
+          // "could not read" about it would be a lie. Say which half broke.
+          section.fail(`Vanish could not display this - ${err.message}`);
+        }
+      })
+      .catch((err) => section.fail(err.message))
+  );
+
+  await Promise.all(settled);
+  auditLoaded = true;
 }
 
 // Attach refresh button

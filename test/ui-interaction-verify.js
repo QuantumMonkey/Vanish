@@ -154,6 +154,16 @@ app.whenReady().then(async () => {
   // DisplayName once arrived as a String[] and broke the whole renderer list.
   // That regression has engine-side coercion and engine-side coverage, but
   // nothing before this asserted the LIST SURVIVES it, on screen, in the DOM.
+  //
+  // NAVIGATE THERE FIRST. Health Advisor is the landing page now, so the apps
+  // table starts hidden and every hit test below would report "element has no
+  // box" - a real answer to the wrong question. This block is about what the
+  // list does when it IS on screen; getting it on screen is a precondition,
+  // not one of its assertions.
+  await click(win, '.nav-item[data-tab="all-apps"]');
+  await waitForSelector(win, '#apps-tbody tr', 4000);
+  await assertClickable(win, '.nav-item[data-tab="all-apps"]', 'All Programs is reachable from the landing page');
+
   console.log('');
   console.log('Application list renders real engine output shapes');
 

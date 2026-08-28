@@ -76,6 +76,10 @@ $suites = @(
     @{ Name = "De-elevation mechanism (9vp)";   Kind = "ps";       Path = "test\deelevation-mechanism-verify.ps1" },
     @{ Name = "Listener panel (ddx)";          Kind = "electron"; Path = "test/listeners-verify.js" },
     @{ Name = "Startup grouping (tda)";        Kind = "electron"; Path = "test/startup-groups-verify.js" },
+    # Correctness, not speed: the runspace pool must return the SAME verdicts
+    # as the serial path, because a signer name decides what gets folded away
+    # as "necessary" rather than shown as actionable.
+    @{ Name = "Parallel signatures";           Kind = "ps";       Path = "test\signature-batch-verify.ps1" },
     @{ Name = "Column filters (5b0)";          Kind = "electron"; Path = "test/column-filter-verify.js" },
     @{ Name = "UI interaction";                Kind = "electron"; Path = "test/ui-interaction-verify.js" },
     @{ Name = "Clean All (zl4)";               Kind = "electron-full"; Path = "test/clean-all-verify.js" },

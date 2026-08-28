@@ -1648,6 +1648,14 @@ function Add-StartupClassification {
     $windir = [string]$env:SystemRoot
     $managedMachine = Get-MachineIsManaged
 
+    # Every signature this pass needs, checked concurrently up front rather
+    # than one at a time inside the loop below. Same verdicts, same order of
+    # decisions - the loop is unchanged except that it now READS an answer
+    # instead of waiting 72ms for one.
+    $sigCache = Get-BinarySignatureBatch -Paths @(
+        $Items | Where-Object { $_.exeExists -eq $true -and $_.exePath } | ForEach-Object { [string]$_.exePath }
+    )
+
     foreach ($item in $Items) {
         $group = 'actionable'
         $classification = 'no-opinion'
@@ -1657,7 +1665,11 @@ function Add-StartupClassification {
         $signer = $null
         $sigStatus = 'not-checked'
         if ($exePath -and $item.exeExists -eq $true) {
-            $sig = Get-BinarySignature -Path $exePath
+            # Falls back to a direct check rather than to 'not-checked' if the
+            # batch somehow has no row: a missing answer must never read as a
+            # verdict, and 'not-checked' is what an unsigned binary looks like
+            # to the grouping below.
+            $sig = if ($sigCache.ContainsKey($exePath)) { $sigCache[$exePath] } else { Get-BinarySignature -Path $exePath }
             $sigStatus = [string]$sig.status
             if ($sig.status -eq 'Valid') { $signer = [string]$sig.signer }
         }
@@ -2133,6 +2145,120 @@ function Get-BinarySignature {
     } catch {
         return @{ status = "unreadable"; signer = $null; isEv = $false }
     }
+}
+
+
+# Signature checking, in parallel, for a whole list at once.
+#
+# WHY. Measured on the operator's machine 2026-08-28: get-startup-items took
+# 7413ms end to end, and 2659ms of that was Get-AuthenticodeSignature over 37
+# unique startup binaries - roughly 72ms each, almost all of it certificate
+# chain work, none of it dependent on any other item. Health Advisor is the
+# landing page now and this was its slowest section by a wide margin.
+#
+# WHAT WAS REJECTED. Caching verdicts to disk keyed on path + mtime + size
+# would be faster still and was NOT done: the cache would have to live somewhere
+# an unelevated process can write, the signer name feeds startup GROUPING, and a
+# writable file that decides what gets grouped as 'necessary' - and therefore
+# folded away out of sight - is a new tampering surface bought for two seconds.
+# Parallelism buys most of the same time and adds no trust surface at all.
+#
+# WHY A RUNSPACE POOL AND NOT ForEach-Object -Parallel: that switch is
+# PowerShell 7+. This engine targets Windows PowerShell 5.1, which is what ships
+# in the box and what the app can rely on being present.
+#
+# The runspaces get a SCRIPT BLOCK WITH NO DEPENDENCIES ON SESSION STATE. A new
+# runspace does not inherit this file's dot-sourced functions, so the parsing is
+# inlined rather than calling Get-BinarySignature - a call that would fail there
+# with "not recognized" and be swallowed into 'unreadable' for every path.
+#
+# FALLS BACK TO SERIAL, LOUDLY IN CODE AND SILENTLY TO THE USER. If the pool
+# cannot be created (constrained language mode, a locked-down host), every path
+# is still checked - just one at a time. A signature verdict is never skipped
+# and never guessed: the answer is the same, only slower.
+function Get-BinarySignatureBatch {
+    param([string[]]$Paths)
+
+    $result = @{}
+    $unique = @($Paths | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique)
+    if ($unique.Count -eq 0) { return $result }
+
+    # Below this it is not worth building a pool: creating and opening one costs
+    # more than a handful of serial checks.
+    if ($unique.Count -lt 4) {
+        foreach ($path in $unique) { $result[$path] = Get-BinarySignature -Path $path }
+        return $result
+    }
+
+    $worker = {
+        param($Path)
+        try {
+            if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+                return @{ path = $Path; status = 'unreadable'; signer = $null; isEv = $false }
+            }
+            $sig = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
+            $subject = if ($sig.SignerCertificate) { [string]$sig.SignerCertificate.Subject } else { $null }
+            $signer = $null
+            if ($subject -and $subject -match 'CN=([^,]+)') { $signer = $Matches[1].Trim('"') }
+            return @{
+                path   = $Path
+                status = [string]$sig.Status
+                signer = $signer
+                isEv   = [bool]($subject -match 'Private Organization')
+            }
+        } catch {
+            return @{ path = $Path; status = 'unreadable'; signer = $null; isEv = $false }
+        }
+    }
+
+    $pool = $null
+    try {
+        # Capped at 8. These are I/O and crypto bound, not CPU bound, so the
+        # gain flattens well before core count on a big machine, and an
+        # unbounded pool on a startup list of 80 would be worse than serial.
+        $threads = [Math]::Min(8, [Math]::Max(2, $unique.Count))
+        $pool = [RunspaceFactory]::CreateRunspacePool(1, $threads)
+        $pool.Open()
+
+        $jobs = @()
+        foreach ($path in $unique) {
+            $ps = [PowerShell]::Create()
+            $ps.RunspacePool = $pool
+            $null = $ps.AddScript($worker).AddArgument($path)
+            $jobs += [PSCustomObject]@{ ps = $ps; handle = $ps.BeginInvoke(); path = $path }
+        }
+
+        foreach ($job in $jobs) {
+            try {
+                $out = $job.ps.EndInvoke($job.handle)
+                $row = @($out)[0]
+                if ($row) {
+                    $result[$job.path] = @{ status = [string]$row.status; signer = $row.signer; isEv = [bool]$row.isEv }
+                }
+            } catch {
+                # One path failing must not cost the other thirty-six.
+                $result[$job.path] = @{ status = 'unreadable'; signer = $null; isEv = $false }
+            } finally {
+                $job.ps.Dispose()
+            }
+        }
+    } catch {
+        # The pool itself was unavailable. Answer every path serially rather
+        # than reporting 'unreadable' for a file we simply did not look at.
+        foreach ($path in $unique) {
+            if (-not $result.ContainsKey($path)) { $result[$path] = Get-BinarySignature -Path $path }
+        }
+    } finally {
+        if ($pool) { try { $pool.Close(); $pool.Dispose() } catch {} }
+    }
+
+    # Any path the pool never answered for - a runspace that died outright -
+    # gets a real serial check. Absence of an answer is not an answer.
+    foreach ($path in $unique) {
+        if (-not $result.ContainsKey($path)) { $result[$path] = Get-BinarySignature -Path $path }
+    }
+
+    return $result
 }
 
 function Get-ListenerReport {

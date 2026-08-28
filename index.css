@@ -3514,3 +3514,33 @@ input:checked + .slider:before {
    not be mistakable for a real date at a glance (c0y). */
 .update-nodate { color: var(--text-muted); font-style: italic; }
 .update-nokb { color: var(--text-muted); font-weight: 400; }
+
+/* --- Health Advisor: per-section pending and failure ----------------------
+   The panel used to hide behind one full-screen spinner until its slowest
+   query landed -- 7.4s on the operator's machine, for a section that has
+   nothing to do with the machine overview that was ready in one. Each section
+   now says what IT is doing, in its own place, so the page is legible from the
+   first frame instead of being a spinner where the page is.
+
+   Deliberately quieter than .panel-state: this is a section still working, not
+   a section reporting a result, and it must not read as an error while it is
+   simply not finished yet. */
+.audit-pending {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 18px 2px;
+  color: var(--text-gray);
+  font-size: 12.5px;
+}
+.audit-pending i { color: var(--color-primary); font-size: 13px; }
+.audit-pending.failed, .audit-pending.failed i { color: var(--color-danger); }
+
+.audit-pending-cell {
+  padding: 22px 16px;
+  color: var(--text-gray);
+  font-size: 12.5px;
+  text-align: center;
+}
+.audit-pending-cell i { color: var(--color-primary); margin-right: 6px; }
+.audit-pending-cell.failed, .audit-pending-cell.failed i { color: var(--color-danger); }

@@ -31,7 +31,10 @@ let lastCheckedRowIndex = null; // for shift-click range selection
 // which rows are on screen; reading the DOM back would give it the checkboxes
 // but not the app ids behind them.
 let lastRenderedApps = [];
-let activeTab = 'all-apps';
+// Health Advisor is the landing page. Kept in sync with the 'active' class in
+// index.html and with the panel that ships visible on the first frame; all
+// three have to agree or the first switchTab leaves two panels showing.
+let activeTab = 'audit';
 let filterText = '';
 let filterType = 'all';
 // 7oo.3: the default list is the things a person recognises as applications.
@@ -363,7 +366,19 @@ document.addEventListener('DOMContentLoaded', async () => {
   // contradicts a currently-elevated session on a machine where startupMode
   // was already 'full' from a prior run.
   syncSettingsPanel();
-  await loadApplications();
+
+  // LANDING ON HEALTH ADVISOR, and not waiting for the program list to do
+  // it. Boot used to await loadApplications() before anything was on screen,
+  // which put two PowerShell round trips in front of the first frame for a
+  // table the user may not even be looking at. The audit panel's sections
+  // each render as their own query lands (see loadAuditData), so the first
+  // useful frame arrives on the fastest query rather than the slowest.
+  switchTab(activeTab);
+
+  // Warm the program list in the background so All Programs is instant when
+  // it is clicked. Deliberately NOT awaited: nothing on the landing screen
+  // needs it, and a failure here is already reported inside that tab.
+  loadApplications().catch((err) => console.error('Background app load failed:', err));
   // Wire the buttons; do NOT open anything. The offer opens from the banner
   // or from a blocked action, never from having started the app.
   wireElevationOffer();

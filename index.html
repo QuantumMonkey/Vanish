@@ -63,13 +63,17 @@
       <!-- Sidebar Navigation -->
       <div class="sidebar">
         <div class="sidebar-nav">
-          <div class="nav-item active" data-tab="all-apps">
-            <i class="fa-solid fa-list-check"></i>
-            <span>All Programs</span>
-          </div>
-          <div class="nav-item" data-tab="audit">
+          <!-- Health Advisor leads, and is the landing page. Vanish is not a
+               list of programs with some tools bolted on; it is a hygiene
+               dashboard, and the first screen has to say so. All Programs is
+               still one click away and still where uninstalls start. -->
+          <div class="nav-item active" data-tab="audit">
             <i class="fa-solid fa-chart-line"></i>
             <span>Health Advisor</span>
+          </div>
+          <div class="nav-item" data-tab="all-apps">
+            <i class="fa-solid fa-list-check"></i>
+            <span>All Programs</span>
           </div>
           <div class="nav-item" data-tab="task-manager">
             <i class="fa-solid fa-microchip"></i>
@@ -106,7 +110,7 @@
       </div>
 
       <!-- Content Area -->
-      <div class="content-area">
+      <div class="content-area" style="display: none;">
         
         <!-- Header Controls -->
         <div class="content-header">
@@ -346,7 +350,7 @@
       </div>
 
       <!-- ===== AUDIT & HEALTH ADVISOR PANEL ===== -->
-      <div class="content-area" id="audit-panel" style="display: none;">
+      <div class="content-area" id="audit-panel" style="display: flex; flex-direction: column; flex: 1; overflow: hidden;">
 
         <!-- Audit Header -->
         <div class="content-header" style="border-bottom: 1px solid var(--border-glass); padding-bottom: 16px; margin-bottom: 0;">
