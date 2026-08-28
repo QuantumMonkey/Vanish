@@ -293,6 +293,41 @@ contextBridge.exposeInMainWorld('api', {
   findBrokenEntries: stub('findBrokenEntries', { success: true, total: 0, findings: [] }),
   cleanerScan: stub('cleanerScan', { success: true, findings: [] }),
   cleanerPurge: stub('cleanerPurge', { success: true, quarantinedCount: 1 }),
+
+  // 5p5 machine hygiene. The DEFAULTS here are deliberately the two states a
+  // happy-path fixture would never produce on its own: one check that ran and
+  // found nothing, and a registry with two checks in it. Every interesting
+  // case - a finding, a blind location, a check that does not come back - is
+  // queued per test, because those are the states this screen exists to keep
+  // apart and a default that produced them would hide a renderer that ignores
+  // the difference.
+  listHygieneFinders: stub('listHygieneFinders', {
+    success: true,
+    loaded: [],
+    loadErrors: [],
+    finders: [
+      { name: 'stub-rescue', title: 'Stub rescue check', module: 'rescue', auditOnly: true, needsElevation: false },
+      { name: 'stub-reclaim', title: 'Stub reclaim check', module: 'reclaim', auditOnly: true, needsElevation: false }
+    ]
+  }),
+  runHygieneScan: stub('runHygieneScan', (params) => {
+    const wanted = (params && params.finders && params.finders[0]) || 'stub-rescue';
+    return {
+      success: true,
+      results: [
+        {
+          finder: wanted,
+          title: `Stub ${wanted}`,
+          module: wanted === 'stub-reclaim' ? 'reclaim' : 'rescue',
+          state: 'nothing',
+          findings: [],
+          unreadable: [],
+          examinedCount: 3,
+          totalBytes: 0
+        }
+      ]
+    };
+  }),
   // 6g2 progress channel. The fixture keeps the same shape as the real preload
   // so the renderer takes the same code path here as it does in the app, and
   // __test.emitScanProgress lets a test drive it.

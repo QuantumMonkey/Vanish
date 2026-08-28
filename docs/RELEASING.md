@@ -2,113 +2,95 @@
 
 ---
 
-## Versioning Scheme — `RELEASE.MAJOR.MINOR`
+## Versioning Scheme -- `MAJOR.MINOR.PATCH`
 
-Vanish uses a three-part version number. The rules below are the single source of
-truth. When in doubt, ask: *"which digit does this change belong to?"* and apply
-the lowest one that fits.
+**Amended 2026-08-28 by the operator, and this amendment is the point of the
+section.** The old scheme called the first digit RELEASE and said it bumps from
+`0` to `1` *exactly once*, after which it moves again only for "a complete
+architectural overhaul". That made `1.0.0` a finish line and everything before
+it a countdown, which had two visible costs:
 
-### RELEASE (first digit)
+* Real milestones piled up under one number because the next number was
+  reserved. **0.8.0 carried far more than one milestone's worth of work** -- the
+  finder/decider seam, the machine-hygiene suite, the UAC cause mapping, the
+  live elevated relaunch -- and comparing "0.8.0" to "0.8.0" told you nothing
+  about which one you were running.
+* It described Vanish as a project heading somewhere and then stopping.
 
-Bumps from `0` to `1` exactly once — when Vanish is ready for public distribution.
+**Vanish is not limited to 1.0 as its final variant.** Versions keep moving with
+the milestones, before and after 1.0, and the digits mean what they mean
+everywhere else in software. The naming below is now ordinary SemVer, because
+inventing private names for the same three digits was itself a source of
+confusion.
 
-**Bump when ALL of the following are true:**
-- Everything in the Ship list of `docs/PRE-RELEASE.md` is done or explicitly
-  waived there. That file, not this list, enumerates the 1.0 gates.
-- `BENCHMARKS.md` has at least one validated run with full test conditions.
-- Any gate waived rather than met is stated plainly in README's **Known
-  limitations** section, with its cost.
+### MAJOR (first digit)
 
-**Amended 2026-08-12.** This list previously required Core stages marked
-Complete in `docs/handoff.md` (now archived under `docs/history/`), a clean
-Win10 + Win11 VM pass, a signed binary, and a real screenshot. The VM pass and
-the signed binary were waived by explicit decision for 1.0 (bd `0xt` closed,
-`1w0` deferred). They are not quietly dropped: both are named in README's
-Known limitations, and both reverse the moment a certificate or a VM run
-exists. Do not re-add them here as blockers without also reopening those
-issues.
+`0` while the ship gates in [PRE-RELEASE.md](PRE-RELEASE.md) are outstanding.
+`1` when they are met -- that is what 1.0.0 means and all it means.
 
-**After `1.0.0`:** bump RELEASE again only for a complete architectural overhaul
-that breaks backward compatibility with the IPC protocol or scanner.ps1 interface
-(e.g. switching the host from Electron to a different runtime). These are rare.
+**After `1.0.0`, MAJOR keeps moving.** Bump it for a break in a contract
+someone outside this repo could be relying on: the IPC action interface, the
+`scanner.ps1` action names or payload shapes, the on-disk vault schema, or a
+host change (Electron to something else). A user whose quarantine vault cannot
+be read by the new version has experienced a major version change whatever the
+changelog says.
 
-**Do not bump RELEASE** to signal excitement or importance. A major feature
-completing is a MAJOR bump, not a RELEASE bump.
+Do **not** bump MAJOR to signal excitement or importance. A big feature landing
+is a MINOR bump.
 
----
+### MINOR (second digit)
 
-### MAJOR (second digit)
+**One milestone, one bump. Bump it when the milestone lands, not when the
+calendar or the roadmap says so.** A milestone is a capability that is complete
+end to end -- it works, it is verified, and a user could describe what changed
+in a sentence.
 
-Bumps each time a meaningful new capability tier is complete.
+Concretely, any of:
 
-**Bump when ANY of the following occurs:**
-- A roadmap Stage (as defined in `docs/roadmap.md`) reaches functional
-  completion — meaning its core deliverables work end-to-end, not just that
-  code exists.
-- The IPC action interface in `scanner.ps1` / `main.js` changes in a way that
-  would break an older renderer (renamed actions, removed fields, schema changes).
-- A significant architectural change: adding a persistent database, switching
-  the IPC transport, replacing the PowerShell backend with a compiled binary.
+* A new capability tier reaches functional completion (the machine-hygiene
+  finders; Force Uninstall; the quarantine vault).
+* A structural change users feel: which screen the app opens on, how a whole
+  panel loads, a new shared surface every feature routes through.
+* An IPC or engine interface gains actions in a way older callers survive.
 
-**Do not bump MAJOR** for adding a new function to an existing stage,
-fixing bugs in a completed stage, or documentation changes.
+Double digits are expected and correct. `0.13.0` is unambiguous and accurate.
+Never reset, compress, or cap the digit to keep it looking tidy.
 
-> **Double digits are expected and correct.** The roadmap has 14 stages (Stage 5
-> was merged into Stage 3, leaving 13 active). By the time all Standard and
-> Extended tier stages are complete, MAJOR will reach `0.13.x` or similar.
-> Do not reset, compress, or artificially cap the digit to keep it single-digit.
-> `0.13.0` is unambiguous and semantically accurate.
+### PATCH (third digit)
 
----
+Everything else, and it absorbs most of the work: bug fixes inside a shipped
+milestone, a new helper or IPC handler that extends an existing one, docs,
+moves and renames, CSS, dependency bumps with no behaviour change, promptgate
+fixes.
 
-### MINOR (third digit)
+### The test, when a change does not obviously fit
 
-Everything else. This digit absorbs all routine development activity.
-
-**Bump when:**
-- A bug is fixed within a completed stage.
-- A new helper function, IPC handler, or UI component is added that extends
-  an existing stage without completing a new one.
-- Documentation is updated, reorganised, or corrected.
-- Files are moved, renamed, or deleted.
-- CSS or UI tweaks that do not constitute a new stage feature.
-- Dependency updates (Electron, Node packages) with no behavioral change.
-- Promptgate rule violations are fixed.
+Ask what a user would have to be told. *"Nothing, unless they hit the bug"* is a
+PATCH. *"Vanish now does X"* is a MINOR. *"Your existing X will not work"* is a
+MAJOR.
 
 ---
 
-## Current Version History
+## Version History
 
-| Version | Date | Description |
+| Version | Date | What it was |
 |---------|------|-------------|
-| `0.1.0` | 2026-06-25 | Core MVP — Stage 1 complete |
-| `0.1.1` | 2026-06-26 | Promptgate alignment, docs corrections, README/BENCHMARKS/RELEASING created |
-| `0.2.0` | 2026-06-26 | Stage 2 complete — Audit & Health Advisor |
-| `0.2.1` | 2026-06-26 | Docs consolidated into `docs/`, versioning scheme established |
+| `0.1.0` | 2026-06-25 | Core MVP |
+| `0.2.0` | 2026-06-26 | Audit & Health Advisor |
+| `0.3.0` | 2026-08-12 | Task Manager & Unlocker |
+| `0.4.0` | 2026-08-13 | Search & Destroy |
+| `0.5.0` | 2026-08-13 | Elevation you can trust |
+| `0.6.0` | 2026-08-14 | Say which, and say what matters |
+| `0.7.0` | 2026-08-18 | Space you can actually recover |
+| `0.8.0` | 2026-08-18 | Other people's tools, used properly |
+| `0.9.0` | 2026-08-28 | Rescue before reclaim -- the machine-hygiene suite, the finder/decider seam, and Health Advisor as the landing dashboard |
 
----
-
-## What Comes Next
-
-| Milestone | Expected version | Tier |
-|-----------|-----------------|------|
-| Stage 3 complete (Task Manager & Unlocker) | `0.3.0` | Core |
-| Stage 4 complete (Search & Destroy) | `0.4.0` | Standard |
-| Stage 5 | *(merged into Stage 3 — no separate version bump)* | — |
-| Stage 6 complete (Orchestration & Shell Cleanup) | `0.5.0` | Core |
-| Stage 7 complete (Network & Disk Optimization) | `0.6.0` | Standard |
-| Stage 8 complete (Installation Sandbox Rollback) | `0.7.0` | Standard |
-| Stage 9 complete (System Integration & Environment Clean) | `0.8.0` | Core |
-| Stage 10 complete (Enterprise Audits & Offset Rules) | `0.9.0` | Extended |
-| Stage 11 complete (Windows Cache & Installer Purge) | `0.10.0` | Standard |
-| Stage 12 complete (OS Telemetry & Shortcut Alignment) | `0.11.0` | Standard |
-| Stage 13 complete (Runtime Dependency & Driver Audit) | `0.12.0` | Extended |
-| Stage 14 complete (CleanerML Cache Engine) | `0.13.0` | Standard |
-| All Core stages verified on clean VMs, signed binary ready | `1.0.0` | — |
-
-> **Note**: RELEASE (`1.0.0`) does not wait for all 13 stages — only Core tier
-> stages (1, 2, 3, 6, 9) must be complete and VM-verified. Standard and Extended
-> stages ship as `1.x.0` post-launch updates.
+`0.9` previously named the pre-release chore list (the elevated confirmations,
+the demo recording, signing, a second machine, a final docs pass). Those are
+gates, not a milestone, and holding a version number hostage to them is exactly
+the habit this section was rewritten to stop. They are tracked in
+[PRE-RELEASE.md](PRE-RELEASE.md) and in `bd`, and they gate **1.0**, which is
+where they always belonged.
 
 ---
 

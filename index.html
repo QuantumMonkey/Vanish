@@ -79,6 +79,15 @@
             <i class="fa-solid fa-microchip"></i>
             <span>Task Manager</span>
           </div>
+          <!-- The three modules of finders/ -- rescue, hygiene, reclaim -- in
+               that order. A top-level tab because it is the one thing here no
+               other cleaner on this machine can do, and because its scan walks
+               real directories and must be asked for rather than run on
+               arrival. -->
+          <div class="nav-item" data-tab="hygiene">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>Machine Hygiene</span>
+          </div>
           <div class="nav-item" data-tab="system-clean">
             <i class="fa-solid fa-broom"></i>
             <span>System Clean</span>
@@ -700,6 +709,65 @@
           </div>
         </div>
       </div><!-- /process-panel -->
+
+      <!-- ===== MACHINE HYGIENE (5p5 / aeu) =====
+           The finder/decider seam, on screen. finders/ produce TYPED results
+           with three states each - found / nothing / could-not-look, computed
+           from evidence and never asserted - and lib/findings.js turns the set
+           of them into exactly one named UI state. Nothing here removes
+           anything: every registered finder is auditOnly.
+
+           The order of the modules is the product argument. Rescue first
+           (what a delete would destroy), then hygiene (wrong but free), then
+           reclaim (bytes). A cleaner that leads with bytes is how people lose
+           keystores. -->
+      <div class="content-area" id="hygiene-panel" style="display: none;">
+        <div class="content-header panel-header">
+          <div class="panel-title">
+            <i class="fa-solid fa-layer-group"></i>
+            Machine Hygiene
+          </div>
+          <div class="panel-header-actions">
+            <select class="sort-selector" id="hygiene-module-select" title="Which set of checks to run">
+              <option value="">All three modules</option>
+              <option value="rescue">Rescue only -- what a delete would destroy</option>
+              <option value="hygiene">Hygiene only -- wrong, not wasteful</option>
+              <option value="reclaim">Reclaim only -- regenerable bytes</option>
+            </select>
+            <button class="btn-sec btn-compact" id="btn-hygiene-scan">
+              <i class="fa-solid fa-magnifying-glass"></i> Run checks
+            </button>
+          </div>
+        </div>
+        <div class="panel-scroll">
+          <p class="panel-lede">
+            Everything here <strong>reads only</strong> -- no finding on this screen can be removed
+            by Vanish, in Audit Mode or Full Mode. It answers the question a disk-usage tool
+            cannot: not how big a folder is, but <strong>what deleting it would cost you</strong>.
+            Checks walk your user profile and can take a while on a large disk, which is why they
+            run when you ask and not when you arrive.
+          </p>
+
+          <!-- The named terminal state lives here, and it is ONE element. Four
+               outcomes - work found, nothing found, could not finish, did not
+               run - are four different sentences licensing four different next
+               actions, and the bug this seam exists to prevent is exactly the
+               moment two of them share a rendering. -->
+          <div id="hygiene-verdict"></div>
+
+          <!-- Which checks ran and how each one ended. A screen that lists only
+               findings looks identical whether a check found nothing or never
+               executed, and those are not the same claim. -->
+          <div id="hygiene-checklist"></div>
+
+          <div id="hygiene-modules"></div>
+
+          <!-- Locations the scan could not read, listed separately and never
+               folded into the count of findings. "I looked and found nothing"
+               and "I could not look" are not the same claim. -->
+          <div id="hygiene-unreadable"></div>
+        </div>
+      </div><!-- /hygiene-panel -->
 
       <!-- ===== SCR-05: SYSTEM CLEAN ===== -->
       <div class="content-area" id="clean-panel" style="display: none;">
@@ -1472,6 +1540,7 @@
   <script src="renderer/settings-about.js"></script>
   <script src="renderer/wizard.js"></script>
   <script src="renderer/audit.js"></script>
+  <script src="renderer/hygiene.js"></script>
   <script src="renderer/updates.js"></script>
   <script src="renderer/quarantine-tasks.js"></script>
   <script src="renderer/queue-clean.js"></script>

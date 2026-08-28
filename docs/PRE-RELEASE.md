@@ -1,8 +1,49 @@
-# Vanish -- the road to 1.0
+# Vanish -- the road to 1.0, and past it
 
 Decided 2026-08-12. This file is the release scope. If something is not in
 the ship list below, it is not in 1.0, and that is a decision rather than an
 oversight.
+
+## What Vanish is -- amended 2026-08-28
+
+Operator, 2026-08-28: *"vanish is no longer a simple uninstaller, it is a
+premium CCleaner for developers and digital hygienists."*
+
+That is a positioning decision and it changes what earns a bd issue. The
+standard below does not move an inch -- if anything it bites harder, because
+"a cleaner for developers" is precisely the claim a redundant feature would
+love to hide behind. What changes is the comparison class. The question is no
+longer "does Windows already uninstall programs" but **"does CCleaner, or
+BleachBit, or WizTree, already do this for the person who has forty
+repositories and six toolchains on one disk"** -- and for the three assets
+below the answer is no, because none of those tools has an installed-program
+map, a restorable vault, or any idea which of your files exist nowhere else.
+
+It also settles the landing screen. A hygiene tool opens on its dashboard;
+Health Advisor is the landing page as of 0.9.0.
+
+## Versions no longer count down to 1.0 -- amended 2026-08-28
+
+Operator, same day: *"we are no longer limited to 1.0 being the final variant,
+so we can continue versioning as per all milestone changes. there have been
+way too many 0.8.0 changes -- its not a fair comparison."*
+
+Correct, and measurable: 0.8.0 was tagged on 2026-08-18 and by 2026-08-28 it
+had absorbed the finder/decider seam, the whole machine-hygiene suite, the UAC
+cause mapping, the live elevated relaunch proof, and the SEC-3 ownership fix.
+Two builds both calling themselves 0.8.0 were not comparable in any useful
+sense.
+
+So: **one milestone, one MINOR bump**, and the numbers keep moving after 1.0
+like any other project. 1.0 is the release that meets the gates in this file --
+not a finish line, and not a licence to sit on a version number while work
+piles up behind it. The rules are in [RELEASING.md](RELEASING.md), which was
+rewritten the same day.
+
+The table under "Status and version plan" below is the ORIGINAL 2026-08-13
+plan and is kept for its reasoning. Where it disagrees with this section, this
+section wins. In particular its "0.9 = pre-release chores" row no longer holds:
+0.9.0 shipped as the machine-hygiene milestone, and those chores gate 1.0.
 
 The standard applied throughout, in the operator's words: *solve problems
 that are not solved, use existing tools where possible, integrate existing

@@ -1,7 +1,7 @@
 {
   "name": "vanish-uninstaller",
-  "version": "0.8.0",
-  "description": "On-device Windows application auditor and manager - approval-gated uninstalls, leftover scanning, and system health audits. No telemetry, no cloud.",
+  "version": "0.9.0",
+  "description": "A premium CCleaner for developers and digital hygienists. On-device Windows machine hygiene - approval-gated uninstalls, leftover scanning, quarantine with a real restore path, and a health dashboard that tells you what a delete would destroy. No telemetry, no cloud.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -13,6 +13,10 @@
   "keywords": [
     "windows",
     "uninstaller",
+    "cleaner",
+    "disk-cleanup",
+    "developer-tools",
+    "machine-hygiene",
     "audit",
     "electron",
     "powershell"

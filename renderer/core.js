@@ -1306,6 +1306,7 @@ const TAB_PANELS = {
   'all-apps': null, // the original content-area
   audit: 'audit-panel',
   'task-manager': 'process-panel',
+  hygiene: 'hygiene-panel',
   'system-clean': 'clean-panel',
   quarantine: 'quarantine-panel',
   'force-uninstall': 'force-panel',
@@ -1371,6 +1372,10 @@ function switchTab(tabName) {
   if (tabName === 'audit') { loadAuditData(); startNetworkAutoRefresh(); }
   if (tabName === 'quarantine') loadVaultEntries();
   if (tabName === 'task-manager') startProcessRefresh();
+  // Deliberately does NOT start a scan. This one walks real directories and
+  // hashes real files; arriving at a tab is not consent to that. The panel
+  // renders what it last found, or an invitation.
+  if (tabName === 'hygiene') renderHygienePanel();
   if (tabName === 'system-clean') renderCleanerSections();
   if (tabName === 'settings') loadSettingsPanel();
   if (tabName === 'about') loadAboutPanel();

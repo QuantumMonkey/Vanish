@@ -3544,3 +3544,184 @@ input:checked + .slider:before {
 }
 .audit-pending-cell i { color: var(--color-primary); margin-right: 6px; }
 .audit-pending-cell.failed, .audit-pending-cell.failed i { color: var(--color-danger); }
+
+/* --- Machine Hygiene (5p5 / aeu) -----------------------------------------
+   The verdict block is one element with four tones, because the four outcomes
+   -- work found, nothing found, could not finish, did not run -- are four
+   different claims about the machine. The moment two of them share a rendering
+   is the moment "I could not look" starts reading as "there is nothing there",
+   which is the defect this whole subsystem exists to make unrepresentable. The
+   colours are part of that: incomplete is deliberately NOT green. */
+.hygiene-verdict {
+  border: 1px solid var(--border-glass);
+  border-left-width: 3px;
+  border-radius: 10px;
+  background: var(--bg-dark-card);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.hygiene-verdict-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-title);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.hygiene-verdict-head i { font-size: 15px; }
+.hygiene-verdict-body {
+  margin-top: 8px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text-gray);
+}
+.hygiene-bytes-total {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--text-gray);
+}
+.hygiene-verdict.work       { border-left-color: var(--color-primary); }
+.hygiene-verdict.work i     { color: var(--color-primary); }
+.hygiene-verdict.clean      { border-left-color: var(--color-success); }
+.hygiene-verdict.clean i    { color: var(--color-success); }
+.hygiene-verdict.incomplete { border-left-color: var(--color-warning); }
+.hygiene-verdict.incomplete i { color: var(--color-warning); }
+.hygiene-verdict.failed     { border-left-color: var(--color-danger); }
+.hygiene-verdict.failed i   { color: var(--color-danger); }
+.hygiene-verdict.neutral    { border-left-color: var(--border-glass-active); }
+.hygiene-verdict.neutral i  { color: var(--text-gray); }
+.hygiene-disagreement { color: var(--color-warning); }
+
+.hygiene-module {
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  background: var(--bg-dark-card);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+}
+.hygiene-module-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.hygiene-module-head i { color: var(--color-primary); font-size: 13px; }
+.hygiene-module-title {
+  font-family: var(--font-title);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.hygiene-module-summary {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-gray);
+}
+.hygiene-module-lede {
+  margin: 6px 0 2px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-gray);
+}
+
+.hygiene-finding {
+  border: 1px solid var(--border-glass);
+  border-left-width: 3px;
+  border-radius: 8px;
+  padding: 11px 13px;
+  margin-top: 10px;
+}
+.hygiene-finding-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.hygiene-finding-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.hygiene-finding-bytes {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-gray);
+}
+.hygiene-finding-path {
+  margin-top: 6px;
+  word-break: break-all;
+  color: var(--text-gray);
+}
+.hygiene-finding-evidence,
+.hygiene-finding-rebuild {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-gray);
+}
+.hygiene-finding-foot {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--text-gray);
+  opacity: 0.75;
+}
+
+/* Cost, not size, is what colours a finding. A 23 GB node_modules that
+   rebuilds in two minutes and a 40 MB keystore that exists nowhere else are
+   not the same offer, and ranking or colouring by bytes gets it exactly
+   backwards. 'unknown' is warned rather than greyed: an unmeasured cost is not
+   a cheap one. */
+.hygiene-cost {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 20px;
+  border: 1px solid currentColor;
+}
+.hygiene-finding.cost-cheap          { border-left-color: var(--color-success); }
+.hygiene-cost.cost-cheap             { color: var(--color-success); }
+.hygiene-finding.cost-moderate       { border-left-color: var(--color-primary); }
+.hygiene-cost.cost-moderate          { color: var(--color-primary); }
+.hygiene-finding.cost-expensive      { border-left-color: var(--color-warning); }
+.hygiene-cost.cost-expensive         { color: var(--color-warning); }
+.hygiene-finding.cost-irreplaceable  { border-left-color: var(--color-danger); }
+.hygiene-cost.cost-irreplaceable     { color: var(--color-danger); }
+.hygiene-finding.cost-unknown        { border-left-color: var(--color-warning); }
+.hygiene-cost.cost-unknown           { color: var(--color-warning); }
+
+.hygiene-blind-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-top: 1px solid var(--border-glass);
+  font-size: 12px;
+}
+.hygiene-blind-reason { color: var(--text-gray); margin-left: auto; text-align: right; }
+
+/* Per-check status. The point of this list is that "nothing found" and "did not
+   run" have different rows, because on a screen that only lists findings they
+   are the same blank space. */
+.hygiene-check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border-glass);
+  font-size: 12px;
+}
+.hygiene-check-row i { font-size: 12px; width: 14px; text-align: center; }
+.hygiene-check-title { color: var(--text-primary); }
+.hygiene-check-note { margin-left: auto; color: var(--text-gray); font-size: 11.5px; }
+.hygiene-check-row.queued  i { color: var(--text-gray); opacity: 0.6; }
+.hygiene-check-row.running i { color: var(--color-primary); }
+.hygiene-check-row.clean   i { color: var(--color-success); }
+.hygiene-check-row.found   i { color: var(--color-primary); }
+.hygiene-check-row.blind   i { color: var(--color-warning); }
+.hygiene-check-row.error   i { color: var(--color-danger); }
+.hygiene-check-row.error   .hygiene-check-note { color: var(--color-danger); }

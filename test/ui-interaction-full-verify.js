@@ -129,6 +129,17 @@ app.whenReady().then(async () => {
   // No elevation offer to dismiss in Full Mode; confirm the app is usable from
   // the first frame, same as a real elevated launch.
   await assertClickable(win, '.nav-item[data-tab="all-apps"]', 'the sidebar is reachable on an elevated launch');
+
+  // Health Advisor is the landing page as of 0.9.0, so the apps table starts
+  // hidden. Every hit test below is about what an elevated session can DO with
+  // that table, not about which tab opens first - so get there, then assert.
+  // Without this they all fail with "element has no box", which is a true
+  // answer to a question this suite is not asking.
+  await win.webContents.executeJavaScript(
+    `(() => { document.querySelector('.nav-item[data-tab="all-apps"]').click(); return true; })()`
+  );
+  await new Promise((r) => setTimeout(r, 600));
+
   await assertClickable(win, '#apps-tbody .app-row', 'the fixture app row is clickable');
 
   // ==========================================================================

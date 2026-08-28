@@ -186,9 +186,21 @@ app.whenReady().then(async () => {
     return { keys: Object.keys(map).sort(), map, procHeaders };
   })()`);
 
+  // AMENDED 2026-08-28 (0.9.0). This used to expect exactly the four filters
+  // belonging to the two STATIC tables, on the reasoning that nothing else had
+  // rendered yet. Health Advisor is the landing page now, so its startup table
+  // renders during boot and registers its own two - which made this fail with
+  // six keys against four.
+  //
+  // The set is still asserted exactly rather than loosened to a subset. The
+  // point of this assertion is that a funnel appears where one is meant to and
+  // NOWHERE else; "at least these four" would pass with a funnel bolted onto a
+  // numeric column, which is the specific mistake the next three assertions
+  // exist to catch.
   assert(
-    funnels.keys.join(',') === 'apps.publisher,apps.type,process.indicators,process.name',
-    'the two static tables register exactly four column filters at startup'
+    funnels.keys.join(',') ===
+      'apps.publisher,apps.type,process.indicators,process.name,startup.source,startup.status',
+    `the tables rendered at startup register exactly six column filters (got ${funnels.keys.join(',')})`
   );
   assert(
     /Type/.test(funnels.map['apps.type']) && /Name/.test(funnels.map['apps.publisher']),

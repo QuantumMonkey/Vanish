@@ -76,6 +76,17 @@ contextBridge.exposeInMainWorld('api', {
   getNetworkActivity: (params) => ipcRenderer.invoke('get-network-activity', params),
   getListeners: () => ipcRenderer.invoke('get-listeners'),
   getWindowsUpdates: () => ipcRenderer.invoke('get-windows-updates'),
+
+  // 5p5/aeu - the machine-hygiene finders. AUDIT ONLY: every finder in
+  // finders/ reports and removes nothing, so this channel is not gated by
+  // fullModeOnly and works in Audit Mode like the rest of the read surface.
+  runHygieneScan: (params) => ipcRenderer.invoke('run-hygiene-scan', params),
+  // The registry of checks, so the panel can run them ONE AT A TIME and show
+  // which is still working. Measured 2026-08-28: the hygiene module alone
+  // takes 89 seconds on the operator's machine, and all three take longer
+  // than ten minutes. A single call behind a single spinner would be the
+  // Health Advisor bug again, an order of magnitude worse.
+  listHygieneFinders: () => ipcRenderer.invoke('list-hygiene-finders'),
   networkSpeedTest: () => ipcRenderer.invoke('network-speedtest'),
 
   // kp0 - the one deliberate exception: a single ICMP echo, only on an

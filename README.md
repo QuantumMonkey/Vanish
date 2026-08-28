@@ -1,10 +1,12 @@
 # Vanish
 
-**An on-device Windows application auditor and manager that proposes — and never acts without your approval.**
+**A premium CCleaner for developers and digital hygienists — on-device, approval-gated, and reversible by default.**
 
-Vanish maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts down the leftovers that uninstallers leave behind, quarantines everything it removes so it can be put back, and audits system health — startup bloat, orphaned autostart entries, redundant software, locked files, a bulk uninstall queue. Everything runs locally. Nothing leaves your machine.
+Vanish opens on a **Health Advisor** dashboard: what this machine is, where the disk went, what starts with Windows, what holds a network connection, what is listening, what is installed twice. From there it maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts the leftovers uninstallers abandon, and **quarantines everything it removes so it can be put back**. Everything runs locally. Nothing leaves your machine.
 
-> Working version 0.3.0. Passes **544/544** assertions locally (`npm test`). Heading for a 1.0 release whose scope, cuts and knowingly-accepted limitations are all written down in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) — read [Status](#status) before you rely on this.
+The "for developers" part is not decoration. A general-purpose cleaner does not know that `node_modules` is disposable and a `.jks` keystore is not, that an unpushed branch exists nowhere else in the world, or that a stash is invisible to every other tool you own. Vanish leads with **what a delete would destroy** and only then with what it would free — see [Rescue before reclaim](#rescue-before-reclaim).
+
+> Working version **0.9.0**, verified locally with `npm test`. Versions track milestones and keep moving past 1.0 — see [docs/RELEASING.md](docs/RELEASING.md). 1.0 is the release that meets the gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md), not a finish line. Read [Status](#status) before you rely on this.
 
 <!-- DEMO GIF PLACEHOLDER
 Record with ScreenToGif: 30–60s showing scan → app select → wizard →
@@ -79,6 +81,23 @@ is 12 GB; none of them can tell you whose it was, because none of them has an
 uninstall database. And a tool that guesses would eventually put a delete button
 next to something you needed.
 
+## Rescue before reclaim
+
+The machine-hygiene suite is audit-only: it reports, and removes nothing. It was
+built in the order that earns trust rather than the order that frees the most
+space, because **a tool that cannot yet delete anything, but can tell you what a
+delete would destroy, is already the most useful thing on the machine.**
+
+| Check | What only this can tell you |
+|---|---|
+| **Local-only credentials** | Files that are on your disk, are gitignored, and are therefore on no remote anywhere -- `key.properties`, `.env.local`, `*.jks`, `*.keystore`. Vanish never reads them; it reports the path, the size, and git's own verdict. A signed Android app whose keystore is gone can never be updated under the same listing again. |
+| **What a re-clone would not bring back** | Uncommitted changes, unpushed commits, branches with no upstream, and **stashes** -- which are invisible to every other check and are pure local-only work. That set is the real blast radius of "just re-clone it". |
+| **Duplicate build output** | Directories identical by content hash, not by name. |
+| **Toolchain consumers** | Who would break if a runtime went. |
+
+Every one of these is a claim about *this* machine, computed from local
+evidence. None of them is a heuristic about what a folder is called.
+
 ## Scan modes
 
 | Mode | Filesystem | Registry | Default in review tree |
@@ -101,7 +120,7 @@ Discovery depth and deletion are independent: you can scan Advanced and still de
 
 Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. For 1.0 the clean-VM gate was **waived deliberately** rather than met — see [Known limitations](#known-limitations) — so treat everything below as "works on the machines it was built and used on," not "certified everywhere."
 
-**Implemented and locally verified (working version 0.3.0):**
+**Implemented and locally verified (working version 0.9.0):**
 - Quarantine-first removal for every destructive path — files move into a versioned vault, registry keys export to a `.reg` restore manifest, *before* anything is removed ([lib/vault.js](lib/vault.js))
 - Audit Mode / Full Mode elevation tiers enforced independently in both the main process and the PowerShell engine — a destructive action reachable only through a channel neither layer gates has not been found ([main.js](main.js) `fullModeOnly()`, [scanner.ps1](scanner.ps1) `Test-IsElevated`)
 - Restore point before uninstall, on by default, admin-gated ([scanner.ps1](scanner.ps1) `Create-RestorePoint`)

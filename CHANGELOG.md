@@ -3,12 +3,80 @@
 All notable changes to **Vanish** will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-The versioning scheme is `RELEASE.MAJOR.MINOR` — see `docs/RELEASING.md` for the
-full decision rules.
+The versioning scheme is `MAJOR.MINOR.PATCH` — one milestone, one MINOR bump,
+and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
 ## [Unreleased]
+
+---
+
+## [0.9.0] - 2026-08-28
+
+Named on the day it shipped: **rescue before reclaim**, and the dashboard that
+says so on arrival.
+
+0.9 used to mean the pre-release chore list -- the elevated confirmations, the
+demo recording, code signing, a second machine. Those are gates, not a
+milestone, and reserving a version number for them is why 0.8.0 ended up
+carrying four milestones at once. They now gate 1.0, where they always
+belonged, and `docs/RELEASING.md` was rewritten so this does not recur: one
+milestone, one bump, and the numbers keep moving past 1.0 rather than counting
+down to it.
+
+### Changed -- Vanish opens on Health Advisor
+
+The landing screen is the dashboard, not the program list. Vanish is not a list
+of installed programs with some tools attached; it is a machine-hygiene tool,
+and the first screen now says which. All Programs is one click away and is
+still where uninstalls start.
+
+### Fixed -- the Health Advisor was as slow as its slowest question
+
+The panel asked the engine six things at once and then hid all six answers
+behind a single spinner until the last one arrived. Measured on the machine
+this was written on: the system overview was ready in **1.0 seconds** and was
+held off screen for **7.4**, waiting on a signature-checking walk of the
+startup list that has nothing to do with it. Startup began the same way,
+waiting for the full program inventory before drawing anything at all.
+
+Each section now renders the moment its own answer lands, and each failure is
+reported inside the section it belongs to instead of blanking the page. A
+section still working says so, in place.
+
+| | before | after |
+|---|---|---|
+| panel on screen | never, until everything finished | 362 ms |
+| first real content | 6099 ms | 1432 ms |
+| everything settled | 6099 ms | 4451 ms |
+
+Authenticode checks now run across a runspace pool rather than one at a time,
+which is most of that last number: 37 startup binaries at ~72ms each was 2.7
+seconds of the 7.4. A disk cache would have been faster still and was not
+built -- the signer name decides which startup entries get folded away as
+"necessary", and a file an unelevated process can write that decides what gets
+hidden is a new tampering surface bought for two seconds.
+
+### Fixed -- the vault lock switched itself off every time Vanish used the vault (`isp`)
+
+Vanish locks its own state directory on every elevated start, so that the
+engine is not reading instructions out of a folder a standard user could
+rewrite. That worked, and then it stopped being true -- silently, and only
+after Vanish itself had written something.
+
+Windows gives a newly created file to whoever created it. Every atomic write in
+the app -- write a temp file, rename it over the target -- therefore produced a
+manifest owned by the logged-in user, even while running as administrator. An
+owner can always hand itself write access back, whatever the permissions say,
+so the check was right to object; the writes it was objecting to were ours.
+
+The practical effect was a feature that worked or did not depending on nothing
+the user could see: restoring a cached Windows installer back into a protected
+system folder failed closed, reporting that the vault could not put it back.
+
+Vanish now claims ownership at each write, so the protection stays true instead
+of true-since-last-checked.
 
 ### Fixed -- a failed leftover scan told you the program had uninstalled cleanly (`aeu`)
 

@@ -1485,6 +1485,30 @@ ipcMain.handle('network-ping', async (event, params) => {
   }
 });
 
+// 5p5: the finder half of the seam reaches the renderer here. Note what this
+// handler does NOT do on failure - it does not return an empty result set.
+// aeu's whole defect class is a failed look being reported as a clean one,
+// and lib/findings.js decides UI_FAILED from success:false. Returning
+// { results: [] } here would be decided as 'nothing found' and would tell the
+// user their machine is clean because the scan crashed.
+ipcMain.handle('list-hygiene-finders', async () => {
+  try {
+    return await runPowerShell('finder-probe', { mode: 'list' });
+  } catch (error) {
+    console.error('Could not list hygiene finders:', error);
+    return { success: false, error: error.message, finders: [] };
+  }
+});
+
+ipcMain.handle('run-hygiene-scan', async (event, params) => {
+  try {
+    return await runPowerShell('hygiene-scan', params || {});
+  } catch (error) {
+    console.error('Hygiene scan failed:', error);
+    return { success: false, error: error.message, results: [] };
+  }
+});
+
 ipcMain.handle('get-software-redundancy', async () => {
   try {
     return await runPowerShell('get-software-redundancy');
