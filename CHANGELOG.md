@@ -58,6 +58,30 @@ says how many there are in total. That is only safe because the list is ranked
 by what it would cost to get something back, so the ones you cannot rebuild are
 at the top and the tail is the part a single command regenerates.
 
+### Fixed -- a setting that did not save looked exactly like one that did
+
+If Vanish has ever run as administrator on your PC, it locks its own settings
+folder so that only an administrator can change what the elevated half of the
+app reads -- how deep it scans, whether it auto-deletes from quarantine. That is
+deliberate and it stays.
+
+What was wrong is what happened when you changed a setting without being an
+administrator. The write failed, the failure went nowhere, and the line that
+says **Setting saved** never ran -- so you got *nothing at all*. The checkbox
+stayed where you clicked it, because that is what a checkbox does. Next launch,
+the old value was back.
+
+Now Vanish checks whether it can write there before offering you the controls.
+If it cannot, the settings panel says so up front, says why, says that
+restarting as administrator would let you change them -- and the controls are
+visibly locked instead of moving under your hand. If a save fails anyway, you
+are told, and the control snaps back to what is really stored.
+
+The same lock stops the activity log being written, and that used to be entirely
+silent. A log that has quietly stopped recording is worse than no log, because
+the whole point of it is being able to check afterwards what happened. The
+notice says that too.
+
 ### Known, and not fixed here
 
 Four of the reclaim checks each walk the same folders separately and each stop

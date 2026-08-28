@@ -225,3 +225,4 @@ removes it again; everything else is read-only.
 ---
 
 *This is the same pattern I use for GTM systems — an agent that watches, diagnoses, and proposes fixes before you notice the problem. I'm building the GTM version next.*
+| **Running as administrator once locks the settings** | Vanish locks its own settings folder to administrators the first time it runs elevated, because the elevated half of the app reads its scan depth and auto-purge policy from there. After that, a normal (non-administrator) session can read those settings but not change them. The app says so on the Settings screen and locks the controls rather than letting them move — but it is a real one-way door, and worth knowing before the first elevated run. |
