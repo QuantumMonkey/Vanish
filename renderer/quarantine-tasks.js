@@ -41,23 +41,29 @@ function setupQuarantineTab() {
         return;
       }
     }
-    appSettings = await window.api.setSettings({
+    const result = await applySettingsPatch({
       autoPurgeEnabled: autoPurgeToggle.checked,
       autoPurgeRetentionDays: parseInt(retentionInput.value, 10)
     });
-    toast(
+    // mp4: redraw from what is ON DISK first. This toggle decides whether
+    // Vanish deletes quarantined items by itself, so a checkbox left showing ON
+    // after a write that failed is the worst version of this bug in the app.
+    autoPurgeToggle.checked = appSettings.autoPurgeEnabled === true;
+    retentionInput.value = appSettings.autoPurgeRetentionDays;
+    reportSettingSaved(
+      result,
       appSettings.autoPurgeEnabled
         ? `Automatic purge is on. Items are deleted after ${appSettings.autoPurgeRetentionDays} days.`
-        : 'Automatic purge is off. Nothing leaves quarantine unless you delete it.',
-      'success'
+        : 'Automatic purge is off. Nothing leaves quarantine unless you delete it.'
     );
   });
 
   retentionInput.addEventListener('change', async () => {
-    appSettings = await window.api.setSettings({
+    const result = await applySettingsPatch({
       autoPurgeRetentionDays: parseInt(retentionInput.value, 10)
     });
     retentionInput.value = appSettings.autoPurgeRetentionDays;
+    if (!result.saved) reportSettingSaved(result);
   });
 }
 
@@ -568,10 +574,11 @@ function setupProcessTab() {
 
   const refreshInput = document.getElementById('inp-process-refresh');
   refreshInput.addEventListener('change', async () => {
-    appSettings = await window.api.setSettings({
+    const result = await applySettingsPatch({
       processRefreshSeconds: parseInt(refreshInput.value, 10)
     });
     refreshInput.value = appSettings.processRefreshSeconds;
+    if (!result.saved) reportSettingSaved(result);
     if (!processPaused && activeTab === 'task-manager') startProcessRefresh();
   });
 

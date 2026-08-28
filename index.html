@@ -926,6 +926,16 @@
           </div>
         </div>
         <div class="panel-scroll">
+
+          <!-- mp4: shown when the state directory is locked to administrators.
+               NOT the same condition as Audit Mode - a machine where Vanish has
+               never run elevated is unlocked, and an unelevated session there
+               saves normally. Hidden by default; syncSettingsWritability shows it
+               from the write probe the main process runs. -->
+          <div class="settings-locked-notice" id="settings-locked-notice" role="status" style="display: none;">
+            <i class="fa-solid fa-lock"></i>
+            <span id="settings-locked-text"></span>
+          </div>
           <p class="panel-lede">
             Vanish keeps everything on this PC. There is no account, no sync and no tracking, so these
             settings are all there is to change.

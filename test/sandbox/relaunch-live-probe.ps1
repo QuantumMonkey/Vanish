@@ -75,17 +75,28 @@ if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -For
 $null = New-Item -ItemType Directory -Path $work -Force
 
 try {
-    # ASSERT THE PREMISE FIRST. If stage 1 is not elevated there is nothing to
-    # drop from, and every result below would be about an ordinary process
-    # start rather than about elevation.
+    # CHECK THE PREMISE FIRST. If stage 1 is not elevated there is nothing to
+    # drop from, and every result below would be about an ordinary process start
+    # rather than about elevation.
+    #
+    # SKIPPED, NOT FAILED, and that changed on 2026-08-28. This used to
+    # Assert-True on the premise, so an unelevated `npm test` reported
+    # "1651 passed, 1 failed" with the one failure being the shell not being
+    # elevated. That is not a defect in Vanish, and a suite that can never be
+    # green in a tier it explicitly supports teaches everyone to read past the
+    # failure count - which is exactly how a real regression gets missed.
+    #
+    # It is not a silent pass either: the run is named in the runner's "Skipped,
+    # named (these did NOT run - they are not passes)" section, which is what
+    # that section exists for.
     $stage1Elevated = Test-IsElevated
-    Assert-True $stage1Elevated 'stage 1 is elevated, so dropping privilege is a real drop'
     if (-not $stage1Elevated) {
-        Write-Host '  SKIP  the whole probe needs an elevated starting point - run this from an elevated shell' -ForegroundColor Yellow
+        Write-Host '  SKIP  the whole probe needs an elevated starting point - asking an unprivileged process to drop privilege proves nothing. Run this from an elevated shell.' -ForegroundColor Yellow
         Write-Host ''
         Write-Host "Result: $script:pass passed, $script:fail failed"
         exit 0
     }
+    Assert-True $stage1Elevated 'stage 1 is elevated, so dropping privilege is a real drop'
 
     # The thing the engine will be asked to launch. It records what it IS,
     # not what it was asked to be.

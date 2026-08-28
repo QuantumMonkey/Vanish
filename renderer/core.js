@@ -408,6 +408,53 @@ async function loadSettings() {
   }
 }
 
+// mp4: THE ONE ROUTE FOR CHANGING A SETTING.
+//
+// Every caller used to do `appSettings = await window.api.setSettings(patch)`
+// and carry on. On a machine where SEC-3 has locked the state directory that
+// write throws EPERM, the handler rejected, and - with no catch anywhere on the
+// path - the lines after the await simply never ran. No toast, no error. The
+// control stayed where the click put it while the setting did not move, which
+// is exactly the defect this application exists to prevent, sitting in the
+// settings panel.
+//
+// So the reply now carries whether the write happened, appSettings is always
+// assigned WHAT IS ON DISK, and this returns the verdict rather than throwing.
+// Callers must redraw their control from appSettings afterwards - the value
+// they get back is the truth, not the value they asked for.
+async function applySettingsPatch(patch) {
+  let reply;
+  try {
+    reply = await window.api.setSettings(patch);
+  } catch (err) {
+    // The handler is written not to reject, so this is the channel itself
+    // failing. Say so rather than reporting a save.
+    return { saved: false, reason: `Vanish could not reach its own settings store: ${err.message}` };
+  }
+
+  // Tolerated on purpose: an older main process returns the settings object
+  // directly. Reading that as "saved" is correct - it only ever returned on
+  // success.
+  if (reply && typeof reply === 'object' && 'settings' in reply) {
+    appSettings = reply.settings;
+    return { saved: reply.saved === true, reason: reply.reason || null };
+  }
+  appSettings = reply;
+  return { saved: true, reason: null };
+}
+
+// The one place that turns that verdict into something the user sees. A failed
+// save is not a toast that says "saved" in a different colour: it names the
+// reason and it is not dismissed in two seconds.
+function reportSettingSaved(result, successText) {
+  if (result.saved) {
+    toast(successText || 'Setting saved.', 'success', 2200);
+    return true;
+  }
+  toast(result.reason || 'That setting could not be saved.', 'error', 9000);
+  return false;
+}
+
 // REQ-04: resolve the tier, then render the banner and lock every destructive
 // control. main.js rejects the calls regardless; this is the honest surface.
 async function checkElevation() {

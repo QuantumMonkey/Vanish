@@ -100,10 +100,15 @@ function setupSettingsTab() {
 }
 
 async function saveSettings(patch) {
-  appSettings = await window.api.setSettings(patch);
+  const result = await applySettingsPatch(patch);
+  // Redraw BEFORE reporting, and from appSettings rather than from the patch:
+  // on a failed write appSettings is what is on disk, so the control snaps back
+  // to the truth instead of sitting where the click left it. This ordering is
+  // the fix - the old code called syncSettingsPanel() after an await that could
+  // reject, so on failure it never ran at all.
   syncSettingsPanel();
   syncQuarantineSettingsUI();
-  toast('Setting saved.', 'success', 2200);
+  reportSettingSaved(result);
 }
 
 // 388: the toggle's own name does not say what happens next, and the setting
@@ -149,10 +154,59 @@ function syncSettingsPanel() {
   applyStartupElevatedCopy(startsElevated);
 
   syncModeCard();
+  syncSettingsWritability();
 
   // Audit Mode can read the configuration but not change deletion policy.
   autoPurge.disabled = !isAdmin;
   document.getElementById('set-retention-days').disabled = !isAdmin;
+}
+
+// mp4: whether settings can be SAVED AT ALL is a separate question from the
+// tier, and the panel used to ask neither.
+//
+// SEC-3 locks the state directory to administrators once Vanish has run
+// elevated, because settings.json is elevated-engine input - scan depth and
+// auto-purge are read by the thing that deletes files. So on such a machine an
+// unelevated session genuinely cannot save, and that is correct. What was not
+// correct is that the panel offered every control anyway, let them move, and
+// said nothing when the write failed.
+//
+// Not derived from isAdmin. A machine where Vanish has NEVER run elevated has
+// an unlocked directory and an unelevated session saves perfectly well; only
+// the write probe in the main process knows the difference, and it re-probes
+// per call because secure-data-dir can run mid-session.
+function syncSettingsWritability() {
+  const locked = tierState && tierState.settingsWritable === false;
+  const reason =
+    (tierState && tierState.settingsLockReason) ||
+    "Vanish's settings folder is locked to administrators on this machine.";
+
+  const notice = document.getElementById('settings-locked-notice');
+  if (notice) {
+    notice.style.display = locked ? 'flex' : 'none';
+    const text = document.getElementById('settings-locked-text');
+    if (text) {
+      text.textContent =
+        `${reason} Vanish reads its scan depth and auto-purge policy from there, so a ` +
+        'standard user being able to rewrite it would be a way to make the elevated ' +
+        'half of Vanish do something it was never asked to. Restart as administrator ' +
+        'to change these. ' +
+        // The same lock stops the activity log being written, and a log that has
+        // silently stopped recording is worse than one that says it has: the
+        // whole point of it is being able to check afterwards what happened.
+        'The activity log is not being written this session either, for the same reason.';
+    }
+  }
+
+  if (!locked) return;
+
+  // Everything on the panel, not a list maintained by hand: a control added
+  // later must not quietly become the one that still moves and still lies.
+  const panel = document.getElementById('settings-panel');
+  if (!panel) return;
+  panel.querySelectorAll('input, select').forEach((el) => {
+    el.disabled = true;
+  });
 }
 
 // The mode this session is actually in, as opposed to the mode the next one

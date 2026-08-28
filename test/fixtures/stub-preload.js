@@ -84,10 +84,17 @@ contextBridge.exposeInMainWorld('api', {
   purgeRemnants: stub('purgeRemnants', { success: true, quarantinedCount: 0, files: [], registry: [] }),
   uninstallNative: stub('uninstallNative', { success: true }),
   checkAdmin: async () => fullMode,
-  getTier: async () => ({
+  // mp4: settingsWritable defaults TRUE, because that is the common machine -
+  // one where secure-data-dir has never run and an unelevated session saves
+  // normally. The locked case is queued per test, since a fixture that
+  // defaulted to locked would disable every control on the settings panel and
+  // quietly break every other suite that touches it.
+  getTier: stub('getTier', {
     tier: fullMode ? 'full' : 'audit',
     isFullMode: fullMode,
     offerElevation: !fullMode,
+    settingsWritable: true,
+    settingsLockReason: null,
     bannerText: 'Running in Audit Mode - elevate to enable cleaning and uninstallation.'
   }),
   relaunchElevated: async () => ({ success: false, declined: true }),
@@ -110,11 +117,19 @@ contextBridge.exposeInMainWorld('api', {
     processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit',
     hasSeenTour: true
   }),
-  setSettings: async (p) => ({
-    autoPurgeEnabled: false, autoPurgeRetentionDays: 30,
-    processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit',
-    hasSeenTour: true, ...p
-  }),
+  // mp4: the reply is { settings, saved, reason }, never a bare settings
+  // object and never a rejection. A rejection is exactly what used to reach
+  // the renderer, where no catch existed and the toast after the await simply
+  // never ran. Queue { saved: false, reason: ... } to drive the locked case.
+  setSettings: stub('setSettings', (p) => ({
+    settings: {
+      autoPurgeEnabled: false, autoPurgeRetentionDays: 30,
+      processRefreshSeconds: 2, defaultScanMode: 'Moderate', startupMode: 'audit',
+      hasSeenTour: true, ...p
+    },
+    saved: true,
+    reason: null
+  })),
   getAppInfo: async () => ({
     name: 'vanish-uninstaller', version: '0.3.0', tier: fullMode ? 'full' : 'audit',
     isFullMode: fullMode, dataDir: 'C:\\data', vaultRoot: 'C:\\vault',

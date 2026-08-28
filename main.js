@@ -733,11 +733,19 @@ ipcMain.handle('get-tier', async () => {
   // to the user once, not on every later getTier() poll this session makes.
   const elevationMismatch = elevationMismatchDiagnostic;
   elevationMismatchDiagnostic = null;
+  // mp4: whether settings can be SAVED is not implied by the tier. On a machine
+  // where Vanish has never run elevated the state directory is unlocked and an
+  // unelevated session saves perfectly well; on one where secure-data-dir has
+  // run, it cannot. The panel has to be told which, so it can lock the controls
+  // up front instead of letting them move and explaining afterwards.
+  const stateWrite = store.canWriteState();
   return {
     tier: currentTier,
     isFullMode: isFullMode(),
     offerElevation: elevationOfferPending,
     bannerText: 'Running in Audit Mode - elevate to enable cleaning and uninstallation.',
+    settingsWritable: stateWrite.writable,
+    settingsLockReason: stateWrite.reason,
     elevationMismatch
   };
 });
@@ -1007,16 +1015,45 @@ fullModeOnly('vault-delete', async (event, { entryId }) => {
 
 ipcMain.handle('get-settings', async () => store.readSettings());
 
+// mp4: this used to return the settings object and nothing else, so a write that
+// threw EPERM rejected the whole call - and the renderer, which had no catch,
+// silently skipped its own "Setting saved" toast. The checkbox stayed where the
+// click put it while the setting did not move. A control that appears to work
+// and did nothing is the defect class this application exists to prevent, and it
+// was sitting in the settings panel.
+//
+// The reply now always says WHICH settings are in effect and whether the change
+// was actually written. It never rejects: a rejection is what produced the
+// silence in the first place.
 ipcMain.handle('set-settings', async (event, patch) => {
-  const saved = store.writeSettings(patch || {});
+  let saved;
+  let error = null;
+  try {
+    saved = store.writeSettings(patch || {});
+  } catch (err) {
+    error = err;
+    // What is ON DISK, which is what the app is actually running with. The
+    // renderer redraws from this, so the control snaps back to the truth
+    // instead of sitting where the click left it.
+    saved = store.readSettings();
+  }
+
   store.appendOplog({
     action: 'settings-change',
     tier: currentTier,
     items: {},
-    outcome: 'success',
-    meta: { patch }
+    outcome: error ? 'error' : 'success',
+    meta: { patch, error: error ? error.message : undefined }
   });
-  return saved;
+
+  const writable = store.canWriteState();
+  return {
+    settings: saved,
+    saved: !error,
+    reason: error
+      ? (writable.writable ? error.message : `${writable.reason} Restart as administrator to change it.`)
+      : null
+  };
 });
 
 ipcMain.handle('open-vault-folder', async () => {

@@ -106,6 +106,7 @@ $suites = @(
     @{ Name = "Hygiene report (z22)";          Kind = "node";     Path = "test/hygiene-report-verify.js" },
     @{ Name = "Shared sizer (lhf)";           Kind = "ps";       Path = "test\finder-sizer-verify.ps1" },
     @{ Name = "Hygiene panel (5p5 UI)";        Kind = "electron"; Path = "test/hygiene-panel-verify.js" },
+    @{ Name = "Settings lock (mp4)";           Kind = "electron"; Path = "test/settings-lock-verify.js" },
     # Needs an ELEVATED shell: only an elevated token can take ownership or
     # re-secure a directory, so unelevated it skips with the reason named
     # rather than passing vacuously. Carries its own negative control - it
