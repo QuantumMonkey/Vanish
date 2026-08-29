@@ -12,6 +12,82 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
+## [0.9.2] - 2026-08-29
+
+### Changed -- four checks now share one walk of the disk instead of taking four
+
+0.9.1 left a note in this file saying what was still wrong: four of the reclaim
+checks each walked the same folders separately, each stopping at the same
+15,000-directory limit. Four passes over one disk to answer four questions about
+the same directories.
+
+They were not similar walks. They were the same walk -- same root, same depth,
+the same cap, and the same fifteen-entry skip list written in four different
+orders -- differing only in what each picked up along the way: a `package.json`,
+a `pubspec.yaml`, a `gradlew`, a `.zip`.
+
+| | before | after |
+|---|---|---|
+| the four reclaim checks, on their own | 66.2 s | **28.2 s** |
+| all thirteen checks | 107.2 s | 92.3 s |
+
+Each row is a before and an after measured in one run against each other.
+The two rows are different runs, so they are not subtractable across -- the
+absolute numbers on this machine move 10-20% depending on what last touched
+the disk, which is exactly why every comparison here is same-run.
+
+Collecting four markers instead of one costs nothing measurable, because the
+directory listing was the entire cost -- 12.4 s of the 28.2. So the walk now
+collects every marker any loaded check asked for, the first check to ask pays
+for it, and the other three read the answer.
+
+**The findings did not move.** Every check was run both ways -- sharing the walk
+and owning it -- and compared on state, counts, byte totals and the ids of the
+findings themselves. This is a performance change to the code that decides what
+a person is offered to delete, and the only thing that makes one of those
+legitimate is a control saying the answers are identical. That control is
+`test/shared-walk-verify.ps1`, not a sentence in a commit message.
+
+### Changed -- the biggest check no longer starts last
+
+Sharing the walk created a new problem. The four reclaim checks became the
+second-largest piece of work in the scan, and they sit last in the list -- so
+with three checks running at a time they were the last thing started and the
+last thing to finish, and the whole scan ended when they did.
+
+Largest unit first: **92.3 s to 81.5 s**, in the same run as the thirteen-check
+row above -- so end to end that run went 107.2 s to 81.5 s.
+
+The ordering uses how many checks are in a unit, not how long any of them takes.
+Vanish does not know how long a check will take on a disk it has not walked yet,
+and a table of expected durations would be numbers from one machine pretending
+to be a fact about every machine. Nothing on screen changes: rescue still reads
+before reclaim, because the display order was never the run order.
+
+**It moved the tail rather than removing it, and that is worth saying plainly.**
+The largest unit is not the longest job. With the group started first, the check
+that now finishes last is package caches -- one check, 45 seconds, sorted behind
+a four-check group because it is smaller by the only measure available before
+the disk has been walked. Going further needs scheduling by measured duration,
+which means remembering how long each check took last time. Tracked separately.
+
+### Fixed -- a check missing from a group answer is could-not-look, not absent
+
+Asking for four checks in one call created a failure mode a one-check call did
+not have: three results coming back for a call that asked about four. The fourth
+would then be *missing* rather than *failed* -- and a missing result is not a
+clean one. Every check in a group is now accounted for by name, and a call that
+answered for its neighbours but not for this one says exactly that, which is a
+different problem from the whole call failing and is reported as one.
+
+### Known, and not fixed here
+
+Duplicate content is now the floor: 54-60 seconds, more than any other check,
+and no amount of concurrency goes below one check. It hashes file contents, so
+that is where the time genuinely is. Tracked separately.
+
+---
+
 ## [0.9.1] - 2026-08-28
 
 ### Fixed -- Machine Hygiene: over ten minutes, to 103 seconds

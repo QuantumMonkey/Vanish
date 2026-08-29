@@ -8114,7 +8114,7 @@ if ($Action) {
                         loaded     = @($load.loaded)
                         loadErrors = @($load.loadErrors)
                         finders    = @(Get-RegisteredFinders | ForEach-Object {
-                            @{ name = $_.name; title = $_.title; module = $_.module; auditOnly = $_.auditOnly; needsElevation = $_.needsElevation }
+                            @{ name = $_.name; title = $_.title; module = $_.module; auditOnly = $_.auditOnly; needsElevation = $_.needsElevation; walkGroup = $_.walkGroup }
                         })
                     }
                 }

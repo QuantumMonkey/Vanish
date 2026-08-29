@@ -467,6 +467,166 @@ app.whenReady().then(async () => {
     'the rejected checks reach the decider as could-not-look, carrying a reason, rather than as nothing at all'
   );
 
+  // ------------------------------------------------------------------
+  console.log('');
+  console.log('Checks that share a walk of the disk are ONE call, and still four results (3l8)');
+
+  // The grouping itself, before any IPC. Invoke-SharedTreeWalk memoises per
+  // PROCESS, so four checks only share a walk if they are in one engine call;
+  // scheduled apart the cache never hits and the saving is zero.
+  const units = await run(`(() => hygieneWalkUnits([
+    { name: 'a', walkGroup: '' },
+    { name: 'b', walkGroup: 'tree' },
+    { name: 'c', walkGroup: '' },
+    { name: 'd', walkGroup: 'tree' },
+    { name: 'e', walkGroup: 'other' }
+  ]).map(u => u.map(f => f.name).join('+')))()`);
+  assert(units.length === 4, `five checks with two shared walks make four units (got ${units.length}: ${units})`);
+  assert(units.indexOf('b+d') >= 0, 'the two checks sharing a walk are one unit');
+  assert(units.indexOf('a') >= 0 && units.indexOf('c') >= 0, 'and checks that share nothing are still scheduled on their own');
+  assert(units[0] === 'a', 'registry order is kept, so the checklist does not reshuffle itself');
+  assert(units[1] === 'b+d', 'and a group takes the position of its FIRST member rather than sinking to the end');
+
+  // Grouping made the four reclaim checks the second-largest piece of work in
+  // the scan, sitting last in registry order - so with a pool of three they
+  // were started last and the whole run ended when they did. Largest first,
+  // measured same-run: 92.3 s to 81.5 s.
+  const order = await run(`(() => hygieneScheduleOrder([
+    [{ name: 'a' }], [{ name: 'b' }, { name: 'c' }, { name: 'd' }], [{ name: 'e' }], [{ name: 'f' }, { name: 'g' }]
+  ]).map(u => u.map(f => f.name).join('+')))()`);
+  assert(order[0] === 'b+c+d', `the largest unit is started first (got ${JSON.stringify(order)})`);
+  assert(order[1] === 'f+g', 'then the next largest');
+  assert(
+    order[2] === 'a' && order[3] === 'e',
+    'and units of equal size keep registry order between them - the sort is stable, so a rerun schedules the same way'
+  );
+  assert(
+    (await run(`hygieneScheduleOrder(hygieneWalkUnits([{name:'x'},{name:'y'}])).length === 2`)) === true,
+    'scheduling never drops or duplicates a unit'
+  );
+
+  const undeclared = await run(`(() => hygieneWalkUnits([
+    { name: 'a' }, { name: 'b', walkGroup: null }, { name: 'c', walkGroup: '   ' }
+  ]).length)()`);
+  assert(undeclared === 3, `a missing, null or blank walkGroup means "on its own", never one accidental mega-group (got ${undeclared})`);
+  // Now through the bridge, which is where it has to be true.
+  const GROUPED = {
+    success: true, loaded: [], loadErrors: [],
+    finders: [
+      { name: 'g-node', title: 'G node', module: 'reclaim', walkGroup: 'user-tree' },
+      { name: 'g-zip', title: 'G zip', module: 'reclaim', walkGroup: 'user-tree' },
+      { name: 'g-dart', title: 'G dart', module: 'reclaim', walkGroup: 'user-tree' },
+      { name: 'g-gradle', title: 'G gradle', module: 'reclaim', walkGroup: 'user-tree' },
+      { name: 'solo', title: 'Solo check', module: 'hygiene', walkGroup: '' }
+    ]
+  };
+
+  await evalInPage(`
+    hygieneScanning = false;
+    hygieneResults = [];
+    window.__test.resetCallCounts();
+    window.__test.queueResponse('listHygieneFinders', ${JSON.stringify(GROUPED)});
+    document.getElementById('btn-hygiene-scan').click();
+    return true;
+  `);
+  await waitFor(`hygieneScanning === false && hygieneDecision !== null`, 8000);
+
+  const sent = await run(`window.__test.callArgs('runHygieneScan').map(a => (a[0].finders || []).join('+'))`);
+  assert(
+    sent.length === 2,
+    `five checks became TWO engine calls, not five - which is the entire saving (got ${sent.length}: ${JSON.stringify(sent)})`
+  );
+  assert(
+    sent.indexOf('g-node+g-zip+g-dart+g-gradle') >= 0,
+    'and the four that share a walk went in ONE call, so the engine can memoise the walk between them',
+    JSON.stringify(sent)
+  );
+  assert(sent.indexOf('solo') >= 0, 'while the check that shares nothing still went on its own');
+  assert(
+    (await run(`hygieneResults.length === 5`)) === true,
+    'and five checks still produce five results - grouping is a scheduling change, not a merge'
+  );
+  assert(
+    (await run(`hygieneDecision.state === 'nothing-found'`)) === true,
+    'a grouped run where every check really did look and find nothing is still allowed to say so',
+    await run(`hygieneDecision.state`)
+  );
+  // THE FAILURE MODE GROUPING CREATED, and the reason this section exists at
+  // all: three results coming back for a call that asked about four. Before
+  // 3l8 a call carried one check, so 'no result' and 'this check failed' were
+  // the same event. Now a check can go MISSING out of a group while its
+  // neighbours answer - and a missing result is not a clean one.
+  console.log('');
+  console.log('A check missing from a group answer is could-not-look, not absent');
+
+  const SHORT = {
+    success: true,
+    results: ['g-node', 'g-zip', 'g-dart'].map((n) => ({
+      finder: n, title: n, module: 'reclaim', state: 'nothing',
+      findings: [], unreadable: [], examinedCount: 2, totalBytes: 0
+    }))
+  };
+  await evalInPage(`
+    hygieneScanning = false;
+    hygieneResults = [];
+    window.__test.resetCallCounts();
+    window.__test.queueResponse('listHygieneFinders', ${JSON.stringify(GROUPED)});
+    window.__test.queueResponse('runHygieneScan', ${JSON.stringify(SHORT)});
+    document.getElementById('btn-hygiene-scan').click();
+    return true;
+  `);
+  await waitFor(`hygieneScanning === false && hygieneDecision !== null`, 8000);
+
+  assert(
+    (await run(`hygieneResults.length === 5`)) === true,
+    `the check the engine skipped is still accounted for - five checks, five results (got ${await run('hygieneResults.length')})`
+  );
+  const missing = await run(`(() => {
+    const r = hygieneResults.find(x => x.finder === 'g-gradle');
+    return r ? { blind: r.unreadable.length, reason: r.unreadable[0] && r.unreadable[0].reason, detail: r.unreadable[0] && r.unreadable[0].detail } : null;
+  })()`);
+  assert(missing !== null, 'the skipped check appears by name rather than vanishing from the set');
+  assert(missing && missing.blind > 0, 'and it carries an unreadable record, which is what makes it could-not-look');
+  assert(missing && missing.reason === 'check-did-not-run', `with the reason that says so (${missing && missing.reason})`);
+  assert(
+    missing && /3 of the 4/.test(missing.detail || ''),
+    'and the detail says the engine answered for its neighbours but not for it - a different problem from the whole call failing, and reported as one',
+    (missing && missing.detail) || ''
+  );
+  // Asserted POSITIVELY. 'not nothing-found' would also pass on a typo, on a
+  // renamed state, on undefined - the vacuous pass this suite exists to
+  // refuse. The run is incomplete, and incomplete is a name it has.
+  assert(
+    (await run(`hygieneDecision.state === 'incomplete'`)) === true,
+    'so the run is decided INCOMPLETE, not as a clean machine on the strength of a check that never reported',
+    await run(`hygieneDecision.state`)
+  );
+
+  console.log('');
+  console.log('A group call that fails takes ALL of its checks down with it, by name');
+  await evalInPage(`
+    hygieneScanning = false;
+    hygieneResults = [];
+    window.__test.resetCallCounts();
+    window.__test.queueResponse('listHygieneFinders', ${JSON.stringify(GROUPED)});
+    window.__test.queueResponse('runHygieneScan', { __reject: 'the shared walk crashed' });
+    document.getElementById('btn-hygiene-scan').click();
+    return true;
+  `);
+  await waitFor(`hygieneScanning === false && hygieneDecision !== null`, 8000);
+  const downed = await run(`hygieneResults.filter(r => r.unreadable.length > 0).map(r => r.finder).sort()`);
+  assert(
+    downed.length === 4,
+    `all four checks in the failed group are reported, not just the call (got ${downed.length}: ${JSON.stringify(downed)})`
+  );
+  assert(
+    (await run(`hygieneResults.filter(r => r.unreadable.some(u => /shared walk crashed/.test(u.detail || ''))).length === 4`)) === true,
+    "and every one of them repeats the engine's own reason rather than a generic one"
+  );
+  assert(
+    (await run(`['g-node','g-zip','g-dart','g-gradle'].every(n => hygieneStatus[n] === 'error')`)) === true,
+    'and the checklist marks all four as failed, so the screen agrees with the decision'
+  );
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
   win.destroy();

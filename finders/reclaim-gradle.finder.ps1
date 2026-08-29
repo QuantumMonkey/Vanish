@@ -52,6 +52,12 @@ $script:PiuGradleSkipDirs = @(
     '$RECYCLE.BIN', 'System Volume Information'
 )
 
+# 3l8: what this finder needs collected while the shared walk is running.
+# Declared at FILE scope, not inside the handler - Import-Finders loads
+# every finder before any handler runs, so the union is complete before
+# the first walk starts and the other three are served from its cache.
+Register-SharedWalkHarvest -markerNames @('gradlew')
+
 function script:Get-PiuGradleDirBytes {
     <#
     .SYNOPSIS
@@ -93,16 +99,25 @@ function script:Format-PiuGradleBytes {
 function script:Find-PiuGradleProjectDirs {
     <#
     .SYNOPSIS
-        Bounded, error-tracked walk under $root for directories directly
-        containing a gradlew file - rule 1's positive test for Gradle.
+        Directories under $root that contain a gradlew wrapper, via the one walk this finder now
+        shares with the other three reclaim checks (3l8).
 
     .DESCRIPTION
-        Manual stack walk, not Get-ChildItem -Recurse, for the reason the
-        other two reclaim finders and ho2 all give: -Recurse cannot prune a
-        subtree from descent, only filter it out afterward. Every
-        unreadable directory is captured via -ErrorVariable +err, never
-        inferred from a bare $? (HANDOFF-2026-08-21 SS4's two-time
-        pipe-scoring defect, the second time immediately before an rm -rf).
+        This was a private stack walk, identical in every respect to the
+        ones in the other three reclaim finders: same default root, same
+        depth, the same 15,000-directory cap, and the same fifteen-entry
+        skip list written in a different order. Four checks listing the
+        same directories cost 66.2 s between them. One listing serving all
+        four brings that to 28.2 s and finds exactly the same things: the
+        listing itself is 12.4 s of it, and collecting three extra file
+        names out of children already enumerated costs nothing measurable.
+
+        The returned SHAPE is deliberately unchanged, so the handler below
+        and every test around it kept working without being rewritten to
+        suit the optimisation. Invoke-SharedTreeWalk carries the properties
+        that mattered - scan-capped as an unreadable record, access-denied
+        by real path, no descent into reparse points - so none of them had
+        to be re-argued here.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$root,
@@ -110,49 +125,18 @@ function script:Find-PiuGradleProjectDirs {
         [int]$maxDirs = 15000
     )
 
-    $projects    = [System.Collections.Generic.List[string]]::new()
-    $unreadable  = [System.Collections.Generic.List[object]]::new()
-    $dirsVisited = 0
-
-    $stack = [System.Collections.Generic.Stack[object]]::new()
-    $stack.Push(@{ Path = $root; Depth = 0 })
-
-    while ($stack.Count -gt 0) {
-        $cur = $stack.Pop()
-
-        if ($dirsVisited -ge $maxDirs) {
-            $unreadable.Add((New-Unreadable -path $cur.Path -reason 'scan-capped' `
-                -detail "The scan visited $maxDirs directories under '$root' and stopped early so a run never hangs. Pass a narrower 'roots' list to cover what was skipped."))
-            continue
-        }
-        $dirsVisited++
-
-        $err = $null
-        $children = @(Get-ChildItem -LiteralPath $cur.Path -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
-        foreach ($e in @($err)) {
-            if ($null -eq $e) { continue }
-            $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $cur.Path }
-            $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
-        }
-
-        $hasMarker = @($children | Where-Object { -not $_.PSIsContainer -and $_.Name -eq 'gradlew' }).Count -gt 0
-        if ($hasMarker) { $projects.Add($cur.Path) }
-
-        if ($cur.Depth -ge $maxDepth) { continue }
-        foreach ($child in $children) {
-            if (-not $child.PSIsContainer) { continue }
-            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
-            if ($script:PiuGradleSkipDirs -contains $child.Name) { continue }
-            $stack.Push(@{ Path = $child.FullName; Depth = $cur.Depth + 1 })
-        }
+    $walk = Invoke-SharedTreeWalk -root $root -maxDepth $maxDepth -maxDirs $maxDirs -skipDirs $script:PiuGradleSkipDirs
+    return @{
+        projects    = @($walk.markers['gradlew'])
+        unreadable  = @($walk.unreadable)
+        dirsVisited = $walk.dirsVisited
     }
-
-    return @{ projects = @($projects); unreadable = @($unreadable); dirsVisited = $dirsVisited }
 }
 
 Register-Finder -name 'reclaim-gradle' `
     -title 'Gradle/Android build artifacts regenerable from gradlew' `
     -module 'reclaim' `
+    -walkGroup 'user-tree' `
     -auditOnly $true `
     -description '.gradle/ (per-project cache) and module build/ directories (e.g. app/build/) found in a project whose gradlew wrapper regenerates them. Never matches on folder name alone (piu rule 1) - see bd vanish-uninstaller-piu.' `
     -handler {

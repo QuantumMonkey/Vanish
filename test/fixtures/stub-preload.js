@@ -321,26 +321,36 @@ contextBridge.exposeInMainWorld('api', {
     loaded: [],
     loadErrors: [],
     finders: [
-      { name: 'stub-rescue', title: 'Stub rescue check', module: 'rescue', auditOnly: true, needsElevation: false },
-      { name: 'stub-reclaim', title: 'Stub reclaim check', module: 'reclaim', auditOnly: true, needsElevation: false }
+      // walkGroup is '' here because the real engine always sends the field
+      // (3l8) and these two checks share no walk. The absent-field case is
+      // covered by hygieneWalkUnits' own assertions rather than by leaving a
+      // fixture that no longer looks like what the engine returns.
+      { name: 'stub-rescue', title: 'Stub rescue check', module: 'rescue', auditOnly: true, needsElevation: false, walkGroup: '' },
+      { name: 'stub-reclaim', title: 'Stub reclaim check', module: 'reclaim', auditOnly: true, needsElevation: false, walkGroup: '' }
     ]
   }),
+  // 3l8: ONE RESULT PER REQUESTED FINDER, not one per call. The panel now
+  // asks for several checks at a time where they share a walk of the disk,
+  // and a fixture that answered a four-finder call with one result would be
+  // modelling an engine Vanish does not have -- every test would then take
+  // the missing-result path and prove nothing about the normal one. Tests
+  // that want a SHORT answer queue it explicitly with queueResponse.
   runHygieneScan: stub('runHygieneScan', (params) => {
-    const wanted = (params && params.finders && params.finders[0]) || 'stub-rescue';
+    const wanted = (params && Array.isArray(params.finders) && params.finders.length)
+      ? params.finders
+      : ['stub-rescue'];
     return {
       success: true,
-      results: [
-        {
-          finder: wanted,
-          title: `Stub ${wanted}`,
-          module: wanted === 'stub-reclaim' ? 'reclaim' : 'rescue',
-          state: 'nothing',
-          findings: [],
-          unreadable: [],
-          examinedCount: 3,
-          totalBytes: 0
-        }
-      ]
+      results: wanted.map((name) => ({
+        finder: name,
+        title: `Stub ${name}`,
+        module: String(name).indexOf('reclaim') >= 0 ? 'reclaim' : 'rescue',
+        state: 'nothing',
+        findings: [],
+        unreadable: [],
+        examinedCount: 3,
+        totalBytes: 0
+      }))
     };
   }),
   // 6g2 progress channel. The fixture keeps the same shape as the real preload

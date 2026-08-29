@@ -18,13 +18,17 @@
 // exists nowhere else is worth shipping years before anything is allowed to
 // delete it.
 //
-// WHY EACH CHECK RUNS SEPARATELY. Measured on the operator's machine
-// 2026-08-28: the `hygiene` module alone takes 89 seconds, and all three
-// together take longer than ten minutes - these walk the user profile and hash
-// file contents. Running them as one call behind one spinner would be the
-// Health Advisor defect again with an order of magnitude more time to be wrong
-// in. Each check is its own engine call, renders when IT lands, and says so
-// while it is still working.
+// WHY THE CHECKS ARE NOT ONE CALL. These walk the user profile and hash file
+// contents. Measured on the operator's machine: over ten minutes for the set
+// on 2026-08-28, 81.5 s on 2026-08-29 after lhf and 3l8. Even at a minute,
+// running the lot as one call behind one spinner would be the Health Advisor
+// defect again with far more time to be wrong in. So the panel schedules small
+// units, renders each as it LANDS, and says which check is working meanwhile.
+//
+// The unit is a walk group rather than a single check (3l8): checks that read
+// the same tree go in one call so the engine can walk it once, and nothing
+// else is grouped, because grouping costs exactly the progressiveness this
+// design is buying.
 //
 // THE ONE RULE THAT SURVIVES ALL OF THAT: a partial run is never decided. The
 // verdict block shows progress until every check has returned, because
@@ -45,6 +49,75 @@ let hygieneLoadErrors = [];
 // just queue on the same spindle and make every individual check look slower
 // on screen without finishing the set any sooner.
 const HYGIENE_CONCURRENCY = 3;
+
+// 3l8: the unit of scheduling is a WALK GROUP, not a finder.
+//
+// Four reclaim checks read the same tree, and Invoke-SharedTreeWalk memoises
+// that walk per PROCESS -- so they only share it if they run in ONE engine
+// call. Split across four calls the cache never hits and the saving is
+// exactly zero. Measured on the operator's machine: 66.2 s as four calls,
+// 28.2 s as one, with byte-identical findings on both sides.
+//
+// The grouping is NOT hardcoded here. The engine reports each finder's
+// walkGroup (Register-Finder in finders/_loader.ps1), so a fifth finder
+// joining the shared walk changes no renderer code and cannot be forgotten
+// about here.
+//
+// WHAT GROUPING COSTS, because it does cost something: the four report
+// together instead of one at a time. That is exactly why only finders that
+// genuinely share a walk are grouped. The progressive checklist is the
+// reason this panel makes ten calls instead of one in the first place,
+// and trading it away where there is no walk to share would be paying the
+// price for none of the benefit.
+function hygieneWalkUnits(finders) {
+  const units = [];
+  const byGroup = new Map();
+  for (const f of finders) {
+    const group = String((f && f.walkGroup) || '').trim();
+    if (!group) {
+      units.push([f]);
+      continue;
+    }
+    if (!byGroup.has(group)) {
+      const unit = [];
+      byGroup.set(group, unit);
+      units.push(unit);
+    }
+    byGroup.get(group).push(f);
+  }
+  return units;
+}
+
+// Which order to RUN them in, which is not the order to LIST them in.
+//
+// Grouping created a tail. The four reclaim checks are the second-largest
+// piece of work in the scan and they sit last in registry order, so with a
+// pool of three they were the last thing started and the last thing to
+// finish -- the whole scan ended when they did. Measured, same run, same
+// machine: 92.3 s in registry order, 81.5 s with the group started first.
+//
+// The proxy is unit SIZE, not measured duration, and that is a deliberate
+// limit rather than an oversight. Vanish does not know how long a check will
+// take on a disk it has not walked yet, and a table of expected durations
+// would be a set of numbers from one machine pretending to be a fact about
+// every machine. Size is a fact about the work being asked for.
+//
+// IT MOVES THE TAIL, IT DOES NOT REMOVE IT, and the measurement says so: with
+// the group started first, the last check to finish is reclaim-package-caches
+// - one check, 45 s, sorted behind a four-check group because size is the only
+// measure available before the disk has been walked. Still the better trade on
+// the numbers, but the honest claim is a smaller tail, not none. Scheduling by
+// measured duration is bd vanish-uninstaller-4v8.
+//
+// This changes nothing on screen. The checklist renders from hygieneFinders
+// and the modules render in HYGIENE_MODULES order, both independent of the
+// order results arrive in - rescue still reads before reclaim.
+function hygieneScheduleOrder(units) {
+  return units
+    .map((unit, index) => ({ unit, index }))
+    .sort((a, b) => (b.unit.length - a.unit.length) || (a.index - b.index))
+    .map((x) => x.unit);
+}
 
 // How many findings a module renders before it stops and says so.
 //
@@ -249,51 +322,69 @@ async function runHygieneScan() {
 
   // A hand-rolled worker pool rather than Promise.all over the whole list: the
   // point is to bound how many engine processes exist at once, and Promise.all
-  // starts all thirteen.
-  const queue = hygieneFinders.slice();
+  // starts every unit at once.
+  //
+  // The queue holds WALK UNITS, not finders. Ten units cover the thirteen
+  // checks: nine that scan on their own, and one that is the four reclaim
+  // checks sharing a single walk of the home directory (3l8). Largest unit
+  // first, so the biggest piece of work is not what everything waits on.
+  const queue = hygieneScheduleOrder(hygieneWalkUnits(hygieneFinders));
   const workers = [];
   for (let i = 0; i < Math.min(HYGIENE_CONCURRENCY, queue.length); i += 1) {
     workers.push(
       (async () => {
         for (;;) {
-          const finder = queue.shift();
-          if (!finder) return;
-          hygieneStatus[finder.name] = 'running';
+          const unit = queue.shift();
+          if (!unit) return;
+          for (const f of unit) hygieneStatus[f.name] = 'running';
           renderHygieneChecklist();
 
           let raw;
           try {
-            raw = await window.api.runHygieneScan({ finders: [finder.name] });
+            raw = await window.api.runHygieneScan({ finders: unit.map((f) => f.name) });
           } catch (err) {
             raw = { success: false, error: err.message, results: [] };
           }
 
           const got = raw && Array.isArray(raw.results) ? raw.results : [];
-          if (got.length > 0) {
-            for (const r of got) hygieneResults.push(r);
-            hygieneStatus[finder.name] = 'done';
-          } else {
-            // NOT an empty result. A check that did not run has established
-            // nothing, and feeding decide() an absence here would let it be
-            // counted as "looked, found nothing". Synthesise the could-not-look
-            // state the engine would have returned if it had got that far.
+          const returned = new Set();
+          for (const r of got) {
+            if (!r || !r.finder) continue;
+            hygieneResults.push(r);
+            returned.add(r.finder);
+            hygieneStatus[r.finder] = 'done';
+          }
+
+          // EVERY finder in the unit is accounted for, not just the call.
+          //
+          // A check that did not run has established nothing, and feeding
+          // decide() an absence here would let it be counted as "looked,
+          // found nothing". So the could-not-look the engine would have
+          // returned, had it got that far, is synthesised instead.
+          //
+          // Grouping (3l8) added a failure mode a one-finder call did not
+          // have: THREE results coming back for a unit of four. The fourth is
+          // then missing rather than failed, which is the same defect wearing
+          // a success badge -- so the loop is over the unit, not over what
+          // came back, and the two cases are told apart in the detail line.
+          for (const f of unit) {
+            if (returned.has(f.name)) continue;
+            const detail = (raw && raw.error)
+              ? raw.error
+              : (unit.length > 1 && got.length > 0
+                ? `The engine answered for ${got.length} of the ${unit.length} checks that share this scan of the disk, and returned nothing at all for this one.`
+                : 'The engine returned no result for this check.');
             hygieneResults.push({
-              finder: finder.name,
-              title: finder.title,
-              module: finder.module,
+              finder: f.name,
+              title: f.title,
+              module: f.module,
               findings: [],
-              unreadable: [
-                {
-                  path: '(check)',
-                  reason: 'check-did-not-run',
-                  detail: (raw && raw.error) || 'The engine returned no result for this check.'
-                }
-              ],
+              unreadable: [{ path: '(check)', reason: 'check-did-not-run', detail }],
               examinedCount: 0,
               totalBytes: 0,
               note: 'This check did not complete, so it has established nothing about the machine.'
             });
-            hygieneStatus[finder.name] = 'error';
+            hygieneStatus[f.name] = 'error';
           }
 
           renderHygieneProgress();

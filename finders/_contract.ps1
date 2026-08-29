@@ -422,3 +422,227 @@ function Measure-FinderPathBytes {
     $script:FinderSizeCache[$key] = $result
     return $result
 }
+
+
+# ==========================================
+# THE SHARED TREE WALK (3l8)
+# ==========================================
+# MEASURED 2026-08-29, warm, on the operator's machine:
+#
+#   one walk of $env:USERPROFILE, depth 8, cap 15000     12.4 s
+#   harvesting FOUR markers instead of one               12.4 s   (no cost)
+#   reclaim-node + archives + flutter + gradle, apart    66.2 s
+#   ...the same four in one call, sharing the walk       28.2 s
+#
+# Four finders were asking four questions about the same directories and
+# paying for the directory listing four times. The listing is the entire
+# cost: harvesting three extra file names out of children we have already
+# enumerated does not move the number at all.
+#
+# So the walk became a service and the questions became a harvest. Each
+# finder still calls its own Find-* helper and still gets its own shape
+# back; underneath, the first one to ask pays 12.4 s and the other three
+# are served from the cache.
+#
+# WHY THE HARVEST IS A REGISTRY RATHER THAN A PARAMETER. If each finder
+# asked for its own marker, the second finder's request would miss the
+# cache and walk again - the exact cost this exists to remove. So every
+# finder declares its markers at LOAD time (Import-Finders dot-sources all
+# of them before any handler runs), and the walk harvests the union. A
+# finder added later joins the shared walk by declaring, with no other
+# file touched.
+#
+# AND WHY THE HARVEST IS STILL IN THE CACHE KEY. A registration arriving
+# after a walk has already run would otherwise be answered from a cache
+# that never looked for it - a finder reporting 'nothing' because nobody
+# collected its marker, which is aeu's defect with a performance
+# optimisation holding the door open. Keying on the harvest makes that
+# case a second walk instead of a wrong answer.
+#
+# THE CACHE IS SCOPED TO ONE SCAN, for the reason Clear-FinderSizeCache
+# gives: a second run exists because something changed.
+$script:SharedWalkCache = @{}
+$script:SharedWalkMarkers = [System.Collections.Generic.List[string]]::new()
+$script:SharedWalkExtensions = [System.Collections.Generic.List[string]]::new()
+
+function Register-SharedWalkHarvest {
+    <#
+    .SYNOPSIS
+        Declare the file names and extensions a finder needs collected.
+
+    .DESCRIPTION
+        Called at FILE scope by a finder, not inside its handler: the union
+        has to be complete before the first walk runs, and Import-Finders
+        loads every file before Invoke-HygieneScan calls any handler.
+
+        Idempotent, and deliberately so - Import-Finders can run twice in one
+        process (probe then scan), and a harvest that doubled would change the
+        cache key and throw away a perfectly good walk.
+    #>
+    param(
+        [string[]]$markerNames = @(),
+        [string[]]$extensions = @()
+    )
+
+    foreach ($m in @($markerNames)) {
+        if ([string]::IsNullOrWhiteSpace($m)) { continue }
+        if (-not ($script:SharedWalkMarkers -contains $m)) { $script:SharedWalkMarkers.Add($m) }
+    }
+    foreach ($e in @($extensions)) {
+        if ([string]::IsNullOrWhiteSpace($e)) { continue }
+        if (-not ($script:SharedWalkExtensions -contains $e)) { $script:SharedWalkExtensions.Add($e) }
+    }
+}
+
+function Get-SharedWalkHarvest {
+    <#
+    .SYNOPSIS
+        What the shared walk currently collects. Exposed for the test suite,
+        which asserts that every reclaim finder's marker is actually in it -
+        a finder that forgot to register would find nothing and look clean.
+    #>
+    return @{
+        markers    = @($script:SharedWalkMarkers)
+        extensions = @($script:SharedWalkExtensions)
+    }
+}
+
+function Clear-SharedWalkCache {
+    <#
+    .SYNOPSIS
+        Drop every memoised walk. Called at the start of each scan.
+
+    .NOTES
+        The HARVEST is not cleared. It is a declaration by the loaded finders
+        about what they need, not an observation about the disk, and clearing
+        it would leave the second scan of a process harvesting nothing.
+    #>
+    $script:SharedWalkCache = @{}
+}
+
+function Invoke-SharedTreeWalk {
+    <#
+    .SYNOPSIS
+        Walk one root once, collecting every registered marker and extension,
+        and memoise the result for the rest of this scan.
+
+    .OUTPUTS
+        @{
+            markers     = @{ 'package.json' = @(directory paths); ... }
+            files       = @{ '.zip' = @(FileInfo); ... }
+            unreadable  = @(New-Unreadable records)
+            dirsVisited = [int]
+            capped      = [bool]
+        }
+
+        markers is keyed by every registered name and files by every
+        registered extension, both present even when empty - so a caller
+        reading a key it registered never gets $null, and never has to tell
+        "collected nothing" apart from "was not collected".
+
+    .NOTES
+        This is the four reclaim walkers merged, and it keeps every property
+        they had, because each was there for a reason:
+
+        * A directory that could not be enumerated becomes New-Unreadable with
+          the real path and the real .NET message, captured via -ErrorVariable
+          +err rather than inferred from a bare $? - the pipe-scoring defect
+          named twice in HANDOFF-2026-08-21 section 4.
+        * A reparse point is not descended into. A junction is a second name
+          for somewhere else, so following one double-counts at best and loops
+          forever at worst.
+        * Hitting maxDirs is scan-capped, an unreadable record, NOT a quiet
+          truncation. A subtree never visited has established nothing, and a
+          capped run reporting itself complete is the exact defect this suite
+          exists to make unrepresentable.
+        * The marker check happens BEFORE the depth cut, so a project sitting
+          exactly at maxDepth is still seen; only descent past it stops.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$root,
+        [Parameter(Mandatory = $true)][int]$maxDepth,
+        [int]$maxDirs = 15000,
+        [string[]]$skipDirs = @()
+    )
+
+    $markerNames = @($script:SharedWalkMarkers)
+    $extensions  = @($script:SharedWalkExtensions)
+
+    # Sorted and lower-cased so two finders passing the same skip list in a
+    # different order share one walk rather than each paying for their own -
+    # which is the whole point, and was true of all four reclaim finders.
+    $skipKey    = (@($skipDirs | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
+    $markerKey  = (@($markerNames | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
+    $extKey     = (@($extensions | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
+    $key = ($root.TrimEnd('\', '/').ToLowerInvariant() + "|d$maxDepth|c$maxDirs|" + $skipKey + '|' + $markerKey + '|' + $extKey)
+
+    if ($script:SharedWalkCache.ContainsKey($key)) { return $script:SharedWalkCache[$key] }
+
+    $markers = @{}
+    foreach ($m in $markerNames) { $markers[$m] = [System.Collections.Generic.List[string]]::new() }
+    $files = @{}
+    foreach ($e in $extensions) { $files[$e] = [System.Collections.Generic.List[object]]::new() }
+
+    $unreadable  = [System.Collections.Generic.List[object]]::new()
+    $dirsVisited = 0
+    $capped      = $false
+
+    $stack = [System.Collections.Generic.Stack[object]]::new()
+    $stack.Push(@{ Path = $root; Depth = 0 })
+
+    while ($stack.Count -gt 0) {
+        $cur = $stack.Pop()
+
+        if ($dirsVisited -ge $maxDirs) {
+            $capped = $true
+            $detail = "The scan visited $maxDirs directories under '$root' and stopped early so a run never hangs. Pass a narrower 'roots' list to cover what was skipped."
+            $unreadable.Add((New-Unreadable -path $cur.Path -reason 'scan-capped' -detail $detail))
+            continue
+        }
+        $dirsVisited++
+
+        $err = $null
+        $children = @(Get-ChildItem -LiteralPath $cur.Path -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
+        foreach ($e in @($err)) {
+            if ($null -eq $e) { continue }
+            $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $cur.Path }
+            $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
+        }
+
+        foreach ($child in $children) {
+            if (-not $child.PSIsContainer) {
+                $name = $child.Name
+                foreach ($m in $markerNames) {
+                    if ($name -eq $m) { $markers[$m].Add($cur.Path); break }
+                }
+                $ext = $child.Extension
+                if ($ext) {
+                    foreach ($x in $extensions) {
+                        if ($ext -ieq $x) { $files[$x].Add($child); break }
+                    }
+                }
+                continue
+            }
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if ($skipDirs -contains $child.Name) { continue }
+            if ($cur.Depth -ge $maxDepth) { continue }
+            $stack.Push(@{ Path = $child.FullName; Depth = $cur.Depth + 1 })
+        }
+    }
+
+    $flatMarkers = @{}
+    foreach ($m in $markerNames) { $flatMarkers[$m] = @($markers[$m]) }
+    $flatFiles = @{}
+    foreach ($x in $extensions) { $flatFiles[$x] = @($files[$x]) }
+
+    $result = @{
+        markers     = $flatMarkers
+        files       = $flatFiles
+        unreadable  = @($unreadable)
+        dirsVisited = $dirsVisited
+        capped      = $capped
+    }
+
+    $script:SharedWalkCache[$key] = $result
+    return $result
+}

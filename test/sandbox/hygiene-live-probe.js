@@ -203,7 +203,7 @@ app.whenReady().then(async () => {
   }
 
   console.log('');
-  console.log('Timings on this machine (the reason each check is its own call):');
+  console.log('Timings on this machine (the reason the panel does not make one big call):');
   console.log(`  list the checks           ${registryMs} ms`);
   console.log(`  one registry-read check   ${scanMs} ms`);
   console.log(`  one whole module, clicked ${Math.round(clickMs / 1000)} s`);

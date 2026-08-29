@@ -51,6 +51,21 @@ function Register-Finder {
         the zero-result case has somewhere to be a named state instead of an
         empty success.
 
+    .PARAMETER walkGroup
+        Finders sharing a name here read the SAME tree, and the panel must
+        run them in ONE engine call for that to mean anything (3l8).
+
+        Invoke-SharedTreeWalk memoises per PROCESS, so four finders declaring
+        'user-tree' walk the disk once between them - 66.2 s of listing became
+        28.2 s, measured, with byte-identical findings. Split across four
+        processes the cache never hits and the saving is exactly zero, which
+        is why the group is declared here rather than left implicit: the
+        renderer schedules by this field and cannot guess it.
+
+        Empty means the finder is scheduled on its own, which is the right
+        default - grouping checks that do not share a walk only makes one
+        slow check hide the others behind it.
+
     .NOTES
         HELPER FUNCTIONS IN A FINDER FILE MUST BE DECLARED `function script:Name`.
 
@@ -80,7 +95,8 @@ function Register-Finder {
         [Parameter(Mandatory = $true)][scriptblock]$handler,
         [string]$description = '',
         [bool]$auditOnly = $true,
-        [bool]$needsElevation = $false
+        [bool]$needsElevation = $false,
+        [string]$walkGroup = ''
     )
 
     $existing = @($script:FinderRegistry | Where-Object { $_.name -eq $name })
@@ -99,6 +115,7 @@ function Register-Finder {
         description    = $description
         auditOnly      = $auditOnly
         needsElevation = $needsElevation
+        walkGroup      = $walkGroup
         handler        = $handler
     })
 }
@@ -206,6 +223,13 @@ function Invoke-HygieneScan {
     # remembered would report the disk as it was and be indistinguishable from
     # one that had looked.
     if (Get-Command Clear-FinderSizeCache -ErrorAction SilentlyContinue) { Clear-FinderSizeCache }
+
+    # 3l8: and the same rule for the shared tree walk, for the same reason.
+    # The HARVEST is not cleared with it - that is a declaration by the
+    # loaded finders about what they need collected, not an observation
+    # about the disk, and clearing it would leave a process's second scan
+    # walking the tree while collecting nothing.
+    if (Get-Command Clear-SharedWalkCache -ErrorAction SilentlyContinue) { Clear-SharedWalkCache }
 
     $results = [System.Collections.Generic.List[object]]::new()
 

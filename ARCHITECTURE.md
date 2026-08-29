@@ -90,6 +90,30 @@ see them: `finders/` has to be declared in `package.json` `build.extraResources`
 or the packaged app registers zero checks and says so politely. See
 `test/packaging-verify.js`.
 
+`_contract.ps1` also holds the two shared services the checks route through,
+both memoised for the length of ONE scan and cleared at the start of the next:
+`Measure-FinderPathBytes` (sizes) and `Invoke-SharedTreeWalk` (one listing of a
+directory tree, harvesting every marker any loaded finder registered). Scoping
+them to a scan is the point -- a second run exists because the operator changed
+something, and a cache that outlived the run would report the disk as it was.
+
+The walk is memoised per PROCESS, which makes scheduling part of the design
+rather than an implementation detail: four checks only share a walk if they are
+in one engine call. So a finder declares `-walkGroup` to `Register-Finder`, the
+probe list carries it to the renderer, and `renderer/hygiene.js` schedules by
+group instead of by finder. Grouping costs progressiveness -- grouped checks
+report together -- so only checks that genuinely share a walk are grouped.
+
+Both memos are tested as memos, by mutating the tree between calls and
+checking which answer comes back (`test/finder-sizer-verify.ps1`,
+`test/shared-walk-verify.ps1`). A cache you cannot prove is being hit is
+indistinguishable from a slow function, and one you cannot prove CLEARS is a
+tool reporting the disk as it was before the operator changed it. The walk
+suite also runs every reclaim check both ways -- sharing the walk and owning
+it -- and compares the findings, because a speed change to the code that
+decides what a person may delete is only legitimate if the answers are
+identical.
+
 The split exists so decisions are testable apart from rendering. `lib/attribution.js`
 never touches the disk — it is handed directory names, an installed-program map
 and recorded install deltas, and returns classifications. The expensive part
