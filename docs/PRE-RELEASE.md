@@ -67,7 +67,7 @@ and the waivers previously recorded against 1.0 move to 0.9's gate instead.
 | **0.6** | Say which, and say what matters | SHIPPED 2026-08-14: `aaw` (GPU column names the adapter) and `ddx` (what can be reached from outside). Still open under this theme: `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
 | **0.7** | Space you can actually recover | `7v3` (orphaned MSI/MSP cache, 1.2 GB measured), `be8` (firewall rule orphans), `ztl` (SharedDLLs + ghost PnP) |
 | **0.8** | Other people's tools, used properly | `7sl` BUILT 2026-08-19 (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
-| **0.9** | Pre-release | The six elevated confirmations, the demo recording, code signing, a second machine, final docs pass |
+| **0.9** | Pre-release | ~~The six elevated confirmations~~ (done 2026-08-29), the demo recording, code signing, a second machine, final docs pass |
 | **1.0** | Everything above, done | No waivers carried forward |
 
 ### What 0.9 actually is, in plain terms
@@ -128,14 +128,33 @@ means finished, so they are gates again rather than accepted costs. `1w0` and
 
 ## Ship list, in order
 
+> **What actually remains, as of 2026-08-29.** Phases 0 to 3 are closed. The
+> release is gated on three things and only one of them is code:
+>
+> 1. **Unsigned binary** (`1w0`, currently deferred). An unsigned exe that asks
+>    for administrator trips SmartScreen's "Windows protected your PC" on every
+>    machine but this one. For a product whose entire pitch is that it tells
+>    you the truth about what it is doing, shipping behind a scary override
+>    dialog undercuts it more than any open bug does. This should be a gate,
+>    not a deferral.
+> 2. **No clean-VM pass** (Rule 10). Windows 10 1607+ and Windows 11, and per
+>    `pnor` that is **two runs per VM** -- elevated and unelevated -- because
+>    neither one alone executes the whole suite. `1qp` rides along with this.
+> 3. **Single-user acceptance.** One external user, one demo recording.
+>
+> None of the eighteen open bd issues moves any of the three. That is the
+> point of writing them down here: the coding backlog and the release gate are
+> different lists, and progress on the first is not progress on the second.
+
+
 ### Phase 0 -- unblock (operator, ~30 seconds)
 
-- [ ] **`9rv`** Elevation round trip on real hardware: toggle startup-elevation
+- [x] **`9rv`** **Closed.** Elevation round trip on real hardware: toggle startup-elevation
       off, **Restart now**, then **Restart as administrator**. `6lg`'s
       instrumentation is live and this machine's storage persists, so this
       yields either a clean instrumented pass or the first real
-      `relaunch-elevated-mismatch` record ever captured. This is the only
-      genuinely stuck item; everything else is unblocked.
+      `relaunch-elevated-mismatch` record ever captured. This was the only
+      genuinely stuck item, and unblocking it is what let Phase 3 close.
 
 ### Phase 1 -- build (the two that carry the product story)
 
@@ -177,16 +196,40 @@ means finished, so they are gates again rather than accepted costs. `1w0` and
 
 ### Phase 3 -- live verification (operator, Windows Sandbox)
 
-All six are "does this actually work when elevated", and all six have been
-blocked behind the same sandbox flakiness. Do them in one sitting once
-Phase 0 settles what that flakiness actually was.
+**Five of six closed. Reconciled 2026-08-29**, when this file was found still
+showing them open while bd had them closed -- the scope authority disagreeing
+with the tracker, which is the one disagreement this document exists to
+prevent.
 
-- [ ] `69a` elevated relaunch UAC branch on a spaced path
-- [ ] `9sy` elevated `test/real-data-verify.js`
-- [ ] `dmu` three startup actions elevated (remove / manual / disable)
-- [ ] `e7q` Store-leftover sweep purges and restores a real folder
-- [ ] `bfh.2` network hold applies and fully reverts
-- [ ] `1qp` Force Uninstall acceptance
+All six were "does this actually work when elevated", and all six were blocked
+behind the same sandbox flakiness that `9rv` resolved. The suites behind them
+then ran green from an elevated shell on 2026-08-29: Vault IPC 35, Startup
+actions 27, System Clean purges 60, Data-dir ownership 12, Live elevated
+relaunch 12, Force uninstall 19, De-elevation 20. The 0.5.0 note further down
+this file -- that `vault-ipc-verify` and `phase4-ipc-verify` "refuse outside
+Full Mode and need an elevated shell" -- is answered. They were run. They pass.
+
+- [x] `69a` elevated relaunch UAC branch on a spaced path
+- [x] `9sy` elevated `test/real-data-verify.js`
+- [x] `dmu` three startup actions elevated (remove / manual / disable)
+- [x] `e7q` Store-leftover sweep purges and restores a real folder
+- [x] `bfh.2` network hold applies and fully reverts
+- [ ] `1qp` Force Uninstall acceptance -- the only one still open, and it
+      wants a clean VM rather than the sandbox that was blocking the others.
+      It belongs with the Rule 10 pass below, not here.
+
+**What an elevated run does NOT establish** -- found the same day, bd `pnor`.
+An Administrator token reads straight through a Deny ACE, so nine suites
+cannot construct the access-denied condition they exist to test and skip it.
+The elevated run covers 225 assertions the unelevated one skips, and loses 9
+that only the unelevated one can reach -- and those 9 are the ones proving a
+finder reports **could-not-look** rather than nothing, which is the contract
+this whole product rests on.
+
+Neither run is the whole suite. **Rule 10's clean-VM pass is therefore two
+passes per VM, elevated and not**, and a green number from one of them is not
+evidence about the other.
+
 
 ### Phase 4 -- cut the release
 
