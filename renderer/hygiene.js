@@ -45,9 +45,23 @@ let hygieneScanning = false;
 let hygieneWired = false;
 let hygieneLoadErrors = [];
 
-// Three engine calls at a time. These are disk-bound: more processes past this
-// just queue on the same spindle and make every individual check look slower
-// on screen without finishing the set any sooner.
+// Three engine calls at a time, and the number is measured rather than
+// assumed. The comment that used to sit here said more processes "just queue
+// on the same spindle ... without finishing the set any sooner". Measured on
+// the operator machine, same 13 checks, same scheduling, one sitting:
+//
+//     pool 1   wall 136.8 s   summed 136.8 s
+//     pool 2   wall  78.4 s   summed 143.4 s
+//     pool 3   wall  58.1 s   summed 145.1 s
+//
+// Running three at once inflates each individual check by 6.1% and cuts the
+// wall clock by 2.35x. The contention is real and it is small; the old
+// comment had the sign right and the magnitude badly wrong.
+//
+// Whether 4 or more still pays is UNTESTED. The sweep above stops at 3
+// because that is what ships, and a number nobody measured does not belong
+// in a comment -- which is the whole point of this block.
+//   VANISH_PROBE_CONCURRENCY=4 node test/sandbox/hygiene-scheduling-probe.js
 const HYGIENE_CONCURRENCY = 3;
 
 // 3l8: the unit of scheduling is a WALK GROUP, not a finder.

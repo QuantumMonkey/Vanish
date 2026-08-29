@@ -29,7 +29,16 @@ const path = require('node:path');
 
 const root = path.join(__dirname, '..', '..');
 const scanner = path.join(root, 'scanner.ps1');
-const CONCURRENCY = 3;
+// Overridable so the pool size itself can be measured. These checks are
+// disk-bound and run against ONE spindle, so the pool is not free: three
+// processes enumerating at once inflate every per-check number, which is
+// how a 12 s directory sizing came to be recorded as 45 s.
+//   VANISH_PROBE_CONCURRENCY=1 node test/sandbox/hygiene-scheduling-probe.js
+const CONCURRENCY = Math.max(1, Number(process.env.VANISH_PROBE_CONCURRENCY) || 3);
+
+// Which passes to run. A contention sweep only needs one of them, and
+// running all three triples the time for no extra information.
+const ONLY = String(process.env.VANISH_PROBE_PASS || '').trim();
 
 function engine(action, params) {
   const b64 = Buffer.from(JSON.stringify(params)).toString('base64');
@@ -110,8 +119,13 @@ async function runPool(units) {
     ['0.9.2: shared walk, largest unit first   ', largestFirst]
   ];
 
+  const chosen = ONLY
+    ? passes.filter(([l]) => l.toLowerCase().includes(ONLY.toLowerCase()))
+    : passes;
+  if (chosen.length === 0) { console.log(`no pass matches VANISH_PROBE_PASS=${ONLY}`); process.exit(2); }
+
   const done = [];
-  for (const [label, units] of passes) {
+  for (const [label, units] of chosen) {
     const r = await runPool(units);
     done.push([label, r]);
     console.log(`${label}   WALL ${(r.wall / 1000).toFixed(1)} s   ${r.marks.length} calls   ${r.reported}/${finders.length} checks`);
@@ -119,8 +133,16 @@ async function runPool(units) {
 
   console.log('');
   for (const [label, r] of done) {
-    const slowest = r.marks.slice().sort((a, b) => b.ms - a.ms)[0];
-    console.log(`${label}   summed ${(r.summed / 1000).toFixed(1)} s, slowest unit ${(slowest.ms / 1000).toFixed(1)} s (${slowest.unit})`);
+    const ranked = r.marks.slice().sort((a, b) => b.ms - a.ms);
+    console.log(`${label}   summed ${(r.summed / 1000).toFixed(1)} s`);
+    // EVERY unit, not just the slowest. Printing one number invites the
+    // reader to subtract it from a number in another run, and cross-run
+    // subtraction on this machine is meaningless: file-system cache warmth
+    // moves the same 13 checks by 1.5x between runs. A full table taken in
+    // ONE run is the only comparison that means anything.
+    for (const m of ranked) {
+      console.log(`      ${String((m.ms / 1000).toFixed(1)).padStart(7)} s  ${m.unit}`);
+    }
   }
 
   // Every pass must report every check. A pass that lost one would make the

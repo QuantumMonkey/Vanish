@@ -62,6 +62,73 @@ never by the process refresh loop. The pre-warm mitigation described in
 
 ---
 
+## Run 003 - 2026-08-29 - the same machine, warm, after a day of walking it
+
+Same hardware as Run 002. Taken late in the same day, after every tree in
+this file had been walked repeatedly, so the file-system cache is as hot as
+it gets.
+
+**This run exists because Run 002's numbers do not reproduce.** The identical
+13 checks, the identical scheduling, summed **210.4 s** in Run 002 and
+**136.8 s** here. 1.5x, same code, same machine, nothing changed but cache
+warmth. Three separate bd issues were filed on Run 002 figures and all three
+had to be re-based against this table.
+
+### Pool size: is running three at once actually paying?
+
+The comment in `renderer/hygiene.js` asserted for months that extra processes
+"just queue on the same spindle ... without finishing the set any sooner".
+One sitting, one scheduling, three pool sizes:
+
+| Pool | Wall clock | Summed engine time |
+|---|---|---|
+| 1 | 136.8 s | 136.8 s |
+| 2 | 78.4 s | 143.4 s |
+| 3 | **58.1 s** | 145.1 s |
+
+Three at once inflates each individual check by **6.1%** and cuts the wall
+clock by **2.35x**. The old comment had the sign right and the magnitude
+badly wrong. Whether 4 pays is untested and the comment now says so.
+
+### Where the time actually goes, every unit, one run
+
+Pool 3, shared walks, largest unit first. WALL 59.9 s, summed 148.7 s, 9 calls.
+
+| Unit | Time |
+|---|---|
+| `local-only-credentials` | **40.0 s** |
+| `duplicate-content` | 35.3 s |
+| the four reclaim checks (3l8 group) | 24.0 s |
+| `reclaim-package-caches` | 19.1 s |
+| `redirect-variables` | 14.5 s |
+| `gitignored-unique` + `repo-health` (lxl group) | 12.6 s |
+| `duplicate-installs` | 1.6 s |
+| `path-hygiene` | 0.8 s |
+| `profile-list` | 0.8 s |
+
+**The tail is `local-only-credentials`, and it shares a walk with nothing.**
+Both shared-walk changes shipped this week -- 3l8 and lxl -- land in the
+middle of this table. The work was real and the findings did not move, but
+neither one was ever touching the slowest thing the panel does. That is bd
+`vanish-uninstaller-o1mj`, and it is unprofiled.
+
+Theoretical floor for this profile is `max(40.0, 148.7 / 3)` = 49.6 s against
+59.9 s actual, so perfect scheduling is worth about 10 s (`4v8`).
+
+### Why this table is shaped like this
+
+Until this run the scheduling probe printed only the SLOWEST unit. One number
+per run is an invitation to compare it against a number from a different run,
+and on this machine that comparison is worthless. It now prints every unit,
+always. The probe also takes `VANISH_PROBE_CONCURRENCY` and
+`VANISH_PROBE_PASS`, so the sweep above is reproducible rather than a one-off:
+
+```
+VANISH_PROBE_CONCURRENCY=1 VANISH_PROBE_PASS="largest unit first" node test\sandbox\hygiene-scheduling-probe.js
+```
+
+---
+
 ## Run 002 - 2026-08-29 - developer machine, Machine Hygiene panel (lhf, 3l8, lxl)
 
 | Condition | Value |

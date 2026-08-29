@@ -164,30 +164,48 @@ function Find-ToolchainConsumers {
             continue
         }
 
-        foreach ($marker in $markers) {
-            $err = $null
-            $hits = @(Get-ChildItem -LiteralPath $root -Filter $marker -File -Recurse -Depth $maxDepth -Force -ErrorAction SilentlyContinue -ErrorVariable +err)
-            $examined++
+        # e6gn: this used to run one recursive Get-ChildItem PER MARKER, so
+        # reclaim-package-caches listed the same tree seven times (npm 1
+        # marker, Gradle 3, pip 3) to collect seven file names. Measured warm
+        # on the operator machine: 4,646 ms across seven listings against
+        # 1,571 ms for one walk collecting all seven, with identical hit
+        # counts. Same defect as 3l8 and lxl, third instance.
+        #
+        # THE MARKERS ARE REGISTERED HERE, not only at file scope, because
+        # this function takes them as a RUNTIME parameter -- scanner.ps1's
+        # toolchain-consumers action passes whatever the caller asked for.
+        # A marker nobody harvested would come back empty from the shared
+        # walk, and "no consumers found" is exactly the wrong answer to give
+        # about a toolchain somebody is about to delete. Registering first
+        # changes the cache key, so an unharvested marker costs one extra
+        # walk instead of producing a confident lie (3l8's reasoning for
+        # keeping the harvest IN the key).
+        Register-SharedWalkHarvest -markerNames @($markers)
 
-            foreach ($hit in $hits) {
+        # No skip list and no directory cap, because the Get-ChildItem -Recurse
+        # this replaces had neither. Passing maxDirs explicitly also keeps this
+        # out of the reclaim group's cache entry: depth 4 unpruned is a
+        # different question from depth 8 with fifteen names pruned.
+        $walk = Invoke-SharedTreeWalk -root $root -maxDepth $maxDepth -maxDirs ([int]::MaxValue) -skipDirs @()
+
+        foreach ($marker in $markers) {
+            $examined++
+            foreach ($dir in @($walk.markers[$marker])) {
                 $consumers.Add(@{
                     marker  = $marker
-                    path    = $hit.FullName
-                    project = $hit.DirectoryName
+                    path    = (Join-Path $dir $marker)
+                    project = $dir
                 })
             }
-
-            # A recursive search that hit an access denial has NOT established
-            # that the subtree is consumer-free, and this is precisely the
-            # "unquoted search path silently skipping an entire store" failure
-            # from the cleanup. The error variable is the only evidence that
-            # happened; -ErrorAction SilentlyContinue throws it away otherwise.
-            foreach ($e in @($err)) {
-                if ($null -eq $e) { continue }
-                $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $root }
-                $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
-            }
         }
+
+        # A walk that hit an access denial has NOT established that the
+        # subtree is consumer-free - the "unquoted search path silently
+        # skipping an entire store" failure from the real cleanup. The shared
+        # walk captures those via -ErrorVariable and hands them back already
+        # shaped as New-Unreadable, so they are added ONCE per denied
+        # directory here rather than once per marker as before.
+        foreach ($u in @($walk.unreadable)) { $unreadable.Add($u) }
     }
 
     return New-FinderResult `

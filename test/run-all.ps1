@@ -105,7 +105,7 @@ $suites = @(
     @{ Name = "Reclaim by marker (piu)";       Kind = "ps";       Path = "test\finder-reclaim-verify.ps1" },
     @{ Name = "Hygiene report (z22)";          Kind = "node";     Path = "test/hygiene-report-verify.js" },
     @{ Name = "Shared sizer (lhf)";           Kind = "ps";       Path = "test\finder-sizer-verify.ps1" },
-    @{ Name = "Shared tree walk (3l8)";        Kind = "ps";       Path = "test\shared-walk-verify.ps1" },
+    @{ Name = "Shared tree walk (3l8, lxl, e6gn)";        Kind = "ps";       Path = "test\shared-walk-verify.ps1" },
     @{ Name = "Hygiene panel (5p5 UI)";        Kind = "electron"; Path = "test/hygiene-panel-verify.js" },
     @{ Name = "Settings lock (mp4)";           Kind = "electron"; Path = "test/settings-lock-verify.js" },
     # Needs an ELEVATED shell: only an elevated token can take ownership or

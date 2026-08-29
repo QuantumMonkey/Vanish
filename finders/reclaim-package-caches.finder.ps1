@@ -56,6 +56,22 @@
 # NOTE ON Set-StrictMode: deliberately NOT set here, matching every other
 # file in this directory.
 
+# e6gn: the consumer markers, at FILE scope so the shared walk harvests all
+# of them before any handler runs. Import-Finders loads every finder file
+# first, so declaring here is what makes ONE walk serve all three cache
+# specs instead of one walk per marker.
+#
+# The specs below read from this table rather than repeating the strings,
+# so a marker cannot be added to a spec and forgotten here. If one ever is,
+# Find-ToolchainConsumers registers whatever it was passed before walking,
+# so the cost of the drift is one extra walk and never a wrong answer.
+$script:PiuCacheMarkerSets = @{
+    npm    = @('package.json')
+    Gradle = @('gradlew', 'build.gradle', 'build.gradle.kts')
+    pip    = @('requirements.txt', 'pyproject.toml', 'setup.py')
+}
+Register-SharedWalkHarvest -markerNames @($script:PiuCacheMarkerSets.Values | ForEach-Object { $_ })
+
 function script:Get-PiuCacheDirBytes {
     <#
     .SYNOPSIS
@@ -145,7 +161,7 @@ Register-Finder -name 'reclaim-package-caches' `
                 tool       = 'npm'
                 envVar     = 'npm_config_cache'
                 default    = (Join-Path $env:LOCALAPPDATA 'npm-cache')
-                markers    = @('package.json')
+                markers    = $script:PiuCacheMarkerSets['npm']
                 evidence   = 'HANDOFF-2026-08-21 measured 4.5 GB here on the operator machine.'
                 rebuild    = 'Refills automatically as npm re-downloads whatever it next installs; every package in it is also on the npm registry, so nothing here is unique. No single command replays the whole cache at once - a cold cache means the next several installs are network-bound until it warms back up.'
             },
@@ -153,7 +169,7 @@ Register-Finder -name 'reclaim-package-caches' `
                 tool       = 'Gradle'
                 envVar     = 'GRADLE_USER_HOME'
                 default    = (Join-Path $env:USERPROFILE '.gradle\caches')
-                markers    = @('gradlew', 'build.gradle', 'build.gradle.kts')
+                markers    = $script:PiuCacheMarkerSets['Gradle']
                 evidence   = 'HANDOFF-2026-08-21 measured 14.7 GB here on the operator machine - the largest single reclaim target found.'
                 rebuild    = 'Refills automatically as Gradle re-resolves and re-downloads dependencies for whichever project builds next; every artifact in it also lives in the Maven/Gradle repositories the project already points at. No single command replays it - the next build after a clear re-fetches only what that build actually needs, but a cold cache slows every build until it does.'
             },
@@ -161,7 +177,7 @@ Register-Finder -name 'reclaim-package-caches' `
                 tool       = 'pip'
                 envVar     = 'PIP_CACHE_DIR'
                 default    = (Join-Path $env:LOCALAPPDATA 'pip\Cache')
-                markers    = @('requirements.txt', 'pyproject.toml', 'setup.py')
+                markers    = $script:PiuCacheMarkerSets['pip']
                 evidence   = 'HANDOFF-2026-08-21 measured 570 MB here on the operator machine.'
                 rebuild    = 'Refills automatically as pip re-downloads whatever it next installs; every wheel/sdist in it also lives on PyPI (or whichever index was configured). No single command replays it - the next install after a clear is slower, network-bound, until the cache warms back up.'
             }

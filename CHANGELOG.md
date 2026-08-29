@@ -12,6 +12,77 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
+## [0.9.4] - 2026-08-29
+
+Mostly a correction release. The code change is small; the larger part is that
+several numbers this project had been quoting about its own performance turned
+out not to survive a re-run, and one claim in the source was measured false.
+
+### Changed -- the consumer search stopped listing the same tree once per marker
+
+Before offering a package cache for reclaim, Vanish looks for the projects that
+would refill it, so the finding can say who depends on it. That search ran one
+recursive directory listing **per marker name** -- npm has one, Gradle three,
+pip three. Seven listings of the same tree to collect seven filenames.
+
+It is now one walk, using the shared-walk service added in 0.9.2.
+
+| | before | after |
+|---|---|---|
+| the consumer search, warm | 4,552 ms | **1,312 ms** |
+
+The consumer sets are identical, compared marker by marker: 56 `package.json`,
+1 `gradlew`, 0 `build.gradle`, 2 `build.gradle.kts`, 2 `requirements.txt`,
+4 `pyproject.toml`, 0 `setup.py`. The comparison refuses to pass if it finds
+no consumers at all, because two empty sets match each other perfectly.
+
+**This is a tidy-up, not a speed-up you will notice.** It saves about three
+seconds of a nineteen-second check that is not the slowest thing the scan
+does. It is in because seven listings to collect seven names is the same
+defect as 0.9.2's and 0.9.3's, and leaving the third instance in place after
+fixing two would be choosing not to look.
+
+### Corrected -- what this repository claims about its own speed
+
+**A comment in the source was measured false.** `renderer/hygiene.js` had
+asserted for months that running more than three checks at once would "just
+queue on the same spindle ... without finishing the set any sooner". Measured,
+same 13 checks, same scheduling, one sitting:
+
+| Pool | Wall clock | Summed engine time |
+|---|---|---|
+| 1 | 136.8 s | 136.8 s |
+| 2 | 78.4 s | 143.4 s |
+| 3 | **58.1 s** | 145.1 s |
+
+Three at once costs 6.1% per check and buys 2.35x on the clock. The comment had
+the sign right and the magnitude badly wrong; it now carries the table, and
+says plainly that four or more is untested.
+
+**And the per-check figures behind three open issues did not reproduce.** The
+identical 13 checks summed 210.4 s earlier in the day and 136.8 s later --
+1.5x, same code, same machine, nothing different but how much of the disk
+Windows still had cached. `docs/BENCHMARKS.md` gains a Run 003 with every unit
+measured in one run, and the three issues have been re-based against it.
+
+The tail is `local-only-credentials` at 40.0 s, which shares a walk with
+nothing and has never been profiled. Neither shared-walk change shipped this
+week was ever touching it.
+
+The scheduling probe used to print only the slowest unit. One number per run is
+an invitation to compare it against a number from a different run, which on
+this machine is worthless. It now prints every unit, always.
+
+### Also
+
+`docs/PRE-RELEASE.md`, which this repository designates as the authority on
+what gets built, was showing seven unchecked items in its ship list. Six were
+already done. It now matches the tracker, and states the three things that
+actually gate a release -- an unsigned binary, no clean-VM pass, and no
+external user -- none of which any open issue moves.
+
+---
+
 ## [0.9.3] - 2026-08-29
 
 ### Fixed -- the same repository was being reported up to four times

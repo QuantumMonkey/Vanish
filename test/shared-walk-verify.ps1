@@ -85,8 +85,8 @@ if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -For
 $null = New-Item -ItemType Directory -Path $work -Force
 
 Write-Host ''
-Write-Host 'Vanish shared tree walk (3l8, lxl)' -ForegroundColor Cyan
-Write-Host '=================================='
+Write-Host 'Vanish shared tree walk (3l8, lxl, e6gn)' -ForegroundColor Cyan
+Write-Host '========================================'
 
 try {
     New-Fixture -base $work
@@ -285,6 +285,73 @@ try {
     $pkoRepos = @((Find-PkoGitRepoRoots -root $memoBase -maxDepth 6).repos | Sort-Object)
     Assert-True (($sgnRepos -join '|') -eq ($pkoRepos -join '|')) 'the two finders get identical repo sets, which is what makes one walk legitimate' "sgn=$($sgnRepos -join ',') pko=$($pkoRepos -join ',')"
     Assert-True (@($sgnRepos).Count -gt 0) 'and the set is not empty - without this the comparison above is empty-equals-empty'
+
+
+    # ==================================================================
+    Write-Host ''
+    Write-Host 'Toolchain consumers: seven listings became one walk (e6gn)' -ForegroundColor Cyan
+    # Find-ToolchainConsumers ran one recursive Get-ChildItem PER MARKER, so
+    # reclaim-package-caches listed the same tree seven times (npm 1 marker,
+    # Gradle 3, pip 3). Measured warm on the operator machine: 4,552 ms across
+    # seven listings against 1,312 ms for one walk, with identical hit counts
+    # for every marker.
+    $need = @('package.json', 'gradlew', 'build.gradle', 'build.gradle.kts', 'requirements.txt', 'pyproject.toml', 'setup.py')
+    $harvest = Get-SharedWalkHarvest
+    $missingAtLoad = @($need | Where-Object { $harvest.markers -notcontains $_ })
+    # THIS is the assertion that the fix works for the reason claimed. The
+    # equivalence checks below would pass even if nothing were registered at
+    # file scope, because Find-ToolchainConsumers registers whatever it is
+    # handed before walking - so they would prove ONE WALK PER SPEC, not one
+    # walk. Only the load-time harvest proves the three specs share it.
+    Assert-True (@($missingAtLoad).Count -eq 0) 'all seven cache markers are harvested BEFORE any handler runs, so the three cache specs share one walk' "not registered at file scope: $(@($missingAtLoad) -join ', ')"
+
+    $tcRoot = Join-Path $work 'toolchain'
+    $null = New-Item -ItemType Directory -Path (Join-Path $tcRoot 'app-node') -Force
+    Set-Content -LiteralPath (Join-Path $tcRoot 'app-node\package.json') -Value '{}' -Encoding ASCII
+    $null = New-Item -ItemType Directory -Path (Join-Path $tcRoot 'app-gradle') -Force
+    Set-Content -LiteralPath (Join-Path $tcRoot 'app-gradle\gradlew') -Value 'x' -Encoding ASCII
+    $null = New-Item -ItemType Directory -Path (Join-Path $tcRoot 'app-py\src') -Force
+    Set-Content -LiteralPath (Join-Path $tcRoot 'app-py\pyproject.toml') -Value 'x' -Encoding ASCII
+    $null = New-Item -ItemType Directory -Path (Join-Path $tcRoot 'not-a-project') -Force
+    Set-Content -LiteralPath (Join-Path $tcRoot 'not-a-project\readme.txt') -Value 'x' -Encoding ASCII
+
+    Clear-SharedWalkCache
+    $tc = Find-ToolchainConsumers -markers @('package.json', 'gradlew', 'pyproject.toml') -roots @($tcRoot) -maxDepth 4
+    $byMarker = @{}
+    foreach ($c in @($tc.findings)) {
+        if (-not $byMarker.ContainsKey($c.marker)) { $byMarker[$c.marker] = [System.Collections.Generic.List[string]]::new() }
+        $byMarker[$c.marker].Add($c.project)
+    }
+    Assert-True (@($tc.findings).Count -eq 3) 'three consumers found, one per marker' "found $(@($tc.findings).Count)"
+    Assert-True ($tc.state -eq 'found') "state is 'found', not 'nothing' or 'could-not-look'" "got '$($tc.state)'"
+    Assert-True (@($byMarker['package.json']) -contains (Join-Path $tcRoot 'app-node')) 'the node project is reported under its own marker'
+    Assert-True (@($byMarker['gradlew']) -contains (Join-Path $tcRoot 'app-gradle')) 'the gradle project too'
+    $projects = @(@($tc.findings) | ForEach-Object { $_.project })
+    Assert-True (@($projects | Where-Object { $_ -like '*not-a-project*' }).Count -eq 0) 'a directory with no marker is not reported as a consumer'
+
+    # The shape callers read. project is the directory; path is the marker file
+    # inside it, which the shared walk does not return and has to reconstruct.
+    $one = @(@($tc.findings) | Where-Object { $_.marker -eq 'gradlew' })[0]
+    Assert-True ($one.path -eq (Join-Path (Join-Path $tcRoot 'app-gradle') 'gradlew')) 'path is the marker FILE, rebuilt from the directory the walk returned' "got '$($one.path)'"
+
+    # THE SAFETY NET, and the reason Find-ToolchainConsumers registers at call
+    # time as well as at file scope. scanner.ps1's toolchain-consumers action
+    # passes whatever markers the caller asked for. A marker nobody declared
+    # would come back empty from a walk that never collected it - and "no
+    # consumers found" is the worst possible wrong answer about a toolchain
+    # somebody is deciding whether to delete. Registering first changes the
+    # cache key, so an undeclared marker costs one extra walk instead.
+    $null = New-Item -ItemType Directory -Path (Join-Path $tcRoot 'app-ruby') -Force
+    Set-Content -LiteralPath (Join-Path $tcRoot 'app-ruby\Gemfile') -Value 'x' -Encoding ASCII
+    # 'Gemfile' rather than 'Cargo.toml': the 3l8 section above already
+    # registers Cargo.toml for its own late-registration test, so reusing it
+    # here made THIS premise false and the assertion below fail against a
+    # product that was working correctly. A test marker has to be unused by
+    # every other test in the file, not merely by every finder.
+    Assert-True ((Get-SharedWalkHarvest).markers -notcontains 'Gemfile') 'premise: nothing has declared Gemfile, so the walk was never collecting it' "harvest: $((Get-SharedWalkHarvest).markers -join ', ')"
+    $rust = Find-ToolchainConsumers -markers @('Gemfile') -roots @($tcRoot) -maxDepth 4
+    Assert-True (@($rust.findings).Count -ge 1) 'an UNDECLARED marker is still found - it forces a fresh walk rather than answering "no consumers" from a cache that never looked' "found $(@($rust.findings).Count); if this is 0 the shared walk is reporting a confident lie"
+    Assert-True ($rust.state -eq 'found') "and its state is 'found'" "got '$($rust.state)'"
 
     # ==================================================================
     Write-Host ''
