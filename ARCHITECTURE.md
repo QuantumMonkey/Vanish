@@ -104,6 +104,20 @@ probe list carries it to the renderer, and `renderer/hygiene.js` schedules by
 group instead of by finder. Grouping costs progressiveness -- grouped checks
 report together -- so only checks that genuinely share a walk are grouped.
 
+There are two groups, and they stay two. The reclaim checks read the home
+directory to depth 8 with fifteen directory names pruned and a 15,000-entry
+cap; the two git checks read it to depth 6 with nothing pruned and no cap.
+Those are different questions about the same disk, so merging them would
+change what is covered rather than how fast it is covered. The cache key
+carries the root, depth, cap, skip list and harvest, so a caller that asks a
+different question gets a different walk instead of another walk's answer.
+
+The harvest has three kinds because a name on disk has three shapes worth
+asking about: `-markerNames` for a file beside a directory (`package.json`),
+`-extensions` for a file by suffix (`.zip`), and `-entryNames` for a name that
+may be either (`.git` is a directory in an ordinary clone and a FILE in a
+submodule or a linked worktree, and both are repos).
+
 Both memos are tested as memos, by mutating the tree between calls and
 checking which answer comes back (`test/finder-sizer-verify.ps1`,
 `test/shared-walk-verify.ps1`). A cache you cannot prove is being hit is

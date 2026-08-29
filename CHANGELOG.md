@@ -12,6 +12,76 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
+## [0.9.3] - 2026-08-29
+
+### Fixed -- the same repository was being reported up to four times
+
+Every Windows home directory carries legacy junctions: `My Documents` is a
+second name for `Documents`, and both `Local Settings` and `Application Data`
+are second names for `AppData\Local`. The two checks that look for git
+repositories walked straight through them, so a repository was found once
+under its real path and again under every alias that reached it.
+
+Measured on the developer machine: **27 paths reported for 14 repositories.**
+Five projects under `Documents\GitHub` were each listed twice. Several under
+`AppData\Local\Temp` were listed four times -- once through `Local Settings`,
+once through `Application Data`, once through `Local Settings\Application
+Data`, and once under their real name.
+
+Both checks are affected. "Repo health" listed the same uncommitted work four
+times over; "Gitignored and unique" listed the same never-pushed files four
+times, with nothing to say they were one repository. No byte total was ever
+double-counted -- both checks are audit-only and report paths, not sizes --
+but the list was wrong and so was the count above it.
+
+Both now refuse to walk into a junction, which is what every other check in
+the panel already did. **No repository is lost.** Each of the 13 paths that
+stopped being reported resolves to a directory still in the list, and that is
+checked rather than claimed: `test\sandbox\git-walk-equivalence-probe.ps1`
+opens a handle to every dropped path and asks Windows what it really is.
+
+### Changed -- the two git checks now share one walk of the disk
+
+They were the same walk written twice: same root, same depth, same test for a
+`.git` entry, same refusal to descend into it. The only difference between the
+two functions was a counter one of them did not use.
+
+| | before | after |
+|---|---|---|
+| the two checks, back to back | 60.0 s | **6.6 s** |
+| directories listed | 31,921 | 8,645 |
+
+Most of that is not the sharing. It is the double-counting above: three
+quarters of the directories the old walk listed were the same directories
+reached through a junction. Sharing the walk accounts for the rest -- the
+second check now costs about a millisecond, because it is handed the first
+one's answer.
+
+This uses the shared walk added in 0.9.2, with one extension. That walk could
+only collect FILE names, which is right for `package.json` and wrong for a
+repository: an ordinary clone has a `.git` directory, while a submodule or a
+linked worktree has a `.git` FILE. Both are repositories, and a scan that
+finds only one kind reports the other as absent. Entry names match either.
+
+The two git checks share with each other and with nothing else. They read the
+home directory to depth 6 with nothing pruned and no directory cap; the four
+reclaim checks read it to depth 8 with fifteen names pruned and a 15,000
+directory cap. Merging those would change what is covered, not how fast it is
+covered.
+
+### Known, and not fixed here
+
+A junction whose target is **outside** the walk root is now skipped with no
+record. Inside the root -- which is where all of these are -- the directory is
+still visited under its real name, so nothing is missed. Outside it, nothing
+visits it, and the scan should say so rather than stay silent. That is the
+could-not-look contract this project is built on, so it is filed as a bug
+(`vanish-uninstaller-127o`) with the resolver already written and proven in
+the equivalence probe. It affects the reclaim checks shipped in 0.9.2 the same
+way.
+
+---
+
 ## [0.9.2] - 2026-08-29
 
 ### Changed -- four checks now share one walk of the disk instead of taking four

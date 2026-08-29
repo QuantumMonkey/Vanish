@@ -107,59 +107,53 @@ function script:Invoke-PkoGit {
     return @{ ExitCode = $code; Lines = @($lines); Text = ($lines -join "`n") }
 }
 
+# lxl: a repo root is a directory holding a .git ENTRY - a directory in an
+# ordinary clone, a FILE in a submodule or a linked worktree. -entryNames
+# matches either, which -markerNames (files only) cannot. Declared at file
+# scope so the union is complete before the first walk runs.
+Register-SharedWalkHarvest -entryNames @('.git')
+
 function script:Find-PkoGitRepoRoots {
     <#
     .SYNOPSIS
-        Explicit-stack walk for directories containing a '.git' entry
-        (file or directory), bounded by maxDepth. Never descends into '.git'
-        itself. Access-denied subtrees are recorded, never silently skipped
-        -- see finders/_never-touch.ps1's Find-ToolchainConsumers for the
-        identical shape and the same reasoning.
+        Directories holding a .git entry, taken from the shared walk.
+
+    .DESCRIPTION
+        lxl: this walk and the one in the other git finder were the same
+        walk written twice - same root, same default depth, same .git
+        test, same refusal to descend into .git. They are now one call to
+        Invoke-SharedTreeWalk and the second finder to ask is served from
+        its cache.
+
+        maxDirs is [int]::MaxValue deliberately. The two walks this
+        replaces had NO directory cap, unlike the reclaim group, and
+        capping them here would quietly shrink what a repo scan covers.
+        Passing it explicitly also keeps this out of the reclaim group's
+        cache entry, which is the intent: depth 6 with nothing pruned is a
+        different question from depth 8 with fifteen names pruned, and
+        sharing those two would change coverage rather than speed.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$root,
         [int]$maxDepth = 6
     )
 
-    $repos      = [System.Collections.Generic.List[string]]::new()
-    $unreadable = [System.Collections.Generic.List[object]]::new()
-
     if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) {
-        $unreadable.Add((New-Unreadable -path $root -reason 'root-missing' -detail 'The search root does not exist or is not a directory.'))
-        return @{ repos = @(); unreadable = @($unreadable) }
+        $missing = New-Unreadable -path $root -reason 'root-missing' -detail 'The search root does not exist or is not a directory.'
+        return @{ repos = @(); unreadable = @($missing) }
     }
 
-    $stack = [System.Collections.Generic.Stack[object]]::new()
-    $stack.Push(@{ Path = $root; Depth = 0 })
-
-    while ($stack.Count -gt 0) {
-        $cur = $stack.Pop()
-
-        if (Test-Path -LiteralPath (Join-Path $cur.Path '.git') -ErrorAction SilentlyContinue) {
-            $repos.Add($cur.Path)
-        }
-
-        if ($cur.Depth -ge $maxDepth) { continue }
-
-        $err = $null
-        $children = @(Get-ChildItem -LiteralPath $cur.Path -Directory -Force -ErrorAction SilentlyContinue -ErrorVariable +err | Where-Object { $_.Name -ne '.git' })
-        foreach ($e in @($err)) {
-            if ($null -eq $e) { continue }
-            $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $cur.Path }
-            $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
-        }
-
-        foreach ($c in $children) {
-            $stack.Push(@{ Path = $c.FullName; Depth = ($cur.Depth + 1) })
-        }
+    $walk = Invoke-SharedTreeWalk -root $root -maxDepth $maxDepth -maxDirs ([int]::MaxValue) -skipDirs @('.git')
+    return @{
+        repos      = @($walk.entries['.git'])
+        unreadable = @($walk.unreadable)
     }
-
-    return @{ repos = @($repos); unreadable = @($unreadable) }
 }
 
 Register-Finder -name 'repo-health' `
     -title 'Repo health: dirty, unpushed, unreadable' `
     -module 'hygiene' `
+    -walkGroup 'git-repos' `
     -auditOnly $true `
     -description 'For every discovered git repo: uncommitted changes, commits not on the upstream branch, and repos git itself refuses to read (dubious ownership, no upstream, or any other git failure) -- the last is the important state, not an edge case (bd aeu). No network access. Audit only; see bd vanish-uninstaller-pko.' `
     -handler {

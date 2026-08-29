@@ -1,4 +1,4 @@
-# One walk of the disk must answer four questions, and give the SAME answers
+# One walk of the disk must answer several questions, and give the SAME answers
 # it gave when it was four walks (3l8).
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File test\shared-walk-verify.ps1
@@ -85,8 +85,8 @@ if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -For
 $null = New-Item -ItemType Directory -Path $work -Force
 
 Write-Host ''
-Write-Host 'Vanish shared tree walk (3l8)' -ForegroundColor Cyan
-Write-Host '============================='
+Write-Host 'Vanish shared tree walk (3l8, lxl)' -ForegroundColor Cyan
+Write-Host '=================================='
 
 try {
     New-Fixture -base $work
@@ -203,6 +203,88 @@ try {
         Assert-True ($j.dirsVisited -eq 1) "the junction is not followed, so a self-referencing tree terminates ($($j.dirsVisited) directories visited)"
         Assert-True ($j.capped -eq $false) 'and it terminates by finishing rather than by hitting the cap'
     }
+
+
+    # ==================================================================
+    Write-Host ''
+    Write-Host 'Entry names: a .git that is a FILE is still a repo (lxl)' -ForegroundColor Cyan
+    # markerNames only ever matches a child that is a file, which is right for
+    # package.json and wrong for a repo root. An ordinary clone has a .git
+    # DIRECTORY; a submodule or a linked worktree has a .git FILE. Both are
+    # repos, and a scan that finds only one kind reports the other as absent -
+    # which is aeu's defect, not a coverage gap.
+    $gitBase = Join-Path $work 'gitfix'
+    $null = New-Item -ItemType Directory -Path (Join-Path $gitBase 'clone\.git\objects') -Force
+    Set-Content -LiteralPath (Join-Path $gitBase 'clone\.git\HEAD') -Value 'ref: refs/heads/main' -Encoding ASCII
+    Set-Content -LiteralPath (Join-Path $gitBase 'clone\readme.txt') -Value 'x' -Encoding ASCII
+    $null = New-Item -ItemType Directory -Path (Join-Path $gitBase 'worktree') -Force
+    Set-Content -LiteralPath (Join-Path $gitBase 'worktree\.git') -Value 'gitdir: ../clone/.git/worktrees/wt' -Encoding ASCII
+    $null = New-Item -ItemType Directory -Path (Join-Path $gitBase 'plain\sub') -Force
+    Set-Content -LiteralPath (Join-Path $gitBase 'plain\sub\file.txt') -Value 'x' -Encoding ASCII
+
+    $harvest = Get-SharedWalkHarvest
+    Assert-True (@($harvest.entryNames) -contains '.git') "'.git' is registered as an ENTRY name, not a marker name" "entryNames=$(@($harvest.entryNames) -join ',')"
+    Assert-True (-not (@($harvest.markers) -contains '.git')) "and NOT as a marker name - a marker would miss every ordinary clone"
+
+    Clear-SharedWalkCache
+    $gw = Invoke-SharedTreeWalk -root $gitBase -maxDepth 6 -maxDirs ([int]::MaxValue) -skipDirs @('.git')
+    $gitFound = @($gw.entries['.git'])
+    Assert-True (@($gitFound).Count -eq 2) "two repos found under the fixture, not one" "found: $(@($gitFound) -join ' | ')"
+    Assert-True (@($gitFound | Where-Object { $_ -like '*clone' }).Count -eq 1) 'the ordinary clone (.git is a DIRECTORY) is found'
+    Assert-True (@($gitFound | Where-Object { $_ -like '*worktree' }).Count -eq 1) 'the linked worktree (.git is a FILE) is found too'
+    Assert-True (@($gitFound | Where-Object { $_ -like '*plain*' }).Count -eq 0) 'a directory with no .git at all is NOT reported as a repo'
+
+    # -skipDirs and -entryNames naming the same directory is the whole shape
+    # of the two walkers this replaced: count it, then refuse to walk into it.
+    # If .git were descended into, its own subdirectories would be visited and
+    # every one of them checked, which is where the original Where-Object went.
+    $insideGit = @($gitFound | Where-Object { $_ -like '*\.git*' })
+    Assert-True (@($insideGit).Count -eq 0) 'nothing INSIDE a .git directory is reported - it is counted, then not descended into' "leaked: $(@($insideGit) -join ' | ')"
+
+    # ==================================================================
+    Write-Host ''
+    Write-Host 'The two git finders share the walk with each other, and nothing else (lxl)' -ForegroundColor Cyan
+    # They cannot join the reclaim group: depth 6 against depth 8, no skip list
+    # against fifteen pruned names, and no directory cap against 15,000.
+    # Merging those would change WHAT IS COVERED, not how fast it is covered,
+    # so the cache key must keep them apart. This asserts the separation
+    # rather than trusting the parameters to stay put.
+    $reg = @($script:FinderRegistry)
+    $sgn = @($reg | Where-Object { $_.name -eq 'gitignored-unique' })[0]
+    $pko = @($reg | Where-Object { $_.name -eq 'repo-health' })[0]
+    $nod = @($reg | Where-Object { $_.name -eq 'reclaim-node' })[0]
+    Assert-True ($null -ne $sgn -and $null -ne $pko) 'both git finders are registered'
+    Assert-True ($sgn.walkGroup -eq 'git-repos') "gitignored-unique is in walk group 'git-repos'" "got '$($sgn.walkGroup)'"
+    Assert-True ($pko.walkGroup -eq 'git-repos') "repo-health is in the same group - so the renderer sends them in ONE engine call" "got '$($pko.walkGroup)'"
+    Assert-True ($nod.walkGroup -ne $sgn.walkGroup) 'and the reclaim group is a DIFFERENT group - a different depth and skip list is a different question' "reclaim='$($nod.walkGroup)' git='$($sgn.walkGroup)'"
+
+    # The memo, tested as a memo, exactly as the reclaim group is above: delete
+    # a repo between the two calls. A cache that is really being hit returns
+    # the STALE answer, and a stale answer here is the proof. If the second
+    # finder walked again it would see three repos, not four.
+    $memoBase = Join-Path $work 'gitmemo'
+    foreach ($n in @('r1', 'r2', 'r3', 'r4')) {
+        $null = New-Item -ItemType Directory -Path (Join-Path $memoBase "$n\.git") -Force
+        Set-Content -LiteralPath (Join-Path $memoBase "$n\.git\HEAD") -Value 'ref: refs/heads/main' -Encoding ASCII
+    }
+    Clear-SharedWalkCache
+    $first = Find-SgnGitRepoRoots -root $memoBase -maxDepth 6
+    Assert-True (@($first.repos).Count -eq 4) 'the first git finder sees four repos' "saw $(@($first.repos).Count)"
+    Remove-Item -LiteralPath (Join-Path $memoBase 'r4') -Recurse -Force
+    $second = Find-PkoGitRepoRoots -root $memoBase -maxDepth 6
+    Assert-True (@($second.repos).Count -eq 4) 'the second git finder still sees four after one was deleted - it was served from the cache, it did not walk' "saw $(@($second.repos).Count); if this is 3 the two finders are still walking twice"
+    Clear-SharedWalkCache
+    $third = Find-PkoGitRepoRoots -root $memoBase -maxDepth 6
+    Assert-True (@($third.repos).Count -eq 3) 'and after Clear-SharedWalkCache it sees three - the cache clears between scans, so a second scan is not the first scan replayed' "saw $(@($third.repos).Count)"
+
+    # Both finders must return the SAME set, which is the premise of grouping
+    # them. Compared as sets, not counts: two different sets of equal size
+    # would pass a count check and be wrong.
+    Clear-SharedWalkCache
+    $sgnRepos = @((Find-SgnGitRepoRoots -root $memoBase -maxDepth 6).repos | Sort-Object)
+    $pkoRepos = @((Find-PkoGitRepoRoots -root $memoBase -maxDepth 6).repos | Sort-Object)
+    Assert-True (($sgnRepos -join '|') -eq ($pkoRepos -join '|')) 'the two finders get identical repo sets, which is what makes one walk legitimate' "sgn=$($sgnRepos -join ',') pko=$($pkoRepos -join ',')"
+    Assert-True (@($sgnRepos).Count -gt 0) 'and the set is not empty - without this the comparison above is empty-equals-empty'
 
     # ==================================================================
     Write-Host ''

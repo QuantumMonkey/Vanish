@@ -58,6 +58,13 @@ const HYGIENE_CONCURRENCY = 3;
 // exactly zero. Measured on the operator's machine: 66.2 s as four calls,
 // 28.2 s as one, with byte-identical findings on both sides.
 //
+// There are two such groups (lxl). The reclaim checks read the home
+// directory to depth 8 with fifteen names pruned; the two git checks read
+// it to depth 6 with nothing pruned and no directory cap. Those are
+// different questions about the same disk, so they are two walks and two
+// groups -- merging them would change what is covered rather than how
+// fast it is covered.
+//
 // The grouping is NOT hardcoded here. The engine reports each finder's
 // walkGroup (Register-Finder in finders/_loader.ps1), so a fifth finder
 // joining the shared walk changes no renderer code and cannot be forgotten
@@ -66,7 +73,7 @@ const HYGIENE_CONCURRENCY = 3;
 // WHAT GROUPING COSTS, because it does cost something: the four report
 // together instead of one at a time. That is exactly why only finders that
 // genuinely share a walk are grouped. The progressive checklist is the
-// reason this panel makes ten calls instead of one in the first place,
+// reason this panel makes nine calls instead of one in the first place,
 // and trading it away where there is no walk to share would be paying the
 // price for none of the benefit.
 function hygieneWalkUnits(finders) {

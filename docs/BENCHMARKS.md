@@ -62,7 +62,7 @@ never by the process refresh loop. The pre-warm mitigation described in
 
 ---
 
-## Run 002 - 2026-08-29 - developer machine, Machine Hygiene panel (lhf, 3l8)
+## Run 002 - 2026-08-29 - developer machine, Machine Hygiene panel (lhf, 3l8, lxl)
 
 | Condition | Value |
 |---|---|
@@ -71,6 +71,7 @@ never by the process refresh loop. The pre-warm mitigation described in
 | Storage | NVMe SSD |
 | Home directory | `C:\Users\Anand`, walk capped at 15,000 directories |
 | Markers found in one walk | 232 `package.json`, 508 `pubspec.yaml`, 1 `gradlew`, 44 `.zip` |
+| Repositories found in one walk | 14 (the two git checks, depth 6) |
 | Windows | Windows 11 Pro, build 26200 |
 | Run type | Warm (the same tree walked immediately beforehand) |
 | Elevation | Audit Mode |
@@ -121,6 +122,46 @@ Findings were compared on both sides, per check, and are identical -- state,
 counts, byte totals and finding ids. That comparison is
 `test/shared-walk-verify.ps1`, not a note in a commit message.
 
+### The two git walks, and what sharing them exposed (lxl)
+
+| Measurement | Value |
+|---|---|
+| `gitignored-unique` and `repo-health`, two walks, back to back | 60.0 s |
+| The same two, one shared walk | **6.6 s** |
+| Of which the second check | 1 ms (served from the memo) |
+| Directories listed, before | 31,921 |
+| Directories listed, after | 8,645 |
+
+Reading, and it is not the reading that was expected. Sharing the walk was
+supposed to remove one of the two walks, so about half. It removed nine tenths,
+because the old walk was not doing the work twice -- it was doing it about
+four times.
+
+`My Documents`, `Local Settings` and `Application Data` are junctions in every
+Windows home directory. The two git walkers used `Get-ChildItem -Directory`
+with no reparse-point test, so they descended through all three and found the
+same repositories again under each alias:
+
+| | paths reported | real directories |
+|---|---|---|
+| before | 27 | 14 |
+| after | **14** | 14 |
+
+Thirteen of the 27 were a second name for one already in the list. Five
+projects under `Documents\GitHub` appeared twice; several under
+`AppData\Local\Temp` appeared four times. The depth-6 limit was the only thing
+keeping that finite.
+
+Nothing real was lost, and that is the claim the change rests on, so it is
+measured rather than argued: every one of the 13 dropped paths is opened with
+`GetFinalPathNameByHandle` and resolved to a directory still in the list. The
+run also asserts it found repositories at all, because two empty sets match
+each other and prove nothing.
+
+Reproduce with `powershell -NoProfile -ExecutionPolicy Bypass -File
+test\sandbox\git-walk-equivalence-probe.ps1`. It walks the real home directory
+twice each way and takes about two minutes.
+
 ### The whole panel, all three schedulings, in one run
 
 Thirteen checks, three at a time, only the queue differing. One run so the
@@ -144,7 +185,40 @@ The floor is unchanged and is now the whole story: `duplicate-content` is the
 slowest unit in all three runs at 54-60 s. No amount of concurrency goes below
 one check, and that check hashes file contents.
 
+### The whole panel again, with two walk groups instead of one
+
+Re-run after `lxl` added the second group. Same probe, same three schedulings,
+one run -- and a DIFFERENT run from the table above, so read down this table,
+never across the two. This machine was about 14% slower on this pass (the same
+0.9.1 configuration measures 122.1 s here against 107.2 s there), which is
+exactly why each table is taken in a single run.
+
+| Scheduling | Engine calls | Wall clock | Summed engine time |
+|---|---|---|---|
+| one call per check, registry order | 13 | 122.1 s | 320.6 s |
+| shared walks, registry order | 9 | 82.2 s | 218.7 s |
+| shared walks, largest unit first | 9 | **81.8 s** | 210.4 s |
+
+**The scheduling change no longer buys anything measurable.** In the previous
+table, with ten units, largest-unit-first was worth 10.8 s. With nine units it
+is worth 0.4 s, which on this machine is noise. That is not a regression and
+the ordering stays -- it costs nothing and it is still the right shape when a
+group is genuinely the biggest job -- but the 10.8 s figure should not be
+quoted as if it still holds. It was a property of one particular unit count,
+which is what unit size being a proxy for duration means in practice
+(`vanish-uninstaller-4v8`).
+
+The floor also moved, and not because anything got slower: the slowest single
+unit is now `local-only-credentials` at 60.4 s rather than `duplicate-content`
+at 58-60 s. Those two are close enough that which one is "the floor" changes
+between runs, so the honest statement is that the scan is bounded by a pair of
+checks around a minute each, not by one named check.
+
 ### What the scheduling did NOT do
+
+From the FIRST of the two runs above, when there was one walk group and ten
+units. Kept because the shape of the problem outlasted the numbers, and it is
+what vanish-uninstaller-4v8 was filed on.
 
 It moved the tail; it did not remove it. Driving the real panel afterwards,
 the group now finishes at 50.6 s -- and `reclaim-package-caches`, a single
@@ -179,6 +253,7 @@ each other -- which is the error this file exists to avoid.
 
 ```
 powershell -NoProfile -ExecutionPolicy Bypass -File test\shared-walk-verify.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File test\sandbox\git-walk-equivalence-probe.ps1
 node test\sandbox\hygiene-scheduling-probe.js
 npx electron test\sandbox\hygiene-wallclock-probe.js
 ```

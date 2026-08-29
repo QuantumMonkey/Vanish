@@ -465,6 +465,18 @@ $script:SharedWalkCache = @{}
 $script:SharedWalkMarkers = [System.Collections.Generic.List[string]]::new()
 $script:SharedWalkExtensions = [System.Collections.Generic.List[string]]::new()
 
+# ENTRY NAMES are the third harvest kind, and they exist because '.git' is
+# usually a directory. A marker name only ever matches a child that is a
+# FILE, which is right for package.json and wrong for a repo root: a
+# submodule or a linked worktree has a '.git' FILE, an ordinary clone has a
+# '.git' DIRECTORY, and both are repos. An entry name matches either.
+#
+# It is collected BEFORE the reparse, skip-list and depth cuts, so naming a
+# directory in both -entryNames and -skipDirs reads as "count it, do not
+# walk into it" - which is exactly what the two git finders expressed as a
+# Test-Path plus a Where-Object that dropped .git from the children.
+$script:SharedWalkEntryNames = [System.Collections.Generic.List[string]]::new()
+
 function Register-SharedWalkHarvest {
     <#
     .SYNOPSIS
@@ -481,7 +493,8 @@ function Register-SharedWalkHarvest {
     #>
     param(
         [string[]]$markerNames = @(),
-        [string[]]$extensions = @()
+        [string[]]$extensions = @(),
+        [string[]]$entryNames = @()
     )
 
     foreach ($m in @($markerNames)) {
@@ -491,6 +504,10 @@ function Register-SharedWalkHarvest {
     foreach ($e in @($extensions)) {
         if ([string]::IsNullOrWhiteSpace($e)) { continue }
         if (-not ($script:SharedWalkExtensions -contains $e)) { $script:SharedWalkExtensions.Add($e) }
+    }
+    foreach ($n in @($entryNames)) {
+        if ([string]::IsNullOrWhiteSpace($n)) { continue }
+        if (-not ($script:SharedWalkEntryNames -contains $n)) { $script:SharedWalkEntryNames.Add($n) }
     }
 }
 
@@ -504,6 +521,7 @@ function Get-SharedWalkHarvest {
     return @{
         markers    = @($script:SharedWalkMarkers)
         extensions = @($script:SharedWalkExtensions)
+        entryNames = @($script:SharedWalkEntryNames)
     }
 }
 
@@ -529,14 +547,15 @@ function Invoke-SharedTreeWalk {
     .OUTPUTS
         @{
             markers     = @{ 'package.json' = @(directory paths); ... }
+            entries     = @{ '.git' = @(directory paths); ... }
             files       = @{ '.zip' = @(FileInfo); ... }
             unreadable  = @(New-Unreadable records)
             dirsVisited = [int]
             capped      = [bool]
         }
 
-        markers is keyed by every registered name and files by every
-        registered extension, both present even when empty - so a caller
+        markers and entries are keyed by every registered name, files by
+        every registered extension, all present even when empty - so a caller
         reading a key it registered never gets $null, and never has to tell
         "collected nothing" apart from "was not collected".
 
@@ -567,6 +586,7 @@ function Invoke-SharedTreeWalk {
 
     $markerNames = @($script:SharedWalkMarkers)
     $extensions  = @($script:SharedWalkExtensions)
+    $entryNames  = @($script:SharedWalkEntryNames)
 
     # Sorted and lower-cased so two finders passing the same skip list in a
     # different order share one walk rather than each paying for their own -
@@ -574,7 +594,8 @@ function Invoke-SharedTreeWalk {
     $skipKey    = (@($skipDirs | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
     $markerKey  = (@($markerNames | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
     $extKey     = (@($extensions | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
-    $key = ($root.TrimEnd('\', '/').ToLowerInvariant() + "|d$maxDepth|c$maxDirs|" + $skipKey + '|' + $markerKey + '|' + $extKey)
+    $entryKey   = (@($entryNames | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object) -join '|')
+    $key = ($root.TrimEnd('\', '/').ToLowerInvariant() + "|d$maxDepth|c$maxDirs|" + $skipKey + '|' + $markerKey + '|' + $extKey + '|' + $entryKey)
 
     if ($script:SharedWalkCache.ContainsKey($key)) { return $script:SharedWalkCache[$key] }
 
@@ -582,6 +603,8 @@ function Invoke-SharedTreeWalk {
     foreach ($m in $markerNames) { $markers[$m] = [System.Collections.Generic.List[string]]::new() }
     $files = @{}
     foreach ($e in $extensions) { $files[$e] = [System.Collections.Generic.List[object]]::new() }
+    $entries = @{}
+    foreach ($n in $entryNames) { $entries[$n] = [System.Collections.Generic.List[string]]::new() }
 
     $unreadable  = [System.Collections.Generic.List[object]]::new()
     $dirsVisited = 0
@@ -610,6 +633,16 @@ function Invoke-SharedTreeWalk {
         }
 
         foreach ($child in $children) {
+            # Ahead of every cut below, and deliberately: an entry name is
+            # collected whether the child is a file or a directory, and
+            # whether or not the walk is about to refuse to descend into it.
+            if ($entryNames.Count -gt 0) {
+                $cname = $child.Name
+                foreach ($n in $entryNames) {
+                    if ($cname -eq $n) { $entries[$n].Add($cur.Path); break }
+                }
+            }
+
             if (-not $child.PSIsContainer) {
                 $name = $child.Name
                 foreach ($m in $markerNames) {
@@ -634,9 +667,12 @@ function Invoke-SharedTreeWalk {
     foreach ($m in $markerNames) { $flatMarkers[$m] = @($markers[$m]) }
     $flatFiles = @{}
     foreach ($x in $extensions) { $flatFiles[$x] = @($files[$x]) }
+    $flatEntries = @{}
+    foreach ($n in $entryNames) { $flatEntries[$n] = @($entries[$n]) }
 
     $result = @{
         markers     = $flatMarkers
+        entries     = $flatEntries
         files       = $flatFiles
         unreadable  = @($unreadable)
         dirsVisited = $dirsVisited

@@ -105,57 +105,48 @@ function script:Invoke-SgnGit {
 # is real and not rare, and stopping at the first '.git' would silently
 # drop it from a scan whose entire purpose is not missing local-only data.
 # ------------------------------------------------------------------------
+# lxl: a repo root is a directory holding a .git ENTRY - a directory in an
+# ordinary clone, a FILE in a submodule or a linked worktree. -entryNames
+# matches either, which -markerNames (files only) cannot. Declared at file
+# scope so the union is complete before the first walk runs.
+Register-SharedWalkHarvest -entryNames @('.git')
+
 function script:Find-SgnGitRepoRoots {
+    <#
+    .SYNOPSIS
+        Directories holding a .git entry, taken from the shared walk.
+
+    .DESCRIPTION
+        lxl: this walk and the one in the other git finder were the same
+        walk written twice - same root, same default depth, same .git
+        test, same refusal to descend into .git. They are now one call to
+        Invoke-SharedTreeWalk and the second finder to ask is served from
+        its cache.
+
+        maxDirs is [int]::MaxValue deliberately. The two walks this
+        replaces had NO directory cap, unlike the reclaim group, and
+        capping them here would quietly shrink what a repo scan covers.
+        Passing it explicitly also keeps this out of the reclaim group's
+        cache entry, which is the intent: depth 6 with nothing pruned is a
+        different question from depth 8 with fifteen names pruned, and
+        sharing those two would change coverage rather than speed.
+    #>
     param(
         [Parameter(Mandatory = $true)][string]$root,
         [int]$maxDepth = 6
     )
 
-    $repos      = [System.Collections.Generic.List[string]]::new()
-    $unreadable = [System.Collections.Generic.List[object]]::new()
-    $examined   = 0
-
     if (-not (Test-Path -LiteralPath $root -PathType Container -ErrorAction SilentlyContinue)) {
-        $unreadable.Add((New-Unreadable -path $root -reason 'root-missing' -detail 'The search root does not exist or is not a directory.'))
-        return @{ repos = @(); unreadable = @($unreadable); examined = 0 }
+        $missing = New-Unreadable -path $root -reason 'root-missing' -detail 'The search root does not exist or is not a directory.'
+        return @{ repos = @(); unreadable = @($missing); examined = 0 }
     }
 
-    $stack = New-Object System.Collections.Generic.Stack[object]
-    $stack.Push(@{ Path = $root; Depth = 0 })
-
-    while ($stack.Count -gt 0) {
-        $item  = $stack.Pop()
-        $dir   = $item.Path
-        $depth = $item.Depth
-        $examined++
-
-        $gitEntry = Join-Path $dir '.git'
-        if (Test-Path -LiteralPath $gitEntry -ErrorAction SilentlyContinue) {
-            $repos.Add($dir)
-        }
-
-        if ($depth -ge $maxDepth) { continue }
-
-        $err = $null
-        $children = @(Get-ChildItem -LiteralPath $dir -Directory -Force -ErrorAction SilentlyContinue -ErrorVariable +err |
-            Where-Object { $_.Name -ne '.git' })
-
-        # An access-denied here has NOT established the subtree is repo-free -
-        # the exact "silently skipped an entire store" failure from the real
-        # cleanup. -ErrorVariable is the only thing that keeps that error
-        # visible once -ErrorAction SilentlyContinue is in play.
-        foreach ($e in @($err)) {
-            if ($null -eq $e) { continue }
-            $target = if ($e.TargetObject) { [string]$e.TargetObject } else { $dir }
-            $unreadable.Add((New-Unreadable -path $target -reason 'access-denied' -detail $e.Exception.Message))
-        }
-
-        foreach ($c in $children) {
-            $stack.Push(@{ Path = $c.FullName; Depth = ($depth + 1) })
-        }
+    $walk = Invoke-SharedTreeWalk -root $root -maxDepth $maxDepth -maxDirs ([int]::MaxValue) -skipDirs @('.git')
+    return @{
+        repos      = @($walk.entries['.git'])
+        unreadable = @($walk.unreadable)
+        examined   = $walk.dirsVisited
     }
-
-    return @{ repos = @($repos); unreadable = @($unreadable); examined = $examined }
 }
 
 function script:Get-SgnPathBytes {
@@ -341,6 +332,7 @@ function script:Get-SgnRepoUniqueContent {
 Register-Finder -name 'gitignored-unique' `
     -title 'Gitignored and unique: what a re-clone would not bring back' `
     -module 'rescue' `
+    -walkGroup 'git-repos' `
     -auditOnly $true `
     -description 'For every git repo under the given roots, lists everything the remote does not have: gitignored/untracked files, never-added files, uncommitted changes to tracked files, commits ahead of upstream, unpushed branches, and stashes. Read-only, no network access.' `
     -handler {
