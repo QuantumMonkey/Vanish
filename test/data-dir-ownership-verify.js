@@ -53,6 +53,15 @@ function assert(condition, label, detail = '') {
   }
 }
 
+// A condition this machine cannot BUILD is not a condition this machine
+// FAILED. Asserting the first case makes a clean-machine run red for
+// reasons that are not defects, and a gate whose failures have to be
+// explained away one by one stops being a gate (bd pnor, and the first
+// unattended sandbox run that produced this helper).
+function assertOrSkip(condition, label, whyNot) {
+  if (condition) { assert(true, label); } else { skip(label, whyNot); }
+}
+
 function skip(label, why) {
   console.log(`  SKIP  ${label}`);
   console.log(`        ${why}`);
@@ -145,7 +154,12 @@ try {
     store.addManifestEntry({ id: store.newId(), status: 'quarantined', control: true });
     const afterUnfixed = engine('check-data-dir', { path: stateDir });
     const reproduced = afterUnfixed.protected === false;
-    assert(
+    // The block below ALREADY treats an unreproducible control as "this
+    // machine does not exhibit isp" and skips the real assertion for it.
+    // Asserting it here as well turned that into a red line on the first
+    // clean-machine run, where the account is an Administrator with UAC off
+    // and the protection simply cannot be broken. Cannot-test is a skip.
+    assertOrSkip(
       reproduced,
       'NEGATIVE CONTROL: with the fix off, one manifest write breaks protection - so this suite can see the bug',
       `owner of manifest.json is now ${ownerOf(store.vaultRoot() + '\\manifest.json')}; ` +

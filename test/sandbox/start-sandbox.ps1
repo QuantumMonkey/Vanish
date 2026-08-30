@@ -25,7 +25,15 @@
 param(
     # Write and report the config without starting the VM. Lets the paths be
     # checked - and regression-tested - without a Sandbox boot.
-    [switch]$GenerateOnly
+    [switch]$GenerateOnly,
+
+    # Run the whole verification suite unattended after setup and leave the
+    # results on the HOST, under test\logs\sandbox-run. Without this the
+    # sandbox boots to a prompt and a human has to paste run-in-sandbox.ps1,
+    # which is fine for a debugging session and useless as a release gate:
+    # Rule 10 wants a clean-machine pass, and a pass that needs somebody at
+    # the keyboard does not get run often enough to be one.
+    [switch]$RunSuite
 )
 
 $ErrorActionPreference = 'Stop'
@@ -93,6 +101,14 @@ $logon = @(
     "New-Item -ItemType Directory -Force -Path `$b | Out-Null;",
     "Set-Content -LiteralPath (Join-Path `$b 'LOGON-RAN.txt') -Value ((Get-Date).ToString('s') + ' logon command reached the mapped folder after ' + `$n + 's');",
     "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\sandbox-setup.ps1')",
+    $(if ($RunSuite) {
+        # Sequential statements, no chaining operator: this whole payload is
+        # one -Command string inside an XML attribute value, and the last two
+        # silent failures of this hook were both punctuation.
+        "Write-Host 'Running the verification suite...' -ForegroundColor Cyan;" +
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\run-in-sandbox.ps1');" +
+        "Set-Content -LiteralPath (Join-Path `$b 'SUITE-DONE.txt') -Value ((Get-Date).ToString('s') + ' run-in-sandbox.ps1 returned');"
+    } else { '' })
     "} else {",
     "Write-Host 'The repo never appeared at $sandboxRepo after 120s.' -ForegroundColor Red;",
     "Write-Host 'The host folder is probably missing or was renamed. Nothing ran.' -ForegroundColor Red",

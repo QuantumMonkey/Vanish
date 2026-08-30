@@ -49,6 +49,11 @@ $scanner = Join-Path $root 'scanner.ps1'
 
 $script:pass = 0
 $script:fail = 0
+function Write-Skip {
+    param([string]$label)
+    Write-Host "  SKIP  $label" -ForegroundColor Yellow
+}
+
 function Assert-True {
     param([bool]$condition, [string]$label)
     if ($condition) { Write-Host "  PASS  $label" -ForegroundColor Green; $script:pass++ }
@@ -149,7 +154,23 @@ $out | ConvertTo-Json -Compress | Set-Content -LiteralPath $dest -Encoding ASCII
 
     if (Test-Path -LiteralPath $stage2Result) {
         $s2 = Get-Content -LiteralPath $stage2Result -Raw | ConvertFrom-Json
-        Assert-True ($s2.callerElevated -eq $false) 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing'
+        # The same rule the premise at the top of this file already follows,
+        # one level deeper. With EnableLUA=0 there is no filtered token to
+        # drop to, so the scheduled-task trick hands back an elevated
+        # process and this can never be false. Windows Sandbox ships that
+        # way, which is how the first clean-machine run produced a red line
+        # that meant "this image cannot host this test".
+        $lua = 1
+        try {
+            $lua = [int](Get-ItemProperty -Path 'HKLM:SOFTWAREMicrosoftWindowsCurrentVersionPoliciesSystem' -Name EnableLUA -ErrorAction Stop).EnableLUA
+        } catch { $lua = 1 }
+        if ($s2.callerElevated -eq $false) {
+            Assert-True $true 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing'
+        } elseif ($lua -eq 0) {
+            Write-Skip 'the de-elevated stage came back STILL elevated because UAC is off on this machine (EnableLUA=0), so there is no standard-user token to drop to. Turn UAC on and restart before treating this as a result.'
+        } else {
+            Assert-True $false 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing' 'UAC is ON here, so the drop should have worked - this is a real failure'
+        }
         Assert-True ($s2.engineSaid -match '"success":true') "the engine reported the relaunch succeeded (said: $($s2.engineSaid))"
     }
 

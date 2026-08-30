@@ -162,9 +162,26 @@ try {
         Assert-True (@($mine).Count -gt 0) `
             "the fixture produced findings to check ($(@($mine).Count) from $(@($finderNames).Count) check(s): $(@($finderNames) -join ', '))" `
             'without this, the invariant below passes vacuously'
-        Assert-True (@($finderNames).Count -ge 2) `
-            'and they come from more than one check, so the invariant is tested across walkers rather than one' `
-            "checks: $(@($finderNames) -join ', ')"
+        # CANNOT-TEST IS NOT FAILURE. The first clean-machine run of this
+        # suite failed here, and the product was fine: Windows Sandbox ships
+        # without git, so three of the four checks that walk this fixture
+        # could not run at all and only one was left to compare. A suite that
+        # reports FAIL when it means "this machine cannot build the condition"
+        # makes the release gate unreadable, which is the whole of bd pnor and
+        # 686 -- and I wrote this one the same morning I filed them.
+        #
+        # The distinction that matters: fewer than two walkers WITH git present
+        # is a real failure, because then something stopped reporting. Without
+        # git it is a machine that cannot host the test.
+        if (@($finderNames).Count -ge 2) {
+            Assert-True $true 'and they come from more than one check, so the invariant is tested across walkers rather than one'
+        } elseif (-not $hasGit) {
+            Write-Skip "only $(@($finderNames).Count) check(s) could run because git.exe is not on PATH - the git and credential checks need a real repository, so the invariant above was tested against one walker rather than several"
+        } else {
+            Assert-True $false `
+                'and they come from more than one check, so the invariant is tested across walkers rather than one' `
+                "git IS available, so this is a real gap: checks: $(@($finderNames) -join ', ')"
+        }
 
         # THE INVARIANT. Every reported path is resolved against the file
         # system; if what came back differs from what was reported, the finder
