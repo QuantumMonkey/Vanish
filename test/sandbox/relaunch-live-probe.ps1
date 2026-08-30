@@ -169,7 +169,7 @@ $out | ConvertTo-Json -Compress | Set-Content -LiteralPath $dest -Encoding ASCII
         } elseif ($lua -eq 0) {
             Write-Skip 'the de-elevated stage came back STILL elevated because UAC is off on this machine (EnableLUA=0), so there is no standard-user token to drop to. Turn UAC on and restart before treating this as a result.'
         } else {
-            Assert-True $false 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing' 'UAC is ON here, so the drop should have worked - this is a real failure'
+            Assert-True $false 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing (UAC is ON here, so the drop should have worked: this is a real failure)'
         }
         Assert-True ($s2.engineSaid -match '"success":true') "the engine reported the relaunch succeeded (said: $($s2.engineSaid))"
     }
