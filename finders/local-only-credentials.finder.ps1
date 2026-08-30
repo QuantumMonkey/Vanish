@@ -145,11 +145,26 @@ function script:Invoke-Ho2CredentialWalk {
     $repoRoots   = [System.Collections.Generic.List[string]]::new()
     $dirsVisited = 0
 
-    $stack = [System.Collections.Generic.Stack[object]]::new()
-    $stack.Push(@{ Path = $root; Depth = 0; RepoRoot = $null })
+    # 087y: a QUEUE, not a stack, so the directory budget is spent
+    # breadth-first. With a stack the budget goes into whichever branch the
+    # walk happened to enter first, and shallow siblings are never popped.
+    #
+    # Measured on the operator machine: D:Dependencies is a search root at
+    # all because Get-Ho2DefaultRoots proved it holds a repo one level down
+    # -- D:DependenciesFlutter has a .git. Depth-first, the 15,000
+    # directories went into D:DependenciesGradle (163,476 files) and
+    # Flutter was still sitting unvisited when the cap stopped the run. The
+    # root SELECTOR and the WALKER disagreed about the same directory.
+    #
+    # Breadth-first cannot fix a cap, and is not meant to: what it changes
+    # is WHICH directories you lose when you hit one. You lose the deepest,
+    # not whichever ones sorted late, and a project root one level under a
+    # search root is now always reached.
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+    $queue.Enqueue(@{ Path = $root; Depth = 0; RepoRoot = $null })
 
-    while ($stack.Count -gt 0) {
-        $cur = $stack.Pop()
+    while ($queue.Count -gt 0) {
+        $cur = $queue.Dequeue()
 
         if ($dirsVisited -ge $maxDirs) {
             # The cap itself is the aeu case, not an edge around it: a subtree
@@ -215,7 +230,7 @@ function script:Invoke-Ho2CredentialWalk {
                 if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
                 if ($script:Ho2PruneSegments -contains $child.Name) { continue }
                 if ($cur.Depth -ge $maxDepth) { continue }
-                $stack.Push(@{ Path = $child.FullName; Depth = $cur.Depth + 1; RepoRoot = $repoRootHere })
+                $queue.Enqueue(@{ Path = $child.FullName; Depth = $cur.Depth + 1; RepoRoot = $repoRootHere })
             }
         }
     }
@@ -348,6 +363,14 @@ Register-Finder -name 'local-only-credentials' `
         try { $maxDepth = [int](Get-FieldValue -record $p -name 'maxDepth' -default 8) } catch { $maxDepth = 8 }
         if ($maxDepth -le 0) { $maxDepth = 8 }
 
+        # 087y: maxDirs is a scan parameter exactly as maxDepth is, and for
+        # the same reason - it decides how much of the disk this check
+        # covers. It is settable so the CAP itself can be exercised without
+        # building 15,000 directories in a test fixture.
+        $maxDirs = 0
+        try { $maxDirs = [int](Get-FieldValue -record $p -name 'maxDirs' -default 15000) } catch { $maxDirs = 15000 }
+        if ($maxDirs -le 0) { $maxDirs = 15000 }
+
         if ($roots.Count -eq 0) {
             $roots = @(Get-Ho2DefaultRoots)
         }
@@ -379,7 +402,7 @@ Register-Finder -name 'local-only-credentials' `
                 continue
             }
 
-            $walk = Invoke-Ho2CredentialWalk -root $root -maxDepth $maxDepth
+            $walk = Invoke-Ho2CredentialWalk -root $root -maxDepth $maxDepth -maxDirs $maxDirs
             $dirsTotal += $walk.dirsVisited
             foreach ($u in $walk.unreadable) { $unreadable.Add($u) }
             $reposSeen += @($walk.repoRoots).Count

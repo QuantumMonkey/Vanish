@@ -46,8 +46,10 @@ function Invoke-Engine {
 }
 
 function Invoke-CredentialScan {
-    param([string[]]$scanRoots)
-    $scan = Invoke-Engine "hygiene-scan" @{ module = 'rescue'; finders = @('local-only-credentials'); roots = @($scanRoots) }
+    param([string[]]$scanRoots, [int]$maxDirs = 0)
+    $args = @{ module = 'rescue'; finders = @('local-only-credentials'); roots = @($scanRoots) }
+    if ($maxDirs -gt 0) { $args['maxDirs'] = $maxDirs }
+    $scan = Invoke-Engine "hygiene-scan" $args
     return @($scan.results | Where-Object { $_.finder -eq 'local-only-credentials' })[0]
 }
 
@@ -332,6 +334,63 @@ try {
                 "leaked: $($leaked -join ' | ')"
         }
     }
+
+    # ==================================================================
+    Write-Host ""
+    Write-Host "The directory budget is spent breadth-first (087y)" -ForegroundColor Cyan
+    # THE CASE THIS WAS FILED ON. D:\Dependencies is a search root because
+    # Get-Ho2DefaultRoots proved it holds a repo one level down. Depth-first,
+    # the 15,000-directory budget went into a 163,476-file package cache and
+    # D:\Dependencies\Flutter -- the .git that made it a root -- was never
+    # visited. The selector and the walker disagreed about the same directory.
+    #
+    # NAMES MATTER IN THIS FIXTURE. A stack pops the LAST child pushed, so a
+    # shallow sibling that sorts last would be found even depth-first. The deep
+    # chain is named to sort AFTER the shallow repo, so depth-first genuinely
+    # descends it first and exhausts the cap. Without that the test would pass
+    # against the old code and prove nothing.
+    $capRoot = Join-Path $work "capprobe"
+    $shallow = Join-Path $capRoot "a-shallow"
+    $null = New-Item -ItemType Directory -Path $shallow -Force
+    Push-Location $shallow
+    $capEap = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        $null = & git.exe init 2>&1
+        $null = & git.exe config user.email "t@example.com" 2>&1
+        $null = & git.exe config user.name "t" 2>&1
+        Set-Content -LiteralPath (Join-Path $shallow ".gitignore") -Value ".env" -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $shallow ".env") -Value "SECRET=1" -Encoding ASCII
+        $null = & git.exe add .gitignore 2>&1
+        $null = & git.exe commit -m init 2>&1
+    } finally { $ErrorActionPreference = $capEap; Pop-Location }
+
+    $chain = Join-Path $capRoot "z-deep"
+    $cur = $chain
+    for ($i = 0; $i -lt 12; $i++) {
+        $cur = Join-Path $cur "level$i"
+        $null = New-Item -ItemType Directory -Path $cur -Force
+    }
+
+    # A budget small enough that a depth-first walk down z-deep never reaches
+    # a-shallow. maxDirs is a scan parameter exactly as maxDepth is.
+    $capped = Invoke-CredentialScan -scanRoots @($capRoot) -maxDirs 5
+    $capPaths = @(@($capped.findings) | ForEach-Object { [string]$_.path })
+    Assert-True (@($capPaths | Where-Object { $_ -like "*a-shallow*" }).Count -eq 1) `
+        "a repo one level under the search root is found even when the budget runs out" `
+        "found: $($capPaths -join ' | ')"
+    Assert-True (@($capped.unreadable | Where-Object { $_.reason -eq 'scan-capped' }).Count -gt 0) `
+        "and the run still reports itself capped, so nothing is claimed about what it did not reach"
+
+    # The control. Breadth-first changes WHICH directories a cap costs you; it
+    # must not change the answer when there is no cap.
+    $uncapped = Invoke-CredentialScan -scanRoots @($capRoot)
+    $unPaths = @(@($uncapped.findings) | ForEach-Object { [string]$_.path } | Sort-Object)
+    Assert-True (@($uncapped.unreadable | Where-Object { $_.reason -eq 'scan-capped' }).Count -eq 0) `
+        "premise: the same fixture is NOT capped at the default budget"
+    Assert-True (@($unPaths | Where-Object { $_ -like "*a-shallow*" }).Count -eq 1) `
+        "and uncapped it reports the same repo, once" `
+        "found: $($unPaths -join ' | ')"
 }
 finally {
     Remove-Ho2TestTree $work
