@@ -97,7 +97,7 @@ Indicators displayed in the Task Manager view (Stage 3):
 
 1. **Suspicious Process Trees**: Flags office applications or document viewers spawning command interpreters (`cmd.exe`, `powershell.exe`, `wscript.exe`).
 2. **Destructive Command Patterns**: Flags active processes issuing known destructive commands (e.g. `vssadmin delete shadows`, host file edits).
-3. **Persistence Path Display**: Lists entries found in known persistence locations (Registry Run keys, Task Scheduler, AppInit_DLLs, Winlogon Shell) for user review — not auto-removal.
+3. **Persistence Path Display**: Lists entries found in known persistence locations (Registry Run keys, Task Scheduler, AppInit_DLLs, Winlogon Shell) for user review -- not auto-removal.
 
 All findings are labelled as "indicators to investigate with your antivirus." Vanish surfaces; AV decides.
 
@@ -127,7 +127,7 @@ Vanish targets a lightweight, non-intrusive system footprint. The figures below 
 
 Vanish operates in one of two capability tiers depending on elevation state:
 
-- **Audit Mode** (unelevated): Read-only. App listing, scan result display, and report generation are available. No destructive operations. UI displays a persistent banner: *"Running in Audit Mode — elevate to enable cleaning and uninstallation."*
+- **Audit Mode** (unelevated): Read-only. App listing, scan result display, and report generation are available. No destructive operations. UI displays a persistent banner: *"Running in Audit Mode -- elevate to enable cleaning and uninstallation."*
 - **Full Mode** (elevated): All features available.
 
 If the user declines the UAC prompt, Vanish falls back to Audit Mode gracefully. It never silently exits or crashes on a declined elevation request. See `docs/promptgate.md` Rule 3.

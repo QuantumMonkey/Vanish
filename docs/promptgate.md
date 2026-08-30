@@ -1,6 +1,6 @@
 # Vanish: Promptgate
 
-This document is a hard decision gate. Every feature plan, prompt, spec, implementation decision, and documentation change must be validated against these rules before any work begins. It is stateless — it does not depend on conversation history or context surviving a rotation. Run every decision through it fresh.
+This document is a hard decision gate. Every feature plan, prompt, spec, implementation decision, and documentation change must be validated against these rules before any work begins. It is stateless -- it does not depend on conversation history or context surviving a rotation. Run every decision through it fresh.
 
 **If a proposed action violates any rule below, stop and resolve the violation first.**
 
@@ -8,7 +8,7 @@ This document is a hard decision gate. Every feature plan, prompt, spec, impleme
 
 ## ARCHITECTURE
 
-### Rule 1 — Discovery Depth and Deletion Policy are independent controls
+### Rule 1 -- Discovery Depth and Deletion Policy are independent controls
 Never couple how aggressively Vanish searches with how automatically it deletes. These are two separate axes:
 
 - **Discovery Depth** (Safe / Moderate / Advanced): controls how far the search goes.
@@ -18,7 +18,7 @@ A user must be able to run Advanced discovery and still review every finding bef
 
 ---
 
-### Rule 2 — Quarantine-first. Never direct deletion.
+### Rule 2 -- Quarantine-first. Never direct deletion.
 No destructive operation in Vanish deletes directly. Every removal follows this sequence:
 
 1. Files: move to a versioned quarantine vault.
@@ -30,26 +30,26 @@ This applies without exception to: MSI caches, WMI entries, orphaned services, S
 
 ---
 
-### Rule 3 — Elevation tiers: Audit Mode and Full Mode
+### Rule 3 -- Elevation tiers: Audit Mode and Full Mode
 Vanish operates in one of two capability tiers:
 
 - **Audit Mode** (unelevated): Read-only. App listing, scan results, and report generation only. No destructive operations.
 - **Full Mode** (elevated): All features available.
 
-If UAC is declined, Vanish falls back to Audit Mode gracefully. It never silently exits or crashes on a declined elevation prompt. The UI must display a persistent banner in Audit Mode: *"Running in Audit Mode — elevate to enable cleaning and uninstallation."*
+If UAC is declined, Vanish falls back to Audit Mode gracefully. It never silently exits or crashes on a declined elevation prompt. The UI must display a persistent banner in Audit Mode: *"Running in Audit Mode -- elevate to enable cleaning and uninstallation."*
 
 Any feature that assumes Full Mode without checking elevation state is rejected.
 
 ---
 
-### Rule 4 — Zero bundled definition files
+### Rule 4 -- Zero bundled definition files
 Vanish core ships with no BCU heuristic rules, no CleanerML definitions, no YARA rule files. These are downloaded separately as community definition packs at user request. The application binary and the definition packs are always architecturally separate. This maintains a clean GPL boundary and protects any future proprietary tier.
 
 Any PR or implementation that bundles definition files into the application package is rejected.
 
 ---
 
-### Rule 5 — YARA: engine only, user-supplied rules
+### Rule 5 -- YARA: engine only, user-supplied rules
 Vanish ships the YARA binary for execution. It does not ship rule files. Users supply their own `.yar` files into a designated rules directory. Vanish provides the runner and directory watcher. This approach carries zero rule licensing liability.
 
 Any plan to bundle YARA rule sets (including Elastic, community GitHub sets, or any other source) is rejected unless each rule file's license has been individually reviewed and cleared.
@@ -58,7 +58,7 @@ Any plan to bundle YARA rule sets (including Elastic, community GitHub sets, or 
 
 ## THREAT INTELLIGENCE (PERMANENTLY CUT)
 
-### Rule 6 — No cloud-based threat lookups. No submission features.
+### Rule 6 -- No cloud-based threat lookups. No submission features.
 The following are permanently out of scope for Vanish:
 
 - Cloud hash lookups against MalwareBazaar, VirusTotal, or any external threat database.
@@ -115,14 +115,14 @@ ends up disabling something that mattered.
 
 ---
 
-### Rule 7 — Behavioral heuristics: passive, local, display-only
+### Rule 7 -- Behavioral heuristics: passive, local, display-only
 The behavioral pattern detection that remains in scope is:
 
 - Suspicious process tree flagging (e.g. Office apps spawning `cmd.exe` or `powershell.exe`).
 - Destructive command detection (e.g. `vssadmin delete shadows`, host file edits).
 - Persistence path display (Registry Run keys, Task Scheduler, AppInit_DLLs, Winlogon Shell).
 
-All of these are **passive**, **local**, and **display-only**. Vanish shows the indicator. No automated action is taken. Findings are labelled: *"Indicator — investigate with your antivirus."*
+All of these are **passive**, **local**, and **display-only**. Vanish shows the indicator. No automated action is taken. Findings are labelled: *"Indicator -- investigate with your antivirus."*
 
 This feature lives inside the Stage 3 Task Manager view. It is not a standalone threat engine.
 
@@ -130,7 +130,7 @@ This feature lives inside the Stage 3 Task Manager view. It is not a standalone 
 
 ## LANGUAGE & CLAIMS
 
-### Rule 8 — "100% complete rollback" is banned language
+### Rule 8 -- "100% complete rollback" is banned language
 Never use the phrase "100% complete rollback" in documentation, UI copy, marketing, or code comments.
 
 The correct framing is: **"best-effort installation audit with quarantine-based reversion."**
@@ -139,7 +139,7 @@ Document explicitly wherever rollback is discussed: asynchronous installer side-
 
 ---
 
-### Rule 9 — Performance figures are design targets until validated
+### Rule 9 -- Performance figures are design targets until validated
 All performance figures (startup time, scan throughput, memory footprint) are labelled as **"Design Targets"** in `docs/architecture.md` until validated.
 
 Validated benchmarks go in `BENCHMARKS.md` with these test conditions documented per run:
@@ -154,19 +154,19 @@ Never present unvalidated numbers as measured facts.
 
 ---
 
-### Rule 10 — "Complete" means tested, not coded
+### Rule 10 -- "Complete" means tested, not coded
 A feature is only marked Complete in `CHANGELOG.md` when it has been manually
 verified beyond "the local suite passes." Coded and passing local tests is
 "In Progress."
 
 **Amended 2026-08-12.** This rule originally required a clean Windows 10
-(1607+) and Windows 11 VM pass, and pointed at `docs/handoff.md` — a file now
+(1607+) and Windows 11 VM pass, and pointed at `docs/handoff.md` -- a file now
 archived under `docs/history/`. Both parts are superseded:
 
 - **The verification bar for 1.0** is Windows Sandbox plus real operator use.
   The clean-VM gate was waived by explicit decision (bd `0xt` closed), with
   the cost recorded in `docs/PRE-RELEASE.md` and stated publicly in README's
-  Known limitations. The rule is not deleted — it is met by a *named, weaker
+  Known limitations. The rule is not deleted -- it is met by a *named, weaker
   standard whose weakness is written down*, which is the honest version of
   waiving it.
 - **Status lives in bd and `CHANGELOG.md`**, never in a handoff file.
@@ -181,7 +181,7 @@ A feature or stage is only marked Complete in `docs/handoff.md` or `CHANGELOG.md
 
 ## LICENSING
 
-### Rule 11 — Check the license before touching any FOSS tool
+### Rule 11 -- Check the license before touching any FOSS tool
 Before referencing, borrowing concepts from, or structuring output similar to any FOSS project, verify its license. The minimum check:
 
 | License | What it means for Vanish |
@@ -211,14 +211,14 @@ If a tool is not on this list, look it up before using it. Add it to `research.m
 
 ---
 
-### Rule 12 — Dual-licensing requires legal review before implementation
+### Rule 12 -- Dual-licensing requires legal review before implementation
 If a proprietary Pro tier is ever pursued, get a legal review of the GPL boundary before writing a single line of Pro-specific code. The definitions loader architecture (Rule 4) is the primary boundary mechanism. Do not assume the separation is clean without professional review.
 
 ---
 
 ## ELEVATION & SECURITY
 
-### Rule 13 — Use WindowsPrincipal for elevation checks. Not `net session`.
+### Rule 13 -- Use WindowsPrincipal for elevation checks. Not `net session`.
 All elevation state detection uses:
 ```powershell
 [Security.Principal.WindowsPrincipal]::new(
@@ -232,7 +232,7 @@ This applies to the implementation code and all documentation references.
 
 ---
 
-### Rule 14 — Code signing is a hard release gate
+### Rule 14 -- Code signing is a hard release gate
 Unsigned builds are for local development only. No unsigned binary is distributed externally under any circumstances, including pre-release and beta builds.
 
 Distribution requirements:
@@ -260,7 +260,7 @@ Log which method succeeded per app to improve the corrections database over time
 
 ## ROADMAP EXECUTION
 
-### Rule 16 — Respect stage priority tiers. No skipping ahead.
+### Rule 16 -- Respect stage priority tiers. No skipping ahead.
 
 | Tier | Stages | Condition |
 |------|--------|-----------|
@@ -272,7 +272,7 @@ Do not begin Standard work until all Core stages are complete and tested per Rul
 
 ---
 
-### Rule 17 — Stage 10 (DCOM/WMI Cleanup) requires mandatory UI review gate
+### Rule 17 -- Stage 10 (DCOM/WMI Cleanup) requires mandatory UI review gate
 Auto-deletion of WMI entries is permanently disabled by default. The Stage 10 implementation must:
 
 1. Display an expandable list of every found entry with full path and description.
@@ -286,12 +286,12 @@ This rule exists because WMI namespace corruption is difficult to diagnose and r
 
 ## DOCUMENTATION
 
-### Rule 18 — No local filesystem paths in any doc file
+### Rule 18 -- No local filesystem paths in any doc file
 Local paths (e.g. `d:\path\to\vanish`) expose developer environment structure in a public repository and become stale immediately for contributors. Use the canonical GitHub URL for repository references.
 
 ---
 
-### Rule 19 — status lives in bd, not in a handoff file
+### Rule 19 -- status lives in bd, not in a handoff file
 **Rewritten 2026-08-12.** This rule used to require the newest
 `docs/HANDOFF-YYYY-MM-DD.md` to carry per-file status indicators. That
 practice produced five files that each said "start here", and a session
@@ -300,7 +300,7 @@ do anything. All five are archived under `docs/history/` and are explicitly
 not to-do lists.
 
 Replaces it:
-- **Work status** is `bd` — `bd list --status=open`, `bd show <id>`. One issue
+- **Work status** is `bd` -- `bd list --status=open`, `bd show <id>`. One issue
   per unit of work, closed with the verification detail in the close reason.
 - **Scope** is `docs/PRE-RELEASE.md`, the single source of truth for what is
   in, what is cut, and why.
@@ -309,19 +309,19 @@ Replaces it:
 
 Do not create a new handoff file. If a narrative record of a session is
 genuinely warranted, it goes in `docs/history/` with a row added to that
-folder's README, and it still does not carry status — bd does.
+folder's README, and it still does not carry status -- bd does.
 - `*(Status: Stub)*`
 
 Without status indicators an LLM resuming work has no signal about what is implemented vs placeholder.
 
 ---
 
-### Rule 20 — the current dated handoff must reference `docs/roadmap.md` for Stages 6+
+### Rule 20 -- the current dated handoff must reference `docs/roadmap.md` for Stages 6+
 The Core-tier checklist in the newest `docs/HANDOFF-YYYY-MM-DD.md` must say explicitly that it covers Core tier stages only, and must direct any resuming agent to `docs/roadmap.md` for the full plan.
 
 ---
 
-### Rule 21 — All Mermaid blocks require the `mermaid` language tag
+### Rule 21 -- All Mermaid blocks require the `mermaid` language tag
 ````
 ```mermaid
 graph TD
@@ -332,19 +332,19 @@ Untagged blocks render as plaintext on GitHub. Any diagram block without the tag
 
 ---
 
-### Rule 22 — README.md must exist before any public sharing
+### Rule 22 -- README.md must exist before any public sharing
 A `README.md` at the repo root is required before any public announcement, social post, or link-sharing. Minimum content: project description, screenshot or UI preview, tech stack, elevated build/run instructions, links to docs. No README means no public sharing, full stop.
 
 ---
 
-### Rule 23 — "JavaScript" is always uppercased. "XML" is always uppercased.
+### Rule 23 -- "JavaScript" is always uppercased. "XML" is always uppercased.
 These are proper nouns and acronyms respectively. "Javascript" and "xml" in any doc file are typos.
 
 ---
 
 ## STATUS COMMUNICATION
 
-### Rule 24 — Ambiguous status must be classified before display
+### Rule 24 -- Ambiguous status must be classified before display
 Never surface a raw Windows status enum (PnP `Unknown`, driver state codes, service state codes, scan result codes) directly to the user. Classify it into a plain-language category with a benign/needs-review signal before it reaches any UI or report. A bare ambiguous status reads as alarming regardless of actual severity, and classification is a research step the app is already positioned to do -- deferring it to the user, or to an external tool, is a completed feature shipped as an unfinished one.
 
 This rule exists because a raw "Unknown" status covers wildly different real conditions (a benign ghost VSS snapshot record and a genuinely failed device look identical unclassified) -- the fix is one extra classification pass, not new capability, so there's no excuse for skipping it.

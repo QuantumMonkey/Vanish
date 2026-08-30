@@ -469,6 +469,219 @@ app.whenReady().then(async () => {
 
   // ------------------------------------------------------------------
   console.log('');
+  console.log('The decision bar recommends by COST, never by size (949)');
+
+  // The rule the whole bar exists for. A 14 GB package cache is the biggest
+  // number on the screen and the least consequential thing on it; a megabyte
+  // of uncommitted work is the opposite. A bar that led with the big number
+  // would be teaching the habit that loses people their data.
+  const costWins = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [
+      { module: 'reclaim', costClass: 'cheap', bytes: 14300000000 },
+      { module: 'rescue',  costClass: 'irreplaceable', bytes: 1 }
+    ],
+    unreadable: [], findingCount: 2, unreadableCount: 0, examinedCount: 9, totalBytes: 14300000001
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  assert(costWins.primary.id === 'go-rescue',
+    `one irreplaceable byte outranks 14 GB of cache (got '${costWins.primary.id}': ${costWins.primary.label})`);
+  assert(costWins.primary.enabled === true, 'and it is offered, not merely described');
+  assert(!/GB|MB|bytes/i.test(costWins.primary.label),
+    `the recommended click does not lead with a size (got '${costWins.primary.label}')`);
+
+  // 'unknown' is not 'cheap'. lib/findings.js sorts it last for the same
+  // reason: an unmeasured cost is not a zero one, and a bar that let it fall
+  // through to a bytes-led offer would put the most dangerous thing last.
+  const unknownWins = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [
+      { module: 'reclaim', costClass: 'cheap', bytes: 99000000000 },
+      { module: 'hygiene', costClass: 'unknown', bytes: 0 }
+    ],
+    unreadable: [], findingCount: 2, unreadableCount: 0, examinedCount: 4, totalBytes: 99000000000
+  }, { scanning: false, returned: 4, total: 4 }))()`);
+  assert(unknownWins.primary.id === 'go-unknown',
+    `an unmeasured cost outranks 99 GB of cache (got '${unknownWins.primary.id}')`);
+
+  // Only when nothing is hard to get back does the bar mention size at all.
+  const cheapOnly = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [{ module: 'reclaim', costClass: 'cheap', bytes: 2000000000 }],
+    unreadable: [], findingCount: 1, unreadableCount: 0, examinedCount: 3, totalBytes: 2000000000
+  }, { scanning: false, returned: 3, total: 3 }))()`);
+  assert(cheapOnly.primary.id === 'go-all', `with nothing costly, the offer is just to review (got '${cheapOnly.primary.id}')`);
+  const cleanBtn = cheapOnly.secondary.find((a) => a.id === 'open-clean');
+  // The bar headline says what ORDER to work in; the verdict block below says
+  // how many. The first version repeated the verdict's sentence verbatim,
+  // which was only obvious in a screenshot of the two together.
+  const bar_heads = await run(`(() => {
+    const F = window.VanishFindings;
+    const mk = (cls) => ({
+      state: F.UI_HAS_WORK,
+      findings: [{ module: 'reclaim', costClass: cls, bytes: 10 }],
+      unreadable: [], findingCount: 1, unreadableCount: 0, examinedCount: 2, totalBytes: 10
+    });
+    return ['irreplaceable', 'unknown', 'expensive', 'cheap']
+      .map(c => hygieneDecisionActions(mk(c), { scanning: false }).headline);
+  })()`);
+  assert(new Set(bar_heads).size === 4, `each cost class gets its own headline (got ${JSON.stringify(bar_heads)})`);
+  for (const h of bar_heads) {
+    assert(!/\d/.test(h), `the bar headline carries no count - that is the verdict's job (got '${h}')`);
+  }
+
+  assert(cleanBtn && cleanBtn.enabled === true, 'System Clean is offered when the evidence is complete and there is something regenerable');
+
+  // A partial run is never decided, and that outranks a perfectly good
+  // has-work state built from three of thirteen checks.
+  const midScan = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [{ module: 'rescue', costClass: 'irreplaceable', bytes: 1 }],
+    unreadable: [], findingCount: 1, unreadableCount: 0, examinedCount: 2, totalBytes: 1
+  }, { scanning: true, returned: 3, total: 13 }))()`);
+  assert(midScan.phase === 'scanning', `a running scan is its own phase (got '${midScan.phase}')`);
+  assert(midScan.primary.enabled === false, 'nothing is recommended mid-scan, even with findings already in hand');
+  assert(midScan.secondary.every((a) => a.enabled === false), 'and no secondary action is offered either');
+  assert(/partial/i.test(midScan.primary.why), `the refusal names the reason (got '${midScan.primary.why}')`);
+
+  // Nothing found but something unreadable. This is the state the whole
+  // subsystem exists for, and the bar must not offer an action computed from
+  // a total it knows is short.
+  const bar_incomplete = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_INCOMPLETE,
+    findings: [], unreadable: [{ path: 'x' }, { path: 'y' }],
+    findingCount: 0, unreadableCount: 2, examinedCount: 40, totalBytes: 0
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  assert(bar_incomplete.phase === 'incomplete', 'incomplete is its own phase');
+  assert(bar_incomplete.primary.id === 'run', 'the only thing offered is to run again');
+  const incClean = bar_incomplete.secondary.find((a) => a.id === 'open-clean');
+  assert(incClean.enabled === false, 'System Clean is refused');
+  assert(/floor/i.test(incClean.why), `and refused for the right reason (got '${incClean.why}')`);
+  assert(bar_incomplete.caveat.length > 0, 'and a caveat explains what would change the answer');
+
+  // has-work, but two locations could not be read. The findings are real and
+  // worth showing; the byte TOTAL is a floor, so acting on it is refused while
+  // reviewing what was found is not.
+  const bar_blind = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [{ module: 'reclaim', costClass: 'cheap', bytes: 5000000000 }],
+    unreadable: [{ path: 'a' }, { path: 'b' }],
+    findingCount: 1, unreadableCount: 2, examinedCount: 12, totalBytes: 5000000000
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  assert(bar_blind.primary.enabled === true, 'findings that WERE read are still reviewable');
+  const bar_blindClean = bar_blind.secondary.find((a) => a.id === 'open-clean');
+  assert(bar_blindClean.enabled === false, 'but the action computed from the byte total is refused');
+  assert(bar_blind.caveat.length > 0, 'and the bar carries the caveat');
+
+  // Two different refusals must not share one sentence. A control that is off
+  // for two reasons and prints one of them is a control that lies.
+  const noReclaim = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [{ module: 'rescue', costClass: 'irreplaceable', bytes: 0 }],
+    unreadable: [], findingCount: 1, unreadableCount: 0, examinedCount: 5, totalBytes: 0
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  const nrClean = noReclaim.secondary.find((a) => a.id === 'open-clean');
+  assert(nrClean.enabled === false, 'System Clean is refused when nothing regenerable was found');
+  assert(nrClean.why !== incClean.why,
+    'and its reason differs from the unreadable-total one - two refusals, two sentences');
+  assert(/nothing regenerable/i.test(nrClean.why), `it names its own reason (got '${nrClean.why}')`);
+
+  // Clean, and complete. The one state on this screen that means clean, so the
+  // bar says there is nothing to decide rather than inventing something to do.
+  const clean = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_NOTHING_FOUND,
+    findings: [], unreadable: [], findingCount: 0, unreadableCount: 0, examinedCount: 61, totalBytes: 0
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  assert(clean.primary.enabled === false, 'nothing-found offers no primary action');
+  assert(clean.secondary.some((a) => a.id === 'copy' && a.enabled), 'but the report is still copyable');
+
+  // A bar_failed scan is not an unstarted one. These were the two states most
+  // likely to share a rendering, which is the defect the verdict block above
+  // was built to prevent, so the bar gets the same treatment.
+  const notRun = await run(`(() => hygieneDecisionActions(null, { scanning: false, returned: 0, total: 0 }))()`);
+  const bar_failed = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_FAILED,
+    findings: [], unreadable: [], findingCount: 0, unreadableCount: 0, examinedCount: 0, totalBytes: 0
+  }, { scanning: false, returned: 0, total: 9 }))()`);
+  assert(notRun.phase === 'not-run' && bar_failed.phase === 'failed', 'never-run and failed are different phases');
+  assert(notRun.headline !== bar_failed.headline,
+    `and they do not share a sentence (both said '${notRun.headline}')`);
+  assert(notRun.primary.id === 'run' && bar_failed.primary.id === 'run', 'both offer a run, which is the only honest action for either');
+
+  // THE INVARIANT, checked across every phase rather than per case: this panel
+  // is read-only, so no state may ever produce an enabled action that removes
+  // anything, and every state carries the standing promise saying so.
+  const phases = await run(`(() => {
+    const F = window.VanishFindings;
+    const mk = (state, findings, unreadable) => ({
+      state, findings: findings || [], unreadable: unreadable || [],
+      findingCount: (findings || []).length, unreadableCount: (unreadable || []).length,
+      examinedCount: 3, totalBytes: 0
+    });
+    const cases = [
+      hygieneDecisionActions(null, { scanning: false }),
+      hygieneDecisionActions(mk(F.UI_HAS_WORK, [{ module: 'reclaim', costClass: 'cheap', bytes: 5 }]), { scanning: true, returned: 1, total: 9 }),
+      hygieneDecisionActions(mk(F.UI_HAS_WORK, [{ module: 'reclaim', costClass: 'cheap', bytes: 5 }]), { scanning: false }),
+      hygieneDecisionActions(mk(F.UI_NOTHING_FOUND), { scanning: false }),
+      hygieneDecisionActions(mk(F.UI_INCOMPLETE, [], [{ path: 'a' }]), { scanning: false }),
+      hygieneDecisionActions(mk(F.UI_FAILED), { scanning: false })
+    ];
+    return cases.map(c => ({
+      phase: c.phase,
+      never: c.never || '',
+      enabled: [c.primary].concat(c.secondary || []).filter(a => a && a.enabled).map(a => a.id)
+    }));
+  })()`);
+  assert(phases.length === 6, 'six phases exercised');
+  const seen = phases.map((p) => p.phase);
+  assert(new Set(seen).size === 6, `each case produced a distinct phase (got ${JSON.stringify(seen)})`);
+  const destructive = /delete|remove|purge|clean-now|free-now|fix-all/i;
+  for (const p of phases) {
+    assert(p.never.length > 0, `${p.phase} carries the standing "nothing here deletes anything" line`);
+    for (const id of p.enabled) {
+      assert(!destructive.test(id), `${p.phase} offers no destructive action (found '${id}')`);
+    }
+  }
+  assert(
+    phases.find((p) => p.phase === 'scanning').enabled.length === 0,
+    'and the scanning phase offers nothing enabled at all'
+  );
+  // The model above is a pure function; this is the only proof it reaches the
+  // screen. renderHygieneAll draws the bar last, with the decision it actually
+  // used, so a bar describing a state the panel has moved past would show here.
+  await decideAndRender([
+    RESULT({
+      finder: 'r1', module: 'reclaim',
+      findings: [{ id: 'f1', title: 'npm cache', path: 'C:/npm', bytes: 5000000000, costClass: 'cheap', action: 'audit' }],
+      unreadable: [{ path: 'C:/locked', reason: 'access-denied', detail: 'no' }],
+      examinedCount: 4, totalBytes: 5000000000
+    })
+  ]);
+  const barHtml = await run(`document.getElementById('hygiene-decisionbar').innerHTML`);
+  assert(barHtml.length > 0, 'the decision bar renders into the page at all');
+  const barText = await run(`document.getElementById('hygiene-decisionbar').textContent`);
+  assert(/deletes anything/.test(barText),
+    'and carries the standing promise on screen, not only in the model');
+
+  // Disabled, present, and explained ON THE PAGE. A reason that lives only in
+  // a title attribute is not an explanation for anyone who never hovers.
+  const offBtns = await run(`(() => Array.from(
+    document.querySelectorAll('#hygiene-decisionbar button[data-act]')
+  ).map(b => ({ act: b.getAttribute('data-act'), off: b.disabled })))()`);
+  const cleanOff = offBtns.find((b) => b.act === 'open-clean');
+  assert(cleanOff && cleanOff.off === true,
+    'with an unreadable location present, System Clean is rendered DISABLED rather than hidden');
+  assert(/floor and not a total/.test(barText),
+    'and the reason is printed in the bar, not left in a tooltip');
+
+  // The scroll target the primary action needs. Without an id per module block
+  // the focus action would silently do nothing.
+  const modIds = await run(`(() => Array.from(document.querySelectorAll('#hygiene-modules .hygiene-module')).map(n => n.id))()`);
+  assert(modIds.length > 0 && modIds.every((i) => i.indexOf('hygiene-mod-') === 0),
+    `every module block carries a scroll id (got ${JSON.stringify(modIds)})`);
+
+
+  // ------------------------------------------------------------------
+  console.log('');
   console.log('Checks that share a walk of the disk are ONE call, and still four results (3l8)');
 
   // The grouping itself, before any IPC. Invoke-SharedTreeWalk memoises per

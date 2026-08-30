@@ -1,27 +1,27 @@
 # Vanish
 
-**A premium CCleaner for developers and digital hygienists — on-device, approval-gated, and reversible by default.**
+**A premium CCleaner for developers and digital hygienists -- on-device, approval-gated, and reversible by default.**
 
 Vanish opens on a **Health Advisor** dashboard: what this machine is, where the disk went, what starts with Windows, what holds a network connection, what is listening, what is installed twice. From there it maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts the leftovers uninstallers abandon, and **quarantines everything it removes so it can be put back**. Everything runs locally. Nothing leaves your machine.
 
-The "for developers" part is not decoration. A general-purpose cleaner does not know that `node_modules` is disposable and a `.jks` keystore is not, that an unpushed branch exists nowhere else in the world, or that a stash is invisible to every other tool you own. Vanish leads with **what a delete would destroy** and only then with what it would free — see [Rescue before reclaim](#rescue-before-reclaim).
+The "for developers" part is not decoration. A general-purpose cleaner does not know that `node_modules` is disposable and a `.jks` keystore is not, that an unpushed branch exists nowhere else in the world, or that a stash is invisible to every other tool you own. Vanish leads with **what a delete would destroy** and only then with what it would free -- see [Rescue before reclaim](#rescue-before-reclaim).
 
-> Working version **0.9.0**, verified locally with `npm test`. Versions track milestones and keep moving past 1.0 — see [docs/RELEASING.md](docs/RELEASING.md). 1.0 is the release that meets the gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md), not a finish line. Read [Status](#status) before you rely on this.
+> Working version **0.9.0**, verified locally with `npm test`. Versions track milestones and keep moving past 1.0 -- see [docs/RELEASING.md](docs/RELEASING.md). 1.0 is the release that meets the gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md), not a finish line. Read [Status](#status) before you rely on this.
 
 <!-- DEMO GIF PLACEHOLDER
-Record with ScreenToGif: 30–60s showing scan → app select → wizard →
+Record with ScreenToGif: 30-60s showing scan → app select → wizard →
 leftover review tree → purge summary. Replace this block with:
 ![Vanish demo](docs/media/vanish-demo.gif)
 -->
-> 📸 *Demo GIF coming — see [docs/RELEASING.md](docs/RELEASING.md) for the release checklist.*
+> 📸 *Demo GIF coming -- see [docs/RELEASING.md](docs/RELEASING.md) for the release checklist.*
 
 ---
 
 ## Why this exists
 
-Windows in 2025–26 accumulates weight quietly: telemetry-heavy background services, autostart entries that outlive the apps that created them, and uninstallers that routinely leave megabytes of files and dozens of registry keys behind. The existing tool landscape splits into two bad camps — "cleaners" that delete aggressively on vague heuristics, and manual registry surgery.
+Windows in 2025-26 accumulates weight quietly: telemetry-heavy background services, autostart entries that outlive the apps that created them, and uninstallers that routinely leave megabytes of files and dozens of registry keys behind. The existing tool landscape splits into two bad camps -- "cleaners" that delete aggressively on vague heuristics, and manual registry surgery.
 
-Vanish takes a third path: **audit first, propose second, act only on explicit approval.** It is built on the conviction that a tool touching your registry should show you exactly what it found, why it thinks it's a leftover, how risky removal is — and then wait.
+Vanish takes a third path: **audit first, propose second, act only on explicit approval.** It is built on the conviction that a tool touching your registry should show you exactly what it found, why it thinks it's a leftover, how risky removal is -- and then wait.
 
 ## The loop
 
@@ -31,13 +31,13 @@ Every destructive workflow in Vanish follows the same pattern, implemented as a 
 scan  →  detect  →  propose  →  await approval  →  act (quarantine)  →  report
 ```
 
-1. **Scan** — enumerate apps from the registry Uninstall hives (64-bit, 32-bit, per-user) and UWP packages ([scanner.ps1](scanner.ps1) `Get-InstalledApps`, `Get-UwpApps`).
-2. **Detect** — after the app's *own* uninstaller runs, sweep the filesystem and registry for remnants in one of three user-selected depths (`Scan-Leftovers`).
-3. **Propose** — present every finding in a review tree with a per-item risk label (Safe / Moderate / Advanced). Advanced-risk items are **unchecked by default** ([renderer.js](renderer.js) `renderLeftoversTree`).
-4. **Await approval** — nothing moves until you review the list and click Purge. Unchecking everything and finishing without purging is a first-class path.
-5. **Act & report** — the checked items are quarantined, not deleted: files move into a versioned vault and registry keys are exported to a `.reg` restore manifest *before* anything is removed. Anything locked by Windows is reported as skipped, never forced. Every quarantined item can be restored from the Quarantine Manager tab, or permanently deleted behind a typed double-confirmation.
+1. **Scan** -- enumerate apps from the registry Uninstall hives (64-bit, 32-bit, per-user) and UWP packages ([scanner.ps1](scanner.ps1) `Get-InstalledApps`, `Get-UwpApps`).
+2. **Detect** -- after the app's *own* uninstaller runs, sweep the filesystem and registry for remnants in one of three user-selected depths (`Scan-Leftovers`).
+3. **Propose** -- present every finding in a review tree with a per-item risk label (Safe / Moderate / Advanced). Advanced-risk items are **unchecked by default** ([renderer.js](renderer.js) `renderLeftoversTree`).
+4. **Await approval** -- nothing moves until you review the list and click Purge. Unchecking everything and finishing without purging is a first-class path.
+5. **Act & report** -- the checked items are quarantined, not deleted: files move into a versioned vault and registry keys are exported to a `.reg` restore manifest *before* anything is removed. Anything locked by Windows is reported as skipped, never forced. Every quarantined item can be restored from the Quarantine Manager tab, or permanently deleted behind a typed double-confirmation.
 
-This same scan → propose → quarantine pattern is how every other destructive surface in the app works too — the bulk uninstall queue, System Clean's seven cleaners, Force Uninstall for broken entries. There is exactly one route to the disk or the registry for a removal ([lib/vault.js](lib/vault.js)), and it is this one.
+This same scan → propose → quarantine pattern is how every other destructive surface in the app works too -- the bulk uninstall queue, System Clean's seven cleaners, Force Uninstall for broken entries. There is exactly one route to the disk or the registry for a removal ([lib/vault.js](lib/vault.js)), and it is this one.
 
 ## What it does
 
@@ -46,21 +46,21 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Desktop app inventory across HKLM / HKCU / Wow6432Node hives, with size + install date | [scanner.ps1](scanner.ps1) `Get-InstalledApps` |
 | UWP / Store app inventory with `AppxManifest.xml` friendly-name parsing | [scanner.ps1](scanner.ps1) `Get-UwpApps` |
 | System Restore Point before any uninstall (default-on, handles the Windows 24-hour rate limit) | [scanner.ps1](scanner.ps1) `Create-RestorePoint` |
-| Native-uninstaller-first flow — Vanish resolves and launches the app's own uninstaller before touching anything, with a live registry re-read and a trust check on every run | [main.js](main.js) `uninstall-native` |
+| Native-uninstaller-first flow -- Vanish resolves and launches the app's own uninstaller before touching anything, with a live registry re-read and a trust check on every run | [main.js](main.js) `uninstall-native` |
 | Three-depth leftover scanning with publisher-folder protection (shared publisher folders are never proposed for whole-folder deletion) | [scanner.ps1](scanner.ps1) `Scan-Leftovers` |
-| Quarantine vault — every removal is reversible until you say otherwise | [lib/vault.js](lib/vault.js), [lib/store.js](lib/store.js), Quarantine Manager tab |
-| Audit Mode / Full Mode elevation tiers — the app is read-only until elevated, with a persistent banner and every destructive control inert and explained | [main.js](main.js) `fullModeOnly()` |
-| Task Manager & file-lock unlocker — see what has a file open and close it (or suspend the tree) before retrying | [scanner.ps1](scanner.ps1) `Get-ProcessList`, `Unlock-Path` |
-| Bulk uninstall queue — restore point, silent-switch resolution, and an untrusted-uninstaller acknowledgement gate, per app | [lib/queue.js](lib/queue.js) |
-| System Clean — orphaned context menus, services, dead PATH entries, broken file associations, other-profile remnants; driver packages are audited but not yet removable | [scanner.ps1](scanner.ps1) `Invoke-CleanerScan` |
-| Left-over Store app data — `%LOCALAPPDATA%\Packages` folders whose package is no longer installed anywhere on the machine, with Windows' own families listed but never removable and anything touched in the last week held back | [scanner.ps1](scanner.ps1) `Find-UwpLeftovers` |
-| Force Uninstall — detects and removes entries that can no longer uninstall themselves, still routed through the vault | [scanner.ps1](scanner.ps1) `Find-BrokenUninstallEntries` |
+| Quarantine vault -- every removal is reversible until you say otherwise | [lib/vault.js](lib/vault.js), [lib/store.js](lib/store.js), Quarantine Manager tab |
+| Audit Mode / Full Mode elevation tiers -- the app is read-only until elevated, with a persistent banner and every destructive control inert and explained | [main.js](main.js) `fullModeOnly()` |
+| Task Manager & file-lock unlocker -- see what has a file open and close it (or suspend the tree) before retrying | [scanner.ps1](scanner.ps1) `Get-ProcessList`, `Unlock-Path` |
+| Bulk uninstall queue -- restore point, silent-switch resolution, and an untrusted-uninstaller acknowledgement gate, per app | [lib/queue.js](lib/queue.js) |
+| System Clean -- orphaned context menus, services, dead PATH entries, broken file associations, other-profile remnants; driver packages are audited but not yet removable | [scanner.ps1](scanner.ps1) `Invoke-CleanerScan` |
+| Left-over Store app data -- `%LOCALAPPDATA%\Packages` folders whose package is no longer installed anywhere on the machine, with Windows' own families listed but never removable and anything touched in the last week held back | [scanner.ps1](scanner.ps1) `Find-UwpLeftovers` |
+| Force Uninstall -- detects and removes entries that can no longer uninstall themselves, still routed through the vault | [scanner.ps1](scanner.ps1) `Find-BrokenUninstallEntries` |
 | Health Advisor -- the landing page: CIM-based system diagnostics (OS, CPU, RAM, GPU, disks, uptime), with each section rendering as its own query answers rather than all of them waiting on the slowest | [scanner.ps1](scanner.ps1) `Get-SystemDiagnostics`, [renderer/audit.js](renderer/audit.js) |
 | Machine Hygiene -- thirteen audit-only checks across rescue / hygiene / reclaim, scheduled so results land as they arrive, with one named terminal state per run and no verdict at all until every check is back | [finders/](finders/), [lib/findings.js](lib/findings.js), [renderer/hygiene.js](renderer/hygiene.js) |
-| Network activity — which programs hold connections, and a verdict including "nothing on this PC is using the network". Reads local byte counters only; it never opens a socket, and never claims a per-program byte rate Windows cannot attribute | [scanner.ps1](scanner.ps1) `Get-NetworkActivity` |
-| Hold background transfers — caps Windows Update's background downloading and pauses running background transfers, with every changed setting written to disk before it is touched, and released automatically if Vanish closes or crashes while a hold is on | [scanner.ps1](scanner.ps1) `Invoke-NetworkHoldApply` |
-| Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services — with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
-| Software redundancy detection: 14 category clusters (browsers, PDF readers, AV tools…) flagging duplicate installs | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
+| Network activity -- which programs hold connections, and a verdict including "nothing on this PC is using the network". Reads local byte counters only; it never opens a socket, and never claims a per-program byte rate Windows cannot attribute | [scanner.ps1](scanner.ps1) `Get-NetworkActivity` |
+| Hold background transfers -- caps Windows Update's background downloading and pauses running background transfers, with every changed setting written to disk before it is touched, and released automatically if Vanish closes or crashes while a hold is on | [scanner.ps1](scanner.ps1) `Invoke-NetworkHoldApply` |
+| Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services -- with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
+| Software redundancy detection: 14 category clusters (browsers, PDF readers, AV tools...) flagging duplicate installs | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
 | Search, type filter, sort (name/size/date), and column filters -- click a header, pick which Publishers or Types to show -- over the full app inventory | [renderer/core.js](renderer/core.js) `filterAndRenderApps`, [renderer/column-filter.js](renderer/column-filter.js) |
 
 ### Watch an install, and see what it left behind
@@ -70,7 +70,7 @@ Two features that only make sense together, both in **System Clean**:
 - **Watch an install** takes a reading of your Run keys, program folders,
   services and uninstall entries, waits while *you* run an installer, then takes
   a second reading and reports the difference in real numbers. It is a
-  comparison, not a recording — it says so — and it installs nothing itself.
+  comparison, not a recording -- it says so -- and it installs nothing itself.
 - **Where your disk space went** matches every top-level program folder against
   the programs actually installed. Folders a watched install created whose
   program is now gone are named as **left behind**. Everything else Vanish
@@ -105,56 +105,56 @@ evidence. None of them is a heuristic about what a folder is called.
 |---|---|---|---|
 | **Safe** | `InstallLocation` + exact-name folders only | Exact `Publisher\App` and `App` key paths | Checked |
 | **Moderate** | Partial-name matches in ProgramFiles / ProgramData / AppData; publisher folders only when no other installed app shares the publisher | Top-two-level key matches with the same publisher-sharing guard | Checked (publisher folders labeled Moderate) |
-| **Advanced** | Wildcard + whitespace-stripped matching, adds `%TEMP%` | Same as Moderate | **Unchecked** — you opt in per item |
+| **Advanced** | Wildcard + whitespace-stripped matching, adds `%TEMP%` | Same as Moderate | **Unchecked** -- you opt in per item |
 
 Discovery depth and deletion are independent: you can scan Advanced and still delete nothing.
 
 ## What Vanish does NOT do
 
-- **No telemetry, no network calls.** There is no analytics code and no cloud lookup anywhere in the codebase. The CSP names no external origin (`connect-src 'none'`) — verify with a grep, don't take the README's word for it.
-- **No autonomous deletion.** No scheduler, no background service, no "auto-clean" — with one narrow, explicit exception: an *optional* setting to permanently purge quarantined items past a retention period at app start, off by default. Every other removal traces to a checkbox you ticked that session.
+- **No telemetry, no network calls.** There is no analytics code and no cloud lookup anywhere in the codebase. The CSP names no external origin (`connect-src 'none'`) -- verify with a grep, don't take the README's word for it.
+- **No autonomous deletion.** No scheduler, no background service, no "auto-clean" -- with one narrow, explicit exception: an *optional* setting to permanently purge quarantined items past a retention period at app start, off by default. Every other removal traces to a checkbox you ticked that session.
 - **Not an antivirus.** Vanish surfaces information; it makes no threat judgments.
-- **No silent auto-elevation.** Vanish can be set to *ask* Windows for elevation automatically at startup instead of waiting for a click (Settings → "Start Vanish as administrator", off by default) — but Windows' own UAC consent prompt still appears on every single launch either way. There is no path in this codebase that skips it.
-- **Driver package removal is audit-only** in this release. Third-party driver packages with a missing INF are listed, not removed — that sweeper is scoped for the Standard tier, not Core.
+- **No silent auto-elevation.** Vanish can be set to *ask* Windows for elevation automatically at startup instead of waiting for a click (Settings → "Start Vanish as administrator", off by default) -- but Windows' own UAC consent prompt still appears on every single launch either way. There is no path in this codebase that skips it.
+- **Driver package removal is audit-only** in this release. Third-party driver packages with a missing INF are listed, not removed -- that sweeper is scoped for the Standard tier, not Core.
 
 ## Status
 
-Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. For 1.0 the clean-VM gate was **waived deliberately** rather than met — see [Known limitations](#known-limitations) — so treat everything below as "works on the machines it was built and used on," not "certified everywhere."
+Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. For 1.0 the clean-VM gate was **waived deliberately** rather than met -- see [Known limitations](#known-limitations) -- so treat everything below as "works on the machines it was built and used on," not "certified everywhere."
 
 **Implemented and locally verified (working version 0.9.0):**
-- Quarantine-first removal for every destructive path — files move into a versioned vault, registry keys export to a `.reg` restore manifest, *before* anything is removed ([lib/vault.js](lib/vault.js))
-- Audit Mode / Full Mode elevation tiers enforced independently in both the main process and the PowerShell engine — a destructive action reachable only through a channel neither layer gates has not been found ([main.js](main.js) `fullModeOnly()`, [scanner.ps1](scanner.ps1) `Test-IsElevated`)
+- Quarantine-first removal for every destructive path -- files move into a versioned vault, registry keys export to a `.reg` restore manifest, *before* anything is removed ([lib/vault.js](lib/vault.js))
+- Audit Mode / Full Mode elevation tiers enforced independently in both the main process and the PowerShell engine -- a destructive action reachable only through a channel neither layer gates has not been found ([main.js](main.js) `fullModeOnly()`, [scanner.ps1](scanner.ps1) `Test-IsElevated`)
 - Restore point before uninstall, on by default, admin-gated ([scanner.ps1](scanner.ps1) `Create-RestorePoint`)
-- The app's own uninstaller always runs first, resolved through a live registry re-read with a trust check — no command string ever crosses the renderer→main boundary ([main.js](main.js) `uninstall-native`)
+- The app's own uninstaller always runs first, resolved through a live registry re-read with a trust check -- no command string ever crosses the renderer→main boundary ([main.js](main.js) `uninstall-native`)
 - Per-item review with risk labels; Advanced findings opt-in only ([renderer.js](renderer.js))
 - Shared publisher folders protected from whole-folder deletion ([scanner.ps1](scanner.ps1) `Is-PublisherShared`)
 - Locked files reported and skipped, never forced; a Task Manager + unlocker tab can close or suspend the holder first
-- A bulk uninstall queue, a System Clean pass across seven leftover categories, and Force Uninstall for entries that can no longer uninstall themselves — all routed through the same vault
+- A bulk uninstall queue, a System Clean pass across seven leftover categories, and Force Uninstall for entries that can no longer uninstall themselves -- all routed through the same vault
 - Elevation state detected via the `WindowsPrincipal` API, never `net session`
 - Thirteen machine-hygiene checks across rescue / hygiene / reclaim, all audit-only, each computing one of three states from evidence rather than asserting one, and a decider that turns the set into exactly one named terminal state ([finders/](finders/), [lib/findings.js](lib/findings.js))
-- A `/cso` security audit found and fixed four issues in the destructive paths (command injection, a restore-destination guard bypassable by a directory junction, an ACL fix that didn't survive the app's own normal startup order, and an untracked lockfile) — see the **Security** section of [CHANGELOG.md](CHANGELOG.md)
+- A `/cso` security audit found and fixed four issues in the destructive paths (command injection, a restore-destination guard bypassable by a directory junction, an ACL fix that didn't survive the app's own normal startup order, and an untracked lockfile) -- see the **Security** section of [CHANGELOG.md](CHANGELOG.md)
 
 **Not yet done, honestly:**
-- **Machine Hygiene still takes a minute or two.** The thirteen checks measured **82 seconds** on their own, and **94-101 seconds** driving the real panel with the rest of the app loading beside it, on the machine it was built on — they walk your profile and hash file contents, so this scales with what is on your disk. It was over ten minutes before 0.9.1 with one check that never finished, and 107 seconds before 0.9.2 made four checks share one walk instead of taking four. 0.9.3 added a second shared walk for the two git checks; measured in one run, the same panel with no walk shared at all takes 122 seconds against 82 with both shared. The floor is a pair of checks around a minute each, duplicate content and local-only credentials: one hashes file contents and the other reads a machine-wide root set, no amount of parallelism goes below one check, and nothing about the other eleven can move them.
-- The UAC accept/decline/cancel branches of both the startup elevation offer and the auto-elevate setting — these need a human at the actual consent prompt, which cannot be automated
-- Six elevated confirmations of already-built features (startup actions, Store-leftover purge/restore, network hold revert, Force Uninstall acceptance) — see `bd list` for the current set
-- Driver Store package *removal*. This one is not "not yet" — it is **cut**, deliberately: `pnputil /delete-driver` destroys the copy a restore would need, so Vanish cannot promise reversibility there, and `pnputil` and Disk Cleanup already do the job. Listing works today and stays.
+- **Machine Hygiene still takes a minute or two.** The thirteen checks measured **82 seconds** on their own, and **94-101 seconds** driving the real panel with the rest of the app loading beside it, on the machine it was built on -- they walk your profile and hash file contents, so this scales with what is on your disk. It was over ten minutes before 0.9.1 with one check that never finished, and 107 seconds before 0.9.2 made four checks share one walk instead of taking four. 0.9.3 added a second shared walk for the two git checks; measured in one run, the same panel with no walk shared at all takes 122 seconds against 82 with both shared. The floor is a pair of checks around a minute each, duplicate content and local-only credentials: one hashes file contents and the other reads a machine-wide root set, no amount of parallelism goes below one check, and nothing about the other eleven can move them.
+- The UAC accept/decline/cancel branches of both the startup elevation offer and the auto-elevate setting -- these need a human at the actual consent prompt, which cannot be automated
+- Six elevated confirmations of already-built features (startup actions, Store-leftover purge/restore, network hold revert, Force Uninstall acceptance) -- see `bd list` for the current set
+- Driver Store package *removal*. This one is not "not yet" -- it is **cut**, deliberately: `pnputil /delete-driver` destroys the copy a restore would need, so Vanish cannot promise reversibility there, and `pnputil` and Disk Cleanup already do the job. Listing works today and stays.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) §5 for the full implemented-vs-designed table.
 
 ## Known limitations
 
 Three release gates were waived for 1.0 by deliberate decision, not oversight.
-Each has a real cost and it belongs here rather than in a commit message —
+Each has a real cost and it belongs here rather than in a commit message --
 an app whose whole argument is "we tell you what we actually know" does not
 get to be vague about its own shipping standard.
 
 | Waived | What it means for you |
 | --- | --- |
 | **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate for this release. |
-| **No clean-VM acceptance pass** | Vanish has not been tested on a fresh Windows 10 or Windows 11 install. Breakage specific to clean machines — missing runtimes, different UAC defaults, no developer tooling present — would not have been caught. |
+| **No clean-VM acceptance pass** | Vanish has not been tested on a fresh Windows 10 or Windows 11 install. Breakage specific to clean machines -- missing runtimes, different UAC defaults, no developer tooling present -- would not have been caught. |
 | **Single-user acceptance** | One person has used this end to end: the person who wrote it. Every "works" claim carries that caveat. |
-| **Machine Hygiene takes 81-101 seconds** | Measured on the machine it was built on, for all thirteen checks — 81 s for the checks alone, up to 101 s through the real panel. It scales with the size of your profile, and one check accounts for most of it. The screen shows which check is working and findings appear as they land, so the wait is legible — but it is still a wait. |
+| **Machine Hygiene takes 81-101 seconds** | Measured on the machine it was built on, for all thirteen checks -- 81 s for the checks alone, up to 101 s through the real panel. It scales with the size of your profile, and one check accounts for most of it. The screen shows which check is working and findings appear as they land, so the wait is legible -- but it is still a wait. |
 
 The first two reverse the moment there is a certificate and a VM run; the
 third reverses the moment someone else uses it. Reopen `1w0` and `442` in the
@@ -186,7 +186,7 @@ npx electron test/real-data-verify.js
 
 `npm test` drives a fixture: one fake application, clean fields, instant
 responses. It is fast, it runs anywhere, and on 2026-08-06 it reported
-**312 of 312 passing while the app was visibly broken** — 60 of 151 installed
+**312 of 312 passing while the app was visibly broken** -- 60 of 151 installed
 programs invisible, the Storage panel rendering nothing at all, and the
 uninstall buttons sitting 250px below the bottom of the window. Fixture-shaped
 tests validate fixture-shaped reality.
@@ -194,7 +194,7 @@ tests validate fixture-shaped reality.
 `test/real-data-verify.js` runs the real preload against the real backend on
 the machine you are sitting at, and asserts what a user would actually see.
 Its ground truth comes from `test/fixtures/real-machine-truth.ps1`, which
-queries the machine with its own independent queries — a harness that asks the
+queries the machine with its own independent queries -- a harness that asks the
 code under test what reality looks like can only ever agree with itself. It
 prints what it could **not** verify at the end of every run.
 
@@ -212,10 +212,10 @@ removes it again; everything else is read-only.
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) — **as-built** components, IPC surface, and the approval-loop sequence (start here)
-- [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) — **the single source of truth for scope**: what is in 1.0, what is cut and why, what comes after
-- [docs/roadmap.md](docs/roadmap.md) · [docs/architecture.md](docs/architecture.md) — historical design records, superseded for scope 2026-08-12 · [docs/history/](docs/history/) — archived session handoffs, not to-do lists
-- [docs/promptgate.md](docs/promptgate.md) — the development rulebook every change must pass
+- [ARCHITECTURE.md](ARCHITECTURE.md) -- **as-built** components, IPC surface, and the approval-loop sequence (start here)
+- [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) -- **the single source of truth for scope**: what is in 1.0, what is cut and why, what comes after
+- [docs/roadmap.md](docs/roadmap.md) · [docs/architecture.md](docs/architecture.md) -- historical design records, superseded for scope 2026-08-12 · [docs/history/](docs/history/) -- archived session handoffs, not to-do lists
+- [docs/promptgate.md](docs/promptgate.md) -- the development rulebook every change must pass
 - [CHANGELOG.md](CHANGELOG.md) · [docs/RELEASING.md](docs/RELEASING.md) · [docs/BENCHMARKS.md](docs/BENCHMARKS.md)
 
 ## License
@@ -224,5 +224,5 @@ removes it again; everything else is read-only.
 
 ---
 
-*This is the same pattern I use for GTM systems — an agent that watches, diagnoses, and proposes fixes before you notice the problem. I'm building the GTM version next.*
-| **Running as administrator once locks the settings** | Vanish locks its own settings folder to administrators the first time it runs elevated, because the elevated half of the app reads its scan depth and auto-purge policy from there. After that, a normal (non-administrator) session can read those settings but not change them. The app says so on the Settings screen and locks the controls rather than letting them move — but it is a real one-way door, and worth knowing before the first elevated run. |
+*This is the same pattern I use for GTM systems -- an agent that watches, diagnoses, and proposes fixes before you notice the problem. I'm building the GTM version next.*
+| **Running as administrator once locks the settings** | Vanish locks its own settings folder to administrators the first time it runs elevated, because the elevated half of the app reads its scan depth and auto-purge policy from there. After that, a normal (non-administrator) session can read those settings but not change them. The app says so on the Settings screen and locks the controls rather than letting them move -- but it is a real one-way door, and worth knowing before the first elevated run. |

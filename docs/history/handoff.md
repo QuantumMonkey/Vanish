@@ -9,7 +9,7 @@ Vanish is a modern Windows application manager and deep cleaner uninstaller. It 
 
 * **Repository Location**: `https://github.com/QuantumMonkey/Vanish`
 * **Version**: `0.3.0` (RELEASE.MAJOR.MINOR; RELEASE stays 0 until `docs/RELEASING.md` criteria are met)
-* **Status**: **Core tier code complete. VM verification outstanding.** Every Core roadmap stage (1, 2, 3, 6, 9) plus the Rule 2/3 safety retrofits is implemented. `test\run-all.ps1` passes 290/290 unelevated (2 of 14 suites need Full Mode and have not run since a `/cso` audit + a startup-elevation-toggle feature landed on 2026-08-03 — see the **Security**/**Testing** sections of `CHANGELOG.md` and re-run elevated before trusting this number further). Per Rule 10 that is **In Progress**, not Complete.
+* **Status**: **Core tier code complete. VM verification outstanding.** Every Core roadmap stage (1, 2, 3, 6, 9) plus the Rule 2/3 safety retrofits is implemented. `test\run-all.ps1` passes 290/290 unelevated (2 of 14 suites need Full Mode and have not run since a `/cso` audit + a startup-elevation-toggle feature landed on 2026-08-03 -- see the **Security**/**Testing** sections of `CHANGELOG.md` and re-run elevated before trusting this number further). Per Rule 10 that is **In Progress**, not Complete.
 * **Read this before anything else in this section**: the numbers and branch note below this line were last updated before 2026-08-03's session (SEC-1 through SEC-4, TASK-05, `vanish-uninstaller-7y0` UI coverage, `vanish-uninstaller-kt0` startup elevation toggle). They are kept for their still-valid lessons, not as a current baseline. `CHANGELOG.md`'s `[Unreleased]` section is the source of truth for what actually shipped.
 
 ---
@@ -199,7 +199,7 @@ Tracked as bd `vanish-uninstaller-ceb`.
 
 ## 🧪 Verification status
 
-*(Snapshot below predates 2026-08-03 — see the note at the top of this file. Three suites have been added since: `store-migration-verify.js` SEC-3, `settings-verify.js`, `ui-interaction-full-verify.js`. Current unelevated total is 290/290 across 14 suites; re-run `test\run-all.ps1` elevated for the real current figure before citing one.)*
+*(Snapshot below predates 2026-08-03 -- see the note at the top of this file. Three suites have been added since: `store-migration-verify.js` SEC-3, `settings-verify.js`, `ui-interaction-full-verify.js`. Current unelevated total is 290/290 across 14 suites; re-run `test\run-all.ps1` elevated for the real current figure before citing one.)*
 
 `test\run-all.ps1`, elevated, on Windows 11 build 26200: **310 passed, 0 failed** across eleven suites (as of the snapshot date, before the suites listed above existed).
 

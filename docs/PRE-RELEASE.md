@@ -54,7 +54,7 @@ we objected to.
 
 ---
 
-## Status and version plan — 2026-08-13
+## Status and version plan -- 2026-08-13
 
 **Released 0.4.0.** Operator direction, same day: *everything gets done before
 1.0; 0.9 is for the pre-release stuff; the other features are filed under the
@@ -185,8 +185,8 @@ means finished, so they are gates again rather than accepted costs. `1w0` and
 
 ### Phase 2 -- safety and honesty gates (must not ship without)
 
-- [x] **`1td`** Security review on the destructive surfaces. **Done 2026-08-13** — no defects; all 17 mutating IPC channels gated, 14 new regressions on the read-only surfaces.
-- [x] **`vhm`** Security audit. **Done 2026-08-13**, scoped to the destructive surfaces and everything added this cycle rather than a full-codebase sweep — the scope is stated in the issue.
+- [x] **`1td`** Security review on the destructive surfaces. **Done 2026-08-13** -- no defects; all 17 mutating IPC channels gated, 14 new regressions on the read-only surfaces.
+- [x] **`vhm`** Security audit. **Done 2026-08-13**, scoped to the destructive surfaces and everything added this cycle rather than a full-codebase sweep -- the scope is stated in the issue.
 - [x] **`8ns`** **Done 2026-08-13.** Six storefronts recognised; Retry withheld where it cannot work. Platform-wrapped games (Steam, Epic) needed their own "needs
       attention" message in the bulk queue. The current generic "retry the
       silent switch" text can never work against `steam.exe`, so today the app

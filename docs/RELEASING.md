@@ -98,16 +98,16 @@ where they always belonged.
 
 ---
 
-## Code Signing (Hard Gate — Promptgate Rule 14)
+## Code Signing (Hard Gate -- Promptgate Rule 14)
 
 Unsigned builds are for local development only. No unsigned binary is distributed
 externally under any circumstances, including pre-release and beta builds.
 
 **Certificate options:**
-- **OV (Organization Validation)**: ~$100–300/yr. Verifies organisation identity.
+- **OV (Organization Validation)**: ~$100-300/yr. Verifies organisation identity.
   SmartScreen will warn on first runs until download reputation builds (weeks to
   months depending on volume). Sufficient for early community releases.
-- **EV (Extended Validation)**: ~$300–600/yr. Requires hardware USB token and
+- **EV (Extended Validation)**: ~$300-600/yr. Requires hardware USB token and
   stricter identity verification. Clears SmartScreen immediately on day one.
   Required for kernel-mode drivers. Recommended for the `1.0.0` public launch.
 
@@ -130,7 +130,7 @@ Never `npm install` for a release. `npm ci` installs exactly what
 `package-lock.json` records and verifies every package against the integrity
 hash stored there; `npm install` is free to resolve something newer and will
 rewrite the lockfile to match. `electron` is pinned to an exact version in
-`package.json` for the same reason — bump it deliberately, in its own commit,
+`package.json` for the same reason -- bump it deliberately, in its own commit,
 never as a side effect of installing.
 
 This matters more here than in most projects: Vanish ships as an application

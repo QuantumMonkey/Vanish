@@ -5,7 +5,7 @@ This project uses **bd** (beads) for issue tracking. Run `bd prime` for full wor
 > **Architecture in one line:** Issues live in a local Dolt database
 > (`.beads/dolt/`); cross-machine sync uses `bd dolt push/pull` (a
 > git-compatible protocol), stored under `refs/dolt/data` on your git
-> remote — separate from `refs/heads/*` where your code lives.
+> remote -- separate from `refs/heads/*` where your code lives.
 > `.beads/issues.jsonl` is a passive export, not the wire protocol.
 >
 > See [SYNC_CONCEPTS.md](https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md)
@@ -63,9 +63,9 @@ bd close <id>         # Complete work
 
 ### Rules
 
-- Use `bd` for ALL task tracking — do NOT use TodoWrite, TaskCreate, or markdown TODO lists
+- Use `bd` for ALL task tracking -- do NOT use TodoWrite, TaskCreate, or markdown TODO lists
 - Run `bd prime` for detailed command reference and session close protocol
-- Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
+- Use `bd remember` for persistent knowledge -- do NOT use MEMORY.md files
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
 
@@ -143,7 +143,7 @@ disagrees with it, PRE-RELEASE.md wins.
 
 Specifically superseded, and kept only as historical reasoning:
 `docs/roadmap.md` (stage/tier model), `docs/architecture.md` (pre-code target
-design), and everything in `docs/history/` (five archived session handoffs —
+design), and everything in `docs/history/` (five archived session handoffs --
 **not** to-do lists, despite each one saying "start here").
 
 The standard every proposed feature must pass before it earns a bd issue:
@@ -152,11 +152,11 @@ The standard every proposed feature must pass before it earns a bd issue:
 > integrate existing FOSS where necessary. Do not build redundant nonsense.
 
 Vanish exists because this category is gatekept and commodified. A feature
-that duplicates something the user already has is not neutral — it is us
+that duplicates something the user already has is not neutral -- it is us
 becoming the thing we objected to. Before proposing work, name what already
 solves it (Windows built-ins, WinDirStat/WizTree, BleachBit, PatchCleaner,
 Task Manager) and what Vanish adds that they cannot. If the honest answer is
-"nothing", that is the finding — say so instead of building it.
+"nothing", that is the finding -- say so instead of building it.
 
 The three assets nothing else in this category has, and which any worthwhile
 feature is leverage on: the installed-program map (`scanner.ps1` +

@@ -3770,3 +3770,90 @@ input:checked + .slider:before {
   color: var(--text-gray);
 }
 .settings-locked-notice i { color: var(--color-warning); font-size: 14px; margin-top: 2px; }
+
+/* --- Machine Hygiene: the decision bar (949) ------------------------------
+   Sits above the verdict and answers "so what do I do now" with one
+   recommended click. Two things about it are deliberate and load-bearing.
+
+   The primary button is chosen by COST, never by size, so its colour follows
+   the same scale the finding cards use: rescue red for irreplaceable, warning
+   amber for expensive, primary blue only when nothing on the machine is hard
+   to get back. A bar that lit up green next to "14.3 GB" would be teaching
+   the habit this product exists to argue against.
+
+   A disabled action keeps its reason ON THE PAGE, in .hygiene-decision-off,
+   not only in a title attribute. Someone who never hovers still gets told
+   why, which is the same promise the tier refusals make. */
+.hygiene-decisionbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+  border: 1px solid var(--border-glass);
+  border-radius: 10px;
+  background: var(--bg-dark-card);
+  padding: 14px 16px;
+  margin-bottom: 10px;
+}
+.hygiene-decision-text { min-width: 220px; flex: 1 1 320px; }
+.hygiene-decision-headline {
+  font-family: var(--font-title);
+  font-size: 15px;
+  color: var(--text-light);
+  margin-bottom: 3px;
+}
+.hygiene-decision-sub { font-size: 12px; color: var(--text-gray); line-height: 1.5; }
+.hygiene-decision-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.hygiene-act {
+  font-family: var(--font-body);
+  font-size: 12px;
+  padding: 9px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-glass-active);
+  background: transparent;
+  color: var(--text-light);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.hygiene-act:hover:not(:disabled) { background: var(--bg-dark-hover, rgba(255,255,255,0.06)); }
+.hygiene-act.primary { font-weight: 600; border-width: 1px; }
+.hygiene-act.primary.tone-rescue { border-color: var(--color-danger); color: var(--color-danger); }
+.hygiene-act.primary.tone-warn   { border-color: var(--color-warning); color: var(--color-warning); }
+.hygiene-act.primary.tone-go     { border-color: var(--color-primary); color: var(--color-primary); }
+
+/* Disabled, not hidden. The operator can see the action exists and read why it
+   is refused, which is the difference between a tool that says no and a tool
+   that pretends the option was never there. */
+.hygiene-act.is-off,
+.hygiene-act:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-style: dashed;
+  color: var(--text-gray);
+}
+
+.hygiene-decision-caveat,
+.hygiene-decision-off {
+  font-size: 12px;
+  color: var(--color-warning);
+  line-height: 1.5;
+  margin: 0 0 8px 2px;
+}
+.hygiene-decision-off { color: var(--text-gray); }
+.hygiene-decision-off div { margin-top: 3px; }
+.hygiene-decision-never {
+  font-size: 11px;
+  color: var(--text-gray);
+  margin: 0 0 18px 2px;
+  letter-spacing: 0.2px;
+}
+
+/* Where the primary action lands. Marking beats filtering: filtering would
+   hide the ranking, and the ranking is the argument this screen is making. */
+.hygiene-finding.is-focused {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: 8px;
+}

@@ -2,7 +2,7 @@
 
 > **COMPLETED.** Every fix below was already applied to the target files.
 > Kept as a historical record of what changed and why, not as a pending
-> action list — nothing here still needs doing.
+> action list -- nothing here still needs doing.
 
 Covers all five markdown files reviewed: `research.md`, `CHANGELOG.md`, `docs/architecture.md`, `docs/handoff.md`, `docs/roadmap.md`. Each fix is formatted as a direct find-and-replace with rationale.
 
@@ -10,7 +10,7 @@ Covers all five markdown files reviewed: `research.md`, `CHANGELOG.md`, `docs/ar
 
 ## `research.md`
 
-### Fix 1 — BCUninstaller mechanism description
+### Fix 1 -- BCUninstaller mechanism description
 **Location**: Q: How does BCUninstaller (BCU) identify file and registry leftovers safely?
 
 **Find**:
@@ -25,7 +25,7 @@ comparing publisher GUIDs and InstallLocation paths across all co-installed prog
 
 ---
 
-### Fix 2 — YARA on Windows claim
+### Fix 2 -- YARA on Windows claim
 **Location**: Q: How can we run YARA pattern matching on Windows in a Node/Electron host?
 
 **Find**:
@@ -40,7 +40,7 @@ Native Node YARA bindings (e.g. `node-yara-rs`) can compile on Windows with the 
 
 ---
 
-### Fix 3 — UAC elevation check method
+### Fix 3 -- UAC elevation check method
 **Location**: Q: How does Vanish automatically request UAC elevation if launched by an unelevated user?
 
 **Find**:
@@ -55,7 +55,7 @@ We check elevation status on startup using `[Security.Principal.WindowsPrincipal
 
 ---
 
-### Fix 4 — BCU handle logic description in FOSS tools summary
+### Fix 4 -- BCU handle logic description in FOSS tools summary
 **Location**: Q: What FOSS tool assists in building a superior handle/socket Task Manager? (Report line)
 
 **Find**:
@@ -70,7 +70,7 @@ System Informer (handle-release logic via handle duplication and remote closure)
 
 ---
 
-### Fix 5 — Conflated FOSS/UX adoption argument
+### Fix 5 -- Conflated FOSS/UX adoption argument
 **Location**: Q: Is keeping Vanish open-source and free a good strategic decision?
 
 **Find**:
@@ -85,7 +85,7 @@ FOSS enables community-driven updates to installer heuristic patterns. A premium
 
 ---
 
-### Fix 6 — TaskExplorer attribution
+### Fix 6 -- TaskExplorer attribution
 **Location**: Q: What FOSS tool assists in building a superior handle/socket Task Manager?
 
 **Find**:
@@ -100,7 +100,7 @@ TaskExplorer (by DavidXanatos), a Qt/C++ tool that shares architectural concepts
 
 ---
 
-### Fix 7 — Add license field to all FOSS tool entries
+### Fix 7 -- Add license field to all FOSS tool entries
 **Location**: All Q entries referencing FOSS tools (BCUninstaller, System Informer, TaskExplorer, OpenArk, PE-sieve/HollowsHunter, BleachBit, winget-cli, DDU, PowerToys, YARA)
 
 **Action**: Append a `- **License**:` line to each tool's Report block. Values:
@@ -122,7 +122,7 @@ TaskExplorer (by DavidXanatos), a Qt/C++ tool that shares architectural concepts
 
 ---
 
-### Fix 8 — Remove Threat Intelligence Q entries
+### Fix 8 -- Remove Threat Intelligence Q entries
 **Location**: Any Q entries referencing MalwareBazaar lookups, Community Threat Submission, or cloud-based file hash queries.
 
 **Action**: Delete those entries entirely. Replace with a single note at the top of the file:
@@ -137,7 +137,7 @@ TaskExplorer (by DavidXanatos), a Qt/C++ tool that shares architectural concepts
 
 ## `CHANGELOG.md`
 
-### Fix 1 — Typo: "sort sorting"
+### Fix 1 -- Typo: "sort sorting"
 **Location**: `## [1.0.0]` → State Controller bullet
 
 **Find**:
@@ -151,7 +151,7 @@ Mapped concurrent app loading, sort controls (by Name, Date, Size)
 
 ---
 
-### Fix 2 — Vague term: "Frameless browser settings"
+### Fix 2 -- Vague term: "Frameless browser settings"
 **Location**: `## [1.0.0]` → Electron Main Process bullet
 
 **Find**:
@@ -165,7 +165,7 @@ Frameless window configuration (`frame: false`), admin elevation checking via Wi
 
 ---
 
-### Fix 3 — Capitalisation: "xml"
+### Fix 3 -- Capitalisation: "xml"
 **Location**: `## [1.0.0]` → PowerShell Execution Engine bullet
 
 **Find**:
@@ -183,7 +183,7 @@ UWP Store app mapping with friendly name XML parsing
 
 ## `docs/architecture.md`
 
-### Fix 1 — Capitalisation: "Javascript"
+### Fix 1 -- Capitalisation: "Javascript"
 **Location**: Technical Stack section
 
 **Find**:
@@ -197,7 +197,7 @@ HTML5, Vanilla CSS3 (Custom Orbit Glassmorphic Dark Theme), ES6 JavaScript.
 
 ---
 
-### Fix 2 — Spelling error: "tempering" → "tampering"
+### Fix 2 -- Spelling error: "tempering" → "tampering"
 **Location**: Counter-Malware & Threat Auditing Architecture → Point 3
 
 **Find**:
@@ -212,7 +212,7 @@ verifies Authenticode digital signatures on target DLLs/EXEs to detect injection
 
 ---
 
-### Fix 3 — MD5 as integrity mechanism
+### Fix 3 -- MD5 as integrity mechanism
 **Location**: Counter-Malware & Threat Auditing Architecture → Point 3
 
 **Find**:
@@ -227,7 +227,7 @@ Executes file integrity hashing (SHA256). MD5 is used only for legacy cross-refe
 
 ---
 
-### Fix 4 — Mermaid diagram missing language tag
+### Fix 4 -- Mermaid diagram missing language tag
 **Location**: System Architecture section
 
 **Find**:
@@ -244,7 +244,7 @@ graph LR
 
 ---
 
-### Fix 5 — Replace Threat Auditing section scope
+### Fix 5 -- Replace Threat Auditing section scope
 **Location**: `## 🛡️ Counter-Malware & Threat Auditing Architecture` section
 
 **Action**: Retitle section and replace Points 1-4 with the following:
@@ -258,7 +258,7 @@ Indicators displayed in the Task Manager view (Stage 3):
 
 1. **Suspicious Process Trees**: Flags office applications or document viewers spawning command interpreters (`cmd.exe`, `powershell.exe`, `wscript.exe`).
 2. **Destructive Command Patterns**: Flags active processes issuing known destructive commands (e.g. `vssadmin delete shadows`, host file edits).
-3. **Persistence Path Display**: Lists entries found in known persistence locations (Registry Run keys, Task Scheduler, AppInit_DLLs, Winlogon Shell) for user review — not auto-removal.
+3. **Persistence Path Display**: Lists entries found in known persistence locations (Registry Run keys, Task Scheduler, AppInit_DLLs, Winlogon Shell) for user review -- not auto-removal.
 
 All findings are labelled as "indicators to investigate with your antivirus." Vanish surfaces; AV decides.
 
@@ -267,7 +267,7 @@ See `docs/promptgate.md` Rules 6 and 7.
 
 ---
 
-### Fix 6 — Add Scan Mode architecture note
+### Fix 6 -- Add Scan Mode architecture note
 **Location**: After `## 2. Deep-Clean Scanner` section
 
 **Add**:
@@ -284,7 +284,7 @@ A user may run Advanced discovery and still review every finding before any dele
 
 ---
 
-### Fix 7 — Add Quarantine-First principle note
+### Fix 7 -- Add Quarantine-First principle note
 **Location**: After the Scan Mode Design Principle addition above
 
 **Add**:
@@ -302,8 +302,8 @@ This applies to all cleanup operations: MSI caches, WMI entries, orphaned servic
 
 ---
 
-### Fix 8 — Add Audit Mode (unelevated) description
-**Location**: `## 🖥️ Windows OS Support Policy` section — add before it
+### Fix 8 -- Add Audit Mode (unelevated) description
+**Location**: `## 🖥️ Windows OS Support Policy` section -- add before it
 
 **Add**:
 ```markdown
@@ -311,7 +311,7 @@ This applies to all cleanup operations: MSI caches, WMI entries, orphaned servic
 
 Vanish operates in one of two capability tiers depending on elevation state:
 
-- **Audit Mode** (unelevated): Read-only. App listing, scan result display, and report generation are available. No destructive operations. UI displays a persistent banner: *"Running in Audit Mode — elevate to enable cleaning and uninstallation."*
+- **Audit Mode** (unelevated): Read-only. App listing, scan result display, and report generation are available. No destructive operations. UI displays a persistent banner: *"Running in Audit Mode -- elevate to enable cleaning and uninstallation."*
 - **Full Mode** (elevated): All features available.
 
 If the user declines the UAC prompt, Vanish falls back to Audit Mode gracefully. It never silently exits or crashes on a declined elevation request. See `docs/promptgate.md` Rule 3.
@@ -319,7 +319,7 @@ If the user declines the UAC prompt, Vanish falls back to Audit Mode gracefully.
 
 ---
 
-### Fix 9 — Label performance targets correctly
+### Fix 9 -- Label performance targets correctly
 **Location**: `## Performance & Resource Targets` section header
 
 **Find**:
@@ -333,8 +333,8 @@ Vanish targets a lightweight, non-intrusive system footprint. The figures below 
 
 ---
 
-### Fix 10 — Add Definition Packs architecture note
-**Location**: `## Technical Stack` section — add after the Communication Channel bullet
+### Fix 10 -- Add Definition Packs architecture note
+**Location**: `## Technical Stack` section -- add after the Communication Channel bullet
 
 **Add**:
 ```markdown
@@ -347,7 +347,7 @@ Vanish targets a lightweight, non-intrusive system footprint. The figures below 
 
 ## `docs/handoff.md`
 
-### Fix 1 — Remove local filesystem path
+### Fix 1 -- Remove local filesystem path
 **Location**: Project Overview section
 
 **Find**:
@@ -362,7 +362,7 @@ Vanish targets a lightweight, non-intrusive system footprint. The figures below 
 
 ---
 
-### Fix 2 — Update elevation check reference
+### Fix 2 -- Update elevation check reference
 **Location**: File Structure Map → main.js description
 
 **Find**:
@@ -371,41 +371,41 @@ elevation queries (`net session`)
 ```
 **Replace with**:
 ```
-elevation queries (WindowsPrincipal API — see `docs/promptgate.md` Rule 13)
+elevation queries (WindowsPrincipal API -- see `docs/promptgate.md` Rule 13)
 ```
 
 ---
 
-### Fix 3 — Add per-file status indicators
+### Fix 3 -- Add per-file status indicators
 **Location**: `## 📁 File Structure Map` section
 
 **Action**: Append `*(Status: ...)*` to each file entry. Current known states:
 
 ```
 - **package.json**: ... *(Status: Complete)*
-- **main.js**: ... *(Status: Complete — MVP functional)*
-- **preload.js**: ... *(Status: Complete — MVP functional)*
-- **index.html**: ... *(Status: Complete — MVP functional)*
-- **index.css**: ... *(Status: Complete — MVP functional)*
-- **renderer.js**: ... *(Status: Complete — MVP functional)*
-- **scanner.ps1**: ... *(Status: Complete — MVP functional)*
+- **main.js**: ... *(Status: Complete -- MVP functional)*
+- **preload.js**: ... *(Status: Complete -- MVP functional)*
+- **index.html**: ... *(Status: Complete -- MVP functional)*
+- **index.css**: ... *(Status: Complete -- MVP functional)*
+- **renderer.js**: ... *(Status: Complete -- MVP functional)*
+- **scanner.ps1**: ... *(Status: Complete -- MVP functional)*
 ```
 
 ---
 
-### Fix 4 — Add promptgate reference and Stages 6+ pointer
-**Location**: `## 🔍 Next Steps & Roadmap Checklist` — add at the top of this section
+### Fix 4 -- Add promptgate reference and Stages 6+ pointer
+**Location**: `## 🔍 Next Steps & Roadmap Checklist` -- add at the top of this section
 
 **Add**:
 ```markdown
 > **Before planning, speccing, or implementing any feature**, run it through `docs/promptgate.md`. All decisions must pass the gate before work begins.
 
-> **For Stages 6–14** (Orchestration, Network, Sandbox, Environment Clean, Enterprise Audits, Cache Purge, Telemetry, Runtime/Driver Audit, CleanerML Engine), refer to `docs/roadmap.md`. The checklist below covers Core tier stages only.
+> **For Stages 6-14** (Orchestration, Network, Sandbox, Environment Clean, Enterprise Audits, Cache Purge, Telemetry, Runtime/Driver Audit, CleanerML Engine), refer to `docs/roadmap.md`. The checklist below covers Core tier stages only.
 ```
 
 ---
 
-### Fix 5 — Expand checklist with tier labels
+### Fix 5 -- Expand checklist with tier labels
 **Location**: `## 🔍 Next Steps & Roadmap Checklist` items
 
 **Action**: Add tier labels and expand to cover all Core stages:
@@ -413,10 +413,10 @@ elevation queries (WindowsPrincipal API — see `docs/promptgate.md` Rule 13)
 ```markdown
 **Core Tier** (complete before any public release):
 
-- `[ ]` **Stage 2 — Audit & Health Advisor Tab**: Interactive scorecard: unused software, reclaimable space, boot-up impact. *(Core)*
-- `[ ]` **Stage 3 — Task Manager & Unlocker**: Process list with CPU/Memory/Disk, file handle inspector, Suspicious Activity Indicators display, Watchdog Suspension. *(Core)*
-- `[ ]` **Stage 6 — Orchestration & Shell Cleanup**: Bulk silent uninstaller, context menu cleaner, MSI service lockout manager, restore point frequency override. *(Core)*
-- `[ ]` **Stage 9 — System Integration & Environment Clean**: Services/drivers purge, PATH cleaner, file association repair, multi-user profile registry sweep, auto-UAC relauncher, registry redirection bypass. *(Core)*
+- `[ ]` **Stage 2 -- Audit & Health Advisor Tab**: Interactive scorecard: unused software, reclaimable space, boot-up impact. *(Core)*
+- `[ ]` **Stage 3 -- Task Manager & Unlocker**: Process list with CPU/Memory/Disk, file handle inspector, Suspicious Activity Indicators display, Watchdog Suspension. *(Core)*
+- `[ ]` **Stage 6 -- Orchestration & Shell Cleanup**: Bulk silent uninstaller, context menu cleaner, MSI service lockout manager, restore point frequency override. *(Core)*
+- `[ ]` **Stage 9 -- System Integration & Environment Clean**: Services/drivers purge, PATH cleaner, file association repair, multi-user profile registry sweep, auto-UAC relauncher, registry redirection bypass. *(Core)*
 
 **Standard and Extended tiers**: See `docs/roadmap.md`.
 ```
@@ -427,7 +427,7 @@ elevation queries (WindowsPrincipal API — see `docs/promptgate.md` Rule 13)
 
 ## `docs/roadmap.md`
 
-### Fix 1 — Mermaid diagram missing language tag
+### Fix 1 -- Mermaid diagram missing language tag
 **Location**: Development Phases diagram
 
 **Find**:
@@ -443,7 +443,7 @@ graph TD
 
 ---
 
-### Fix 2 — Duplicate word: "registry registry"
+### Fix 2 -- Duplicate word: "registry registry"
 **Location**: Stage 6 → Restore Point Frequency Override bullet
 
 **Find**:
@@ -457,8 +457,8 @@ the `SystemRestorePointCreationFrequency` registry value
 
 ---
 
-### Fix 3 — Remove Stage 5: Threat Intelligence Hunting Model
-**Location**: `### Stage 5: Threat Intelligence Hunting Model` — entire section
+### Fix 3 -- Remove Stage 5: Threat Intelligence Hunting Model
+**Location**: `### Stage 5: Threat Intelligence Hunting Model` -- entire section
 
 **Action**: Delete the entire Stage 5 section. Replace with:
 
@@ -472,7 +472,7 @@ the `SystemRestorePointCreationFrequency` registry value
 
 ---
 
-### Fix 4 — System Informer language: "C-based" → "C/C++-based"
+### Fix 4 -- System Informer language: "C-based" → "C/C++-based"
 **Location**: Open Source section → System Informer entry
 
 **Find**:
@@ -486,7 +486,7 @@ We can study its C/C++-based native handle querying logic
 
 ---
 
-### Fix 5 — YARA attribution
+### Fix 5 -- YARA attribution
 **Location**: Open Source section → YARA entry heading
 
 **Find**:
@@ -500,7 +500,7 @@ We can study its C/C++-based native handle querying logic
 
 ---
 
-### Fix 6 — Add winget caveat
+### Fix 6 -- Add winget caveat
 **Location**: Open Source section → winget-cli entry, "How to use it" line
 
 **Find**:
@@ -509,12 +509,12 @@ We can query the winget open-source manifest database to retrieve silent install
 ```
 **Replace with**:
 ```
-We can query the winget open-source manifest repository as a primary source for silent installer arguments. Note: uninstaller switch coverage in winget manifests is inconsistent — many entries are missing or incorrect. The lookup chain is: (1) winget manifest, (2) project-maintained corrections JSON, (3) heuristic fallback sequence (`/qn` → `/S` → `--silent` → `-quiet`). See `docs/promptgate.md` Rule 15.
+We can query the winget open-source manifest repository as a primary source for silent installer arguments. Note: uninstaller switch coverage in winget manifests is inconsistent -- many entries are missing or incorrect. The lookup chain is: (1) winget manifest, (2) project-maintained corrections JSON, (3) heuristic fallback sequence (`/qn` → `/S` → `--silent` → `-quiet`). See `docs/promptgate.md` Rule 15.
 ```
 
 ---
 
-### Fix 7 — Add Stage 10 mandatory review gate note
+### Fix 7 -- Add Stage 10 mandatory review gate note
 **Location**: `### Stage 10: Enterprise Audits & Offset Rules` → DCOM & WMI Namespace Cleanup bullet
 
 **Find**:
@@ -528,7 +528,7 @@ Scan for orphaned WMI classes and DCOM app registrations referencing missing exe
 
 ---
 
-### Fix 8 — Add priority tier table
+### Fix 8 -- Add priority tier table
 **Location**: After `## 🗺️ Development Phases` diagram, before Stage 1
 
 **Add**:
@@ -546,7 +546,7 @@ Do not begin Standard work until all Core stages are complete and tested on clea
 
 ---
 
-### Fix 9 — Add licensing deferred note
+### Fix 9 -- Add licensing deferred note
 **Location**: `## ⚖️ Open Source & License Assessment` → end of Monetization section
 
 **Add**:
@@ -556,8 +556,8 @@ Do not begin Standard work until all Core stages are complete and tested on clea
 
 ---
 
-### Fix 10 — Add definitions loader model note
-**Location**: `### 2. Can We Use Existing FOSS Solutions` section — add at the top
+### Fix 10 -- Add definitions loader model note
+**Location**: `### 2. Can We Use Existing FOSS Solutions` section -- add at the top
 
 **Add**:
 ```markdown

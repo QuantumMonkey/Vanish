@@ -3,12 +3,55 @@
 All notable changes to **Vanish** will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
-The versioning scheme is `MAJOR.MINOR.PATCH` — one milestone, one MINOR bump,
+The versioning scheme is `MAJOR.MINOR.PATCH` -- one milestone, one MINOR bump,
 and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
 ## [Unreleased]
+
+### Added -- a decision bar above Machine Hygiene
+
+The panel told you what it found. It did not tell you what to do about it, and
+with eight findings across three modules that is a real question. There is now
+a bar at the top of the screen that answers it with **one recommended click**.
+
+**It is not a Clean button, and it never will be.** Nothing on that screen is
+removable by Vanish in either mode. A one-click delete there would not be a
+faster version of the screen; it would be the product Vanish exists as an
+alternative to. Every action opens, filters, scrolls or copies, and the bar
+says so in every state it can be in.
+
+**The recommendation is chosen by what a finding would cost to get back, never
+by how large it is.** A 14 GB package cache is the biggest number on the screen
+and the least consequential thing on it. A megabyte of uncommitted work is the
+opposite. So the order is: what you cannot get back, then what has not been
+measured, then what is expensive to rebuild, and only when none of those exist
+does the bar mention size at all. An unmeasured cost is deliberately ranked
+above an expensive one, because unmeasured is not the same as cheap.
+
+What it refuses to do, and says out loud:
+
+- **Nothing is recommended while the checks are still running.** Not even when
+  findings are already in hand. A recommendation from a partial run is not a
+  recommendation.
+- **No action is computed from a total that is a floor.** If any location could
+  not be read, the button that would act on the byte total is disabled and the
+  reason is printed on the page.
+- **Two refusals get two sentences.** "Nothing regenerable was found" and "the
+  total is incomplete" are different reasons to grey out the same button, and
+  saying only one of them would be a control that lies.
+- **Refused controls are disabled and explained, never hidden**, and never in a
+  tooltip alone.
+- **"Did not run" and "found nothing" stay different**, in the bar as well as in
+  the verdict block below it.
+
+### Changed -- no em-dashes anywhere in the repository
+
+339 em-dashes, en-dashes and ellipses replaced with their ASCII forms across
+twelve files. The house rule already required ASCII on disk, because PowerShell
+5.1 mangles the rest; the documentation had not been held to it. The only ones
+left are in files `bd` generates and reinstalls.
 
 ---
 
@@ -1562,7 +1605,7 @@ proven correct about elevation.
 
 ## [0.4.0] - 2026-08-13
 
-### Added — watch an install, and see what it left behind (`zrw`, `bu2`)
+### Added -- watch an install, and see what it left behind (`zrw`, `bu2`)
 
 Two features that only make sense together, both in **System Clean**.
 
@@ -1571,7 +1614,7 @@ Two features that only make sense together, both in **System Clean**.
   installer yourself; a second reading reports the difference in real numbers.
   Windows does not answer "what did that installer actually change", and the
   tools that used to (InstallWatch, ZSoft Uninstaller) are dead with nothing in
-  their place. It is a **comparison, not a recording** — anything created and
+  their place. It is a **comparison, not a recording** -- anything created and
   deleted in between is invisible to it, and the panel says so rather than
   implying completeness.
 * **Where your disk space went** matches every top-level program folder against
@@ -1580,7 +1623,7 @@ Two features that only make sense together, both in **System Clean**.
   database. Vanish has one.
 * The distinction the second feature is built around: **"left behind" and
   "unexplained" are different claims and are never merged.** Left behind is
-  positive — Vanish watched the install and the program is gone — and is only
+  positive -- Vanish watched the install and the program is gone -- and is only
   ever said on recorded evidence. A folder that was watched but whose owner was
   never resolved stays *unexplained*, because calling it orphaned would invent
   the fact that makes the word mean anything. A tool that guessed here would
@@ -1594,15 +1637,15 @@ it.** 134 of 233 folders came back unexplained, because a program registered
 *beneath* a publisher folder (Brave lives in
 `BraveSoftware\Brave-Browser\Application`) made the scanned folder an ancestor
 of the registered location, and concatenated folder names never split into
-tokens — both now matched, unexplained fell to 107 and matched rose to 93. And
+tokens -- both now matched, unexplained fell to 107 and matched rose to 93. And
 measurement took 62 seconds against a 12 GB WSL tree and an npm cache of
 hundreds of thousands of files, so it now runs under a 20-second budget:
 anything past it is reported **unmeasured, with the reason**, never truncated or
 shown as small. A false zero is a number you would act on.
 
-### Fixed — the bulk queue no longer blames an uninstaller that never ran (`8ns`)
+### Fixed -- the bulk queue no longer blames an uninstaller that never ran (`8ns`)
 
-* A Steam game came back "needs attention — the uninstaller did not finish on
+* A Steam game came back "needs attention -- the uninstaller did not finish on
   its own", with a Retry button. Both were wrong in the worst way this app can
   be wrong: they told you to do something that cannot work. A Steam game's
   uninstall string is `steam.exe`, not a per-app uninstaller, so there is no
@@ -1615,7 +1658,7 @@ shown as small. A false zero is a number you would act on.
   Software" is not a Steam game. Suppressing Retry on something that could have
   retried is its own kind of wrong answer.
 
-### Changed — the renderer is seven modules instead of one 5,500-line file
+### Changed -- the renderer is seven modules instead of one 5,500-line file
 
 * `renderer.js` had grown to 5,518 lines and 148 functions covering every
   screen. Split by feature into `renderer/`: core, settings-about, wizard,
@@ -1624,7 +1667,7 @@ shown as small. A false zero is a number you would act on.
   executable statements, both `DOMContentLoaded` listeners that run after every
   script has loaded. Classic scripts share one global lexical environment, so
   cross-file references resolve exactly as before. No bundler, no imports, no
-  behaviour change — and the suite total is identical either side of it.
+  behaviour change -- and the suite total is identical either side of it.
 * Three references to the vanished filename would each have failed differently:
   `package.json` would have shipped a build whose `index.html` loads seven
   scripts that were never packaged (a blank window, visible only in a packaged
@@ -1633,7 +1676,7 @@ shown as small. A false zero is a number you would act on.
   fraction of the UI. All three fixed, and the two checkers now *discover*
   renderer files rather than naming them.
 
-### Security — the new read-only surfaces are regressed, not just asserted
+### Security -- the new read-only surfaces are regressed, not just asserted
 
 * `measure-paths` is the first engine command to take a caller-supplied path
   **list** rather than one validated target, so the base64-JSON parameter
@@ -1644,16 +1687,16 @@ shown as small. A false zero is a number you would act on.
   `cmd.exe` and no write cmdlet at all.
 * Placed **above** the elevation gate on purpose: they had been written inside
   the elevated-only section, which would have meant the Audit Mode read-only
-  promise was regressed exactly never — Audit Mode being the tier the promise is
+  promise was regressed exactly never -- Audit Mode being the tier the promise is
   about.
 * Review finding, recorded because a negative result is still a result: all 17
   mutating IPC channels are gated through `fullModeOnly`, and every ungated
-  channel is a read. `set-settings` is ungated and correctly so — it can ask for
+  channel is a read. `set-settings` is ungated and correctly so -- it can ask for
   elevation at the next launch but grants none, and the channel that creates the
   scheduled task is gated.
 
 
-### Added — multi-select and bulk "Add N to queue" in All Programs (`5rz`)
+### Added -- multi-select and bulk "Add N to queue" in All Programs (`5rz`)
 
 * Building a bulk queue used to be N × (click a row → wait for the details
   sidebar → click Add), for a feature whose name is "Bulk uninstall queue".
@@ -1664,7 +1707,7 @@ shown as small. A false zero is a number you would act on.
   checkbox does not swap the details sidebar out from under a selection
   being built, and opening a row does not tick its box.
 * **Select-all means the rows you can see.** It covers the currently
-  rendered — filtered and sorted — list, never the full one, and any row a
+  rendered -- filtered and sorted -- list, never the full one, and any row a
   filter later hides is dropped from the selection rather than queued
   unseen. Filter to a publisher or a type, select all, queue.
 * **Refusals are named, not silent.** The protected/Windows-feature check is
@@ -1676,16 +1719,16 @@ shown as small. A false zero is a number you would act on.
   deliberately dropped by a re-sort, because it is a *position* and the rows
   have moved.
 
-### Fixed — three defects surfaced by the column above
+### Fixed -- three defects surfaced by the column above
 
 * **Date and Size could wrap again** (`ri6` regression). That fix pinned
   them by column position; a new leading checkbox column shifted every later
   column by one, so it had silently started pinning Type and Date instead.
-  Positional CSS selectors do not error when a column is inserted — they
+  Positional CSS selectors do not error when a column is inserted -- they
   just start describing different columns.
 * **An active filter went quiet while rows were selected.** The selection
   caption and the filter caption share one slot, so a live selection hid
-  "Showing 5 of 163 programs" entirely — the exact 2026-08-05 bug where a
+  "Showing 5 of 163 programs" entirely -- the exact 2026-08-05 bug where a
   filter said nothing about itself. The selection caption now carries that
   sentence for as long as it holds the slot.
 * **A selected Windows optional feature could vanish from the report.** The
@@ -1693,7 +1736,7 @@ shown as small. A false zero is a number you would act on.
   feature row would have been dropped from *both* the added count and the
   skipped list. It is now resolved against everything the table can render.
 
-### Added — restart back to Audit Mode, without closing the app (`dtd`)
+### Added -- restart back to Audit Mode, without closing the app (`dtd`)
 
 * Turning the startup-elevation setting off used to mean quitting and
   relaunching the exe by hand to actually leave Full Mode. There is now a
@@ -1701,12 +1744,12 @@ shown as small. A false zero is a number you would act on.
 * Shipped on the second implementation. The first used the
   `Shell.Application` "ask explorer to launch it" trick, which looked
   correct and passed every check available without real elevation, then
-  **failed a live elevated test** — it relaunched and came back still
+  **failed a live elevated test** -- it relaunched and came back still
   elevated. The shipped version uses `runas.exe /trustlevel:0x20000`, the
   documented Windows mechanism for dropping privilege, and was confirmed
   live: a real, UAC-free de-elevation round trip.
 
-### Added — silent or interactive uninstall, and which switch was used (`d6y`)
+### Added -- silent or interactive uninstall, and which switch was used (`d6y`)
 
 * The wizard's native-uninstaller screen has a **Run the uninstaller
   silently** toggle, remembered between runs. The completion toast now names
@@ -1717,7 +1760,7 @@ shown as small. A false zero is a number you would act on.
   point, so it keeps its always-silent-with-fallback behaviour rather than
   gaining a per-item prompt that would defeat walking away from it.
 
-### Added — evidence for the elevation-relaunch loop (`6lg`)
+### Added -- evidence for the elevation-relaunch loop (`6lg`)
 
 * Not a fix. "Restart as administrator" has intermittently closed and
   reopened the app in Audit Mode with no prompt, no crash and nothing to
@@ -1725,16 +1768,16 @@ shown as small. A false zero is a number you would act on.
   the fault lies. A relaunch that reports success but comes back
   unelevated now raises an explicit toast on the very next launch and logs a
   `relaunch-elevated-mismatch` oplog entry with a full UAC diagnostics
-  snapshot — so the next occurrence produces evidence instead of another
+  snapshot -- so the next occurrence produces evidence instead of another
   guess.
 
-### Added — manual-tap ping (`kp0`)
+### Added -- manual-tap ping (`kp0`)
 
 * Asked three times; accepted this session as one deliberate, tightly
   scoped exception to "zero network I/O", not a reopening of it. A fourth
-  tile next to Download/Upload/Adapter sends a single ICMP echo — **only**
+  tile next to Download/Upload/Adapter sends a single ICMP echo -- **only**
   when tapped, never on a timer or automatically. Defaults to the current
-  adapter's own gateway address, shown and editable — never a hardcoded
+  adapter's own gateway address, shown and editable -- never a hardcoded
   third-party IP. First tap explains what is sent and where, and is
   remembered after being *given*, not merely seen; declining asks again
   next time. The About page's absolute privacy promise is now stated
@@ -1746,7 +1789,7 @@ shown as small. A false zero is a number you would act on.
   count. 39/0 in that suite, including a real round trip against loopback
   and a guaranteed-unreachable test address.
 
-### Fixed — the operator's punch list from the installed build
+### Fixed -- the operator's punch list from the installed build
 
 Twelve issues reported after installing and using the sent executable, plus
 three found while fixing them. The recurring theme the operator named twice
@@ -1755,7 +1798,7 @@ was honesty: several screens stated more certainty than the data supported.
 * **Uninstall completion screen no longer overclaims** (`xw2`). A run where
   0 items moved to quarantine used the partial-success wording and showed
   "Unknown" freed. Nothing moving is a failure, not a lesser success: it now
-  has its own state — "Nothing was moved to quarantine", failed styling, and
+  has its own state -- "Nothing was moved to quarantine", failed styling, and
   an explicit "0 B".
 * **"Left in place" failures are reachable** (`vej`). The per-item reason was
   always rendered; the completion screen had no `overflow-y`, so an
@@ -1764,51 +1807,51 @@ was honesty: several screens stated more certainty than the data supported.
 * **Network Activity stops calling a quiet sample an idle machine** (`h8j`).
   The verdict is computed from a ~1s byte-rate sample, which can land in a
   gap of genuinely bursty traffic. With programs holding open connections it
-  now reads "Low traffic in this sample — not necessarily idle" and states
+  now reads "Low traffic in this sample -- not necessarily idle" and states
   the sample length; the confident "Nothing on this PC is using the network"
   is reserved for a quiet sample with *no* open connections.
 * **A high connection count is explained, not just counted** (`hks`). 54
   open connections on one program read as alarming with no context. A local
   process-kind classifier (browsers, sync clients, launchers, security
-  software, updaters, dev tools…) explains what is normal for that kind of
-  program — visible in-row above 10 connections, in a tooltip always. No
+  software, updaters, dev tools...) explains what is normal for that kind of
+  program -- visible in-row above 10 connections, in a tooltip always. No
   risk score, no safe/unsafe verdict, no trusted-process list (Rule 6), and
   no lookups of any kind (INV-4). An unrecognised program is explicitly
   described as meaning nothing either way.
 * **GPU column says which kind of nothing it means** (`3nd`). The engine
   drops zero readings, so one "-" meant both "measured, idle" and "never
-  measured". Now three distinct states — "measuring…", an honest "0%", and
-  "-" only for a process newer than the last sample — plus a visible note
+  measured". Now three distinct states -- "measuring...", an honest "0%", and
+  "-" only for a process newer than the last sample -- plus a visible note
   and header tooltip stating the 15s cadence and that the percentage sums
   across the GPU's engines.
 * **Guided tour's welcome step is readable** (`0ct`). The step with no
   spotlight target hid the spotlight with `opacity: 0`, which also killed
-  the box-shadow that does the dimming — so the one step that most needed a
+  the box-shadow that does the dimming -- so the one step that most needed a
   dim never had one, and its tooltip sat on a bright app list.
 * **Sticky table headers** (`h0i`) across all four column-header tables.
 * **All Programs layout** (`ri6`). Date and Size had no width floor and
   wrapped to two lines once the details sidebar compressed the table; the
   sidebar also claimed its full width while invisible, before any selection.
-* **Column header said "Publisher", showed a type badge** (`qq5`) — renamed
+* **Column header said "Publisher", showed a type badge** (`qq5`) -- renamed
   to "Type"; the publisher was always under the app name in column 1.
-* **System Clean header buttons** (`l0t`) — "Scan all" and "Clean all" were
+* **System Clean header buttons** (`l0t`) -- "Scan all" and "Clean all" were
   spread apart by the shared header's `space-between`.
 * **The bulk queue stops fighting its own user** (`2pc`). It re-expanded on
   every add and toasted each time, so collapsing it was undone by the next
   thing you did. It now announces itself once per batch, and collapsed
-  shrinks from 400×419 to 391×57 — about 87% less screen area.
+  shrinks from 400×419 to 391×57 -- about 87% less screen area.
 
-### Added — Network Activity download/upload tiles
+### Added -- Network Activity download/upload tiles
 
 * Download, Upload and a de-emphasised adapter tile (`anc`) replace the text
   fragment that used to sit inside the "Looked at:" line. Deliberately *not*
   shown as a percentage of link speed: that is the negotiated rate to the
   router, not the internet connection behind it.
 
-### Fixed — test coverage that looked like coverage
+### Fixed -- test coverage that looked like coverage
 
 * **Seven `window.api` methods were missing from the shared test fixture**,
-  so the Health Advisor tab was a hard TypeError under test — and the suite
+  so the Health Advisor tab was a hard TypeError under test -- and the suite
   stayed green, because nothing ever navigated there. All 48 methods are now
   covered, found by diffing the renderer's calls against the fixture's keys
   rather than one crash at a time.
@@ -1816,15 +1859,15 @@ was honesty: several screens stated more certainty than the data supported.
   asserts a panel is visible, carries no visible error state, and contains
   no "is not a function" text. Verified by deliberately re-breaking the
   fixture and confirming the suite goes red.
-* **Three icons were rendering as invisible blank squares** — caught by this
+* **Three icons were rendering as invisible blank squares** -- caught by this
   project's own `test/icon-verify.js`, which exists for exactly that silent
   no-op. Added to the vendored set; 55 referenced, 55 defined.
 
 `npm test`: **395 passed, 0 failed** (was 371 before the new assertions; the
 `kp0` ping work above added further assertions on top of these, see that
-section — **404 passed, 0 failed** is the current total).
+section -- **404 passed, 0 failed** is the current total).
 
-### Added — guided tour, ambient background, codebase cleanup
+### Added -- guided tour, ambient background, codebase cleanup
 
 * **Guided tour.** A hand-rolled spotlight walkthrough (no third-party tour
   library) - 7 steps covering Audit/Full Mode, All Programs, Health
@@ -1848,7 +1891,7 @@ section — **404 passed, 0 failed** is the current total).
   documentation artifacts as historical rather than deleting them, matching
   this project's existing keep-and-mark convention.
 
-### Added — real install sizes for Steam (and documented support for Epic) games
+### Added -- real install sizes for Steam (and documented support for Epic) games
 
 * **Steam/Epic games no longer show "unknown size."** Confirmed the actual
   gap: Steam (and Epic) still write a normal Programs-and-Features entry per
@@ -1870,7 +1913,7 @@ section — **404 passed, 0 failed** is the current total).
   manifest shape but not live-tested - Epic isn't installed on the machine
   this was built against.
 
-### Added / Confirmed — startup latency root cause, redundancy discount badge
+### Added / Confirmed -- startup latency root cause, redundancy discount badge
 
 * **Startup latency: root cause confirmed with a live A/B measurement.**
   Built and installed the NSIS package, then timed launch-to-real-window on
@@ -1907,7 +1950,7 @@ section — **404 passed, 0 failed** is the current total).
   render on the Task Manager GPU pills, correctly labelled regardless of
   which adapter happens to be awake at query time.
 
-### Added / Fixed — GPU visibility, network telemetry, redundancy waivers, startup latency
+### Added / Fixed -- GPU visibility, network telemetry, redundancy waivers, startup latency
 
 * **System Overview grid, real fix this time.** The prior width-guessed
   auto-fit still wrapped on the operator's actual screen. Replaced with
@@ -1964,7 +2007,7 @@ section — **404 passed, 0 failed** is the current total).
   own concurrent process manipulation makes the trace unreliable), but both
   gaps were real regardless of what caused that one incident.
 
-### Fixed / Added — seven operator-reported issues from a live session
+### Fixed / Added -- seven operator-reported issues from a live session
 
 * **UAC diagnostics (`ytv`).** The "Windows did not grant administrator
   rights" message never said why. `scanner.ps1` now reads `EnableLUA` and
@@ -2002,22 +2045,22 @@ section — **404 passed, 0 failed** is the current total).
   tech-stack/data-folder disclosure was kept deliberately (zero network I/O,
   matches the project's transparency stance).
 
-### Changed — commercialization: personal use free, commercial use paid (ADR 0002)
+### Changed -- commercialization: personal use free, commercial use paid (ADR 0002)
 
 [`adrs/0002-commercialization-b2b-paid-personal-free.md`](adrs/0002-commercialization-b2b-paid-personal-free.md)
 supersedes **only** the payments row of ADR 0001; every other row of 0001
-stands. It also records what it deliberately does *not* decide — price,
+stands. It also records what it deliberately does *not* decide -- price,
 per-seat versus site, licence-key enforcement, and the repository licence text
-— because leaving those implicit is how one decision becomes five nobody made.
+-- because leaving those implicit is how one decision becomes five nobody made.
 
 Open-core was rejected on the way: a paid tier would end up holding the
 fleet-audit and advanced-heuristic surfaces, which would make the free build
 weaker at exactly the things that make the tool trustworthy. Signing hardens
-from optional-with-a-reversal-condition to disqualifying-if-absent — no IT
-department deploys an unsigned binary — so TASK-21 now needs splitting into
+from optional-with-a-reversal-condition to disqualifying-if-absent -- no IT
+department deploys an unsigned binary -- so TASK-21 now needs splitting into
 signing (required) and channel (open).
 
-### Added — hold background transfers, with a guaranteed way back (`bfh.2`)
+### Added -- hold background transfers, with a guaranteed way back (`bfh.2`)
 
 * Step 2 of the network work. A hold caps Windows Update's **background**
   downloading by policy and suspends BITS transfers that are currently running.
@@ -2026,7 +2069,7 @@ signing (required) and channel (open).
 * **The ordering is the safety property.** Capture is a separate, read-only
   step; the main process writes that record to disk *before* anything is
   changed. A crash between the two leaves a machine nobody touched. A crash
-  after leaves a file describing exactly what to put back — and the next
+  after leaves a file describing exactly what to put back -- and the next
   elevated start puts it back without being asked, because leaving Windows
   Update capped at 1% because Vanish died is precisely "left the system in a
   worse state than before".
@@ -2038,11 +2081,11 @@ signing (required) and channel (open).
 * A job somebody else already suspended is never captured, so releasing never
   resumes a transfer that was not Vanish's to touch.
 
-### Added — network attribution, and an honest negative answer (`bfh.1`)
+### Added -- network attribution, and an honest negative answer (`bfh.1`)
 
 * **A Health Advisor section that reaches a verdict about the network**, not a
   list of sockets. The verdict that matters is the negative one: *nothing on
-  this PC is using the network* — which tells someone to stop looking at their
+  this PC is using the network* -- which tells someone to stop looking at their
   PC and go look at their router. That answer needs no network call to reach,
   because it is a claim about local state, so `INV-4` (zero runtime network
   I/O) stands untouched.
@@ -2059,7 +2102,7 @@ signing (required) and channel (open).
   verdict by requiring a default gateway.
 * Absence is reported as absence, with a reason. Windows 11 gates Wi-Fi signal
   strength behind the Location privacy setting *and* elevation, so on a healthy
-  machine that read legitimately fails — it is reported as unread with the
+  machine that read legitimately fails -- it is reported as unread with the
   cause, never as a good signal, and the "weak link" verdict is withheld rather
   than guessed at.
 * Two bugs found while building it, both of which looked fine on screen:
@@ -2071,7 +2114,7 @@ signing (required) and channel (open).
   * `Get-BitsTransfer -AllUsers` needs elevation, and `netsh wlan` needs
     Location permission. Both now degrade to "unknown", never to "none".
 
-### Fixed — five icons were rendering as blank squares
+### Fixed -- five icons were rendering as blank squares
 
 The icon set is first-party SVG data URIs used as CSS masks (it replaced the
 FontAwesome CDN for `INV-4`). A class the file does not define is not an error:
@@ -2081,23 +2124,23 @@ the element renders as a 1em blank square, nothing throws, and nothing logs.
 diffs referenced against defined so the next one fails the build instead of
 shipping invisibly.
 
-### Changed — the operator's second pass over Health Advisor and Settings
+### Changed -- the operator's second pass over Health Advisor and Settings
 
 * **Startup items can be acted on** (`7oo.11`). The verdict on the old surface
   was "this item is broken but i cant do anything to it", and that was fair: it
   named the orphan, named the tool that manages it, and stopped. Each row now
   carries the one action Vanish can perform on that kind of entry, and each is
-  reversible — a Run value is removed after its key is exported to the vault as
+  reversible -- a Run value is removed after its key is exported to the vault as
   a `.reg` restore manifest; a service is set to start on demand after the same
   export; a scheduled task is disabled in place and re-enabled by the same
   button. The three engine verbs are deliberately narrow: the registry one
   accepts only the five Run/RunOnce keys this surface reads, the service one
   refuses boot-start drivers, and the task one refuses anything under
   `\Microsoft\`. None of them is a general-purpose primitive reachable over IPC.
-* **The second GPU was never missing — it was clipped** (`1bp`). The engine has
+* **The second GPU was never missing -- it was clipped** (`1bp`). The engine has
   reported every adapter since the last fix. `.card-value` is one `nowrap` line
   with an ellipsis, so "AMD Radeon + NVIDIA RTX 3080" rendered as "AMD
-  Radeon...". Adapters now render one per line, and every overview value wraps —
+  Radeon...". Adapters now render one per line, and every overview value wraps --
   the CPU and machine model were quietly losing their tails the same way.
 * **System Overview cards centre at any count** (`1zv`). `auto-fill` keeps empty
   phantom tracks, so a short last row sat jammed against the left with dead
@@ -2105,28 +2148,28 @@ shipping invisibly.
   center` reads the same with four cards or ten.
 * **The elevated restart says what it is doing** (`2cv`). Between requesting
   elevation and the elevated window appearing there are several seconds of
-  Windows' own work — consent, then a second Electron process booting. The
+  Windows' own work -- consent, then a second Electron process booting. The
   automatic path created no window at all in that window of time, and the manual
   path just vanished. Both now show a notice; the small always-on-top one
   outlives the main window on purpose, so the desktop is never blank.
 * **Settings states which mode this session is in** (`388`). The "start as
   administrator" toggle is about the *next* launch, but it was the only
   elevation-shaped control on the panel, so it read as the current mode. Settings
-  now opens with a status block naming the mode, what it allows, and — in Audit
-  Mode — a button to elevate now. The toggle says in words what the next start
+  now opens with a status block naming the mode, what it allows, and -- in Audit
+  Mode -- a button to elevate now. The toggle says in words what the next start
   will do.
   * Caught by the UI suite on the way: the new status block was first written as
     `.mode-card`, a class the uninstall wizard's scan-depth cards already own.
     It silently re-laid out the wizard until its restore-point toggle slid under
     the step rail. A class name is an interface.
 
-### Added — left-over Store app data sweep (`udu`)
+### Added -- left-over Store app data sweep (`udu`)
 
 * **A seventh System Clean cleaner: left-over Store (UWP/MSIX) app data.**
   Uninstalling a Store app removes the package and leaves
   `%LOCALAPPDATA%\Packages\<PackageFamilyName>` exactly where it was. Windows
   never collects these, Settings never shows them, and no other surface in
-  Vanish could see them — the app list reports packages Windows still
+  Vanish could see them -- the app list reports packages Windows still
   registers, which is precisely the set these folders are *not* in. On the
   development machine the sweep found 24 MB of data belonging to a vendor
   utility removed long ago.
@@ -2139,7 +2182,7 @@ shipping invisibly.
   `cr.sb.*` sandboxes, Windows' `ActiveSync`) are excluded by shape, since "no
   package claims it" says nothing about a directory that never had one.
 * Registered packages whose install folder has vanished are listed in the same
-  section as audit-only rows — that is why the Start tile does nothing — with
+  section as audit-only rows -- that is why the Start tile does nothing -- with
   no removal offered: a package registration has no restore manifest, so
   INV-1 forbids removing one from here.
 * `cleaner-purge` grew a file branch, so this is also the first cleaner whose
@@ -2148,13 +2191,13 @@ shipping invisibly.
   trip end to end (elevated), which no automated run had ever done for a file.
 * **`Get-FolderSize` had never returned anything but zero.**
   `return if ($size) { $size } else { 0 }` is not the expression PowerShell 5.1
-  reads it as. It had no live callers when this was found — the app-list caller
-  was deleted for being slow in the previous session — so nothing on screen was
+  reads it as. It had no live callers when this was found -- the app-list caller
+  was deleted for being slow in the previous session -- so nothing on screen was
   ever wrong, but the next caller would have inherited a helper that silently
   agrees every folder is empty. Fixed, and now measures hidden subtrees too
   (`-Force`), which is where app data actually lives.
 
-### Fixed — epic 7oo: the operator audit of 2026-08-06
+### Fixed -- epic 7oo: the operator audit of 2026-08-06
 
 The verdict that started this was "we have an aesthetic product with poor ux and
 minimal functionality". Ten defects, all of them invisible to a 312/312 green
@@ -2164,7 +2207,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 * **Real-data harness** (`7oo.10`). A second harness class that runs the real
   preload against the real backend and asserts what a user would actually see.
   Ground truth comes from `test/fixtures/real-machine-truth.ps1`, which reads
-  the machine with its own queries — a harness that asks the code under test
+  the machine with its own queries -- a harness that asks the code under test
   what reality looks like can only ever agree with itself. It reproduced six of
   the defects below before any of them were fixed. `main.js` gained
   `VANISH_HEADLESS_HARNESS=1` so no diagnostic can spawn a window mistakable for
@@ -2182,7 +2225,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   for Linux, the vendor utilities, both Python installations and every runtime.
   Nothing is dropped now: every entry is classified (application / component /
   update) and every component states why. Protection is a narrow claim about
-  Windows servicing — one entry on this machine — not a publisher check.
+  Windows servicing -- one entry on this machine -- not a publisher check.
 * **Uninstall actions rendered 250px below the window** (`7oo.1`). The details
   panel scrolled as a whole while its buttons relied on `margin-top: auto`. The
   info list scrolls now and the actions are structure; panel chrome is sized in
@@ -2199,7 +2242,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   serialised as `null` whenever exactly one item matched, hiding the badge.
 * **Live scan progress** (`6g2`). `queue-update` was the only push channel in
   the app. `scanner.ps1` now emits progress on stderr behind a marker, `main.js`
-  forwards it, and the renderer shows measured facts only — "step 6250 of 6465,
+  forwards it, and the renderer shows measured facts only -- "step 6250 of 6465,
   294 found so far, 6s", never a predicted percentage (Rule 9).
 * **Purging no longer triggers a full rescan** (`7oo.5`), counts read "scanning"
   until final, and a ticked selection survives collapsing and tab changes.
@@ -2213,7 +2256,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 * **Quarantine entries answer what happens if you do nothing** (`7oo.9`), read
   from the live retention setting, plus what/where/when/can-I-undo without
   expanding anything.
-* `test/fixtures/stub-preload.js` gained `callCount()` — "did interacting with
+* `test/fixtures/stub-preload.js` gained `callCount()` -- "did interacting with
   this screen re-run the scan?" is only answerable by counting what crossed the
   bridge, and the worst behaviours here were invisible because nothing counted.
 
@@ -2221,11 +2264,11 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 > Rule 10 note: everything below is **In Progress**, not Complete. It is coded
 > and passes 290/290 assertions **unelevated** on Windows 11 build 26200
 > (`test\run-all.ps1`); 2 of 14 suites (Vault IPC, System Clean purges) require
-> Full Mode and have not run this session — run elevated before trusting a
+> Full Mode and have not run this session -- run elevated before trusting a
 > total beyond 290. No clean Windows 10 / Windows 11 VM pass has happened yet
 > (TASK-17). No stage flips to "Complete" until it does.
 
-### Added — safety retrofits (promptgate Rules 2 and 3)
+### Added -- safety retrofits (promptgate Rules 2 and 3)
 * **Quarantine vault.** Every removal now moves files into a versioned vault
   and exports registry keys to a `.reg` restore manifest before deleting them.
   New engine actions `quarantine-items`, `vault-restore`, `vault-delete`;
@@ -2237,7 +2280,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   double confirmation (typed `DELETE`). Auto-purge is a setting, off by default,
   with a retention period.
 * **Enforced Audit Mode.** Elevation is resolved once at startup and every
-  destructive IPC channel is rejected in `main.js` when unelevated — verified by
+  destructive IPC channel is rejected in `main.js` when unelevated -- verified by
   invoking all nine of them directly, bypassing the UI. `scanner.ps1` re-checks
   `WindowsPrincipal` independently. The Rule 3 banner is shown verbatim and
   every destructive control is inert with an explaining tooltip.
@@ -2246,7 +2289,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 * **Startup elevation toggle (operator request 2026-08-03).** Settings >
   "Start Vanish as administrator" lets a trusted machine skip the manual click:
   when enabled, `main.js` requests elevation automatically before any window
-  exists, instead of waiting for FLOW-01. Off by default — everyone else's
+  exists, instead of waiting for FLOW-01. Off by default -- everyone else's
   first launch is unchanged. This does **not** bypass UAC; Windows' own consent
   prompt still appears on every launch while the setting is on, by design. A
   declined or cancelled elevation falls through to a working Audit Mode exactly
@@ -2254,7 +2297,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 * **Operation log** (`oplog.jsonl`): every destructive action, rejection and
   settings change is appended with a timestamp, tier and outcome.
 
-### Added — Stage 3 (Task Manager & Unlocker)
+### Added -- Stage 3 (Task Manager & Unlocker)
 * Live process monitor with CPU, working set and disk I/O per second, sortable,
   with a detail pane and a Full-Mode-only kill.
 * Unlocker built on the Windows Restart Manager: lists the processes holding a
@@ -2265,15 +2308,15 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   thaw is guaranteed by a `finally` path.
 * Passive suspicious-activity indicators (Rule 7): suspicious process trees,
   destructive command lines and persistence entries, labelled
-  "Indicator -- investigate with your antivirus". Display only — no UI path acts
+  "Indicator -- investigate with your antivirus". Display only -- no UI path acts
   on them, and a test asserts that.
 
-### Added — Stage 6 (Orchestration)
+### Added -- Stage 6 (Orchestration)
 * Bulk uninstall queue with a resumable state machine; queue state is written to
   disk on every transition, so a crash loses at most the in-flight application.
   Reboot exit codes (3010/1641) pause the queue; a non-silent uninstaller is
   marked "needs attention" and the queue carries on.
-* `corrections.json` — the Rule 15 primary switch source, seeded with the
+* `corrections.json` -- the Rule 15 primary switch source, seeded with the
   OPEN-02 verified entries plus a few community ones, each with provenance.
 * Installer service manager: `msiserver` is enabled if disabled before an MSI
   queue and restored to its prior start mode afterwards.
@@ -2281,7 +2324,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   checkpoint and the prior registry value is restored in a `finally`, so every
   application in a queue gets its own restore point.
 
-### Added — Stage 9 (System Integration & Environment Clean)
+### Added -- Stage 9 (System Integration & Environment Clean)
 * System Clean tab with one reusable review-list component per cleaner: orphaned
   context-menu handlers, orphaned services, dead PATH directories, dead file
   associations and protocol handlers, and an other-user-profile sweep. Scanning
@@ -2291,18 +2334,18 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 * Offline registry hive loading for other local profiles, with a guaranteed
   unload in a `finally` even when the scan fails.
 
-### Added — verification
+### Added -- verification
 * `test/` suite: 220 assertions across eight harnesses covering the vault round
   trip, the privilege boundary, the process/unlock/suspend paths, the switch
   chain, the queue state machine, and every cleaner's scan-purge-restore loop.
   `test/run-all.ps1` runs them all and prints one summary.
 * `docs/BENCHMARKS.md` now carries measured figures with Rule 9 test conditions:
-  process refresh 1.47–1.57 s at 305 processes, and OPEN-03 resolved (Restart
-  Manager interop init is 345 ms, not the feared 1–2 s).
+  process refresh 1.47-1.57 s at 305 processes, and OPEN-03 resolved (Restart
+  Manager interop init is 345 ms, not the feared 1-2 s).
 
 ### Added
 * `LICENSE` (MIT) at repository root.
-* `ARCHITECTURE.md` at repository root: **as-built** architecture — component
+* `ARCHITECTURE.md` at repository root: **as-built** architecture -- component
   map, approval-loop sequence diagram (both Mermaid), complete IPC surface
   table, `scanner.ps1` function inventory, and an implemented-vs-designed
   status table. `docs/architecture.md` remains the target-state specification.
@@ -2332,8 +2375,8 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   application list. Display fields are now coerced in the engine, with a
   defensive coercion in the renderer as well.
 * The System Clean association scan initially proposed removing `exefile`,
-  `batfile`, `cmdfile`, `comfile`, `scrfile` and `piffile` — the handlers that
-  let Windows launch anything at all — because `"%1"` placeholders and
+  `batfile`, `cmdfile`, `comfile`, `scrfile` and `piffile` -- the handlers that
+  let Windows launch anything at all -- because `"%1"` placeholders and
   extension-less commands were misread as missing targets. The command-target
   resolver now recognises shell placeholders, walks the longest existing path
   prefix (so unquoted paths with spaces survive), and probes for omitted
@@ -2354,21 +2397,21 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 * **Widened DOM hit-test coverage to the main user flows.** Raised by the
   operator: prior coverage bypassed the UI for most flows, testing the engine
   or IPC layer directly. Extended `test/ui-interaction-verify.js` (Audit Mode)
-  with application-list rendering of real engine output shapes — an empty
+  with application-list rendering of real engine output shapes -- an empty
   list, a rejected call, and a `REG_MULTI_SZ`-shaped `DisplayName` that once
   broke the whole renderer list (engine-side coercion existed; nothing
   asserted the list survived it on screen). Added
   `test/ui-interaction-full-verify.js` (Full Mode, fixture-simulated) driving
   the uninstall wizard end to end, the leftovers tree (select-all and
-  per-item toggles), the Quarantine Manager restore — including the
-  overwrite-conflict branch — and Delete Forever's double-typed-confirm, the
+  per-item toggles), the Quarantine Manager restore -- including the
+  overwrite-conflict branch -- and Delete Forever's double-typed-confirm, the
   bulk queue panel and its risky-uninstaller acknowledgement, and System
   Clean scan-to-purge. Every assertion hit-tests the real clickable target
   with `elementFromPoint`, the technique this suite exists for since an
   invisible overlay once covered every dialog in the app. Found one
   test-authoring bug in the process, not an app bug: the restore-point
   checkbox is a deliberately zero-size input behind a visible toggle slider
-  (standard CSS pattern) — fixed the assertion to hit-test the slider a real
+  (standard CSS pattern) -- fixed the assertion to hit-test the slider a real
   user clicks, and separately proved the click reaches the underlying input.
   212 → 277 assertions. bd `vanish-uninstaller-7y0`.
 ### Security
@@ -2376,13 +2419,13 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   gitignored and `electron` was range-pinned (`^42.5.0`), so nothing in the repo
   recorded which dependency builds a release came from. A compromised publish
   anywhere in the install graph would have been pulled by the next `npm install`
-  and shipped inside an application that runs elevated — with no committed hash
+  and shipped inside an application that runs elevated -- with no committed hash
   to notice it against. The lockfile is now tracked (all 13 packages carry
   integrity hashes), `electron` is pinned exactly, `docs/RELEASING.md` requires
   `npm ci` for releases, and `npm test` runs the verification suite instead of
   erroring out. Found by a `/cso` audit (bd `vanish-uninstaller-703`).
 * **Fixed: the destination-guard junction resolver only followed one hop (HIGH, found on re-review of the SEC-2 fix itself).**
-  `Resolve-DestinationTarget` resolved a single reparse point and returned —
+  `Resolve-DestinationTarget` resolved a single reparse point and returned --
   correct for a lone junction, but a chain (`A → B → the real blocked
   location`) resolved only to `B`. If `B` didn't itself match anything on the
   blocklist, the destination was allowed even though Windows follows the whole
@@ -2394,24 +2437,24 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   A vault restore is a file write performed as administrator to a location the
   manifest chooses, and the manifest is untrusted input. The guard covered the
   Windows directory and nothing else, so a forged entry could restore an
-  attacker's binary into the all-users Startup folder — admin-level persistence
+  attacker's binary into the all-users Startup folder -- admin-level persistence
   at the next logon. Worse, it compared paths *textually*, and `GetFullPath` does
   not follow junctions: a directory junction pre-created at an innocent-looking
   path defeated any check of this kind entirely. The guard now resolves a
   destination to the path the write really lands on before judging it, and
   refuses the narrow set of locations whose only value to an attacker is
-  privileged execution — any `Start Menu` subtree in any profile, direct children
+  privileged execution -- any `Start Menu` subtree in any profile, direct children
   of a drive root, the Windows directory, and unreadable reparse points.
   `%ProgramFiles%`, `%ProgramData%` and other user profiles stay allowed on
   purpose: Vanish quarantines application leftovers from all three (REQ-17 sweeps
-  other profiles by design) and a restore has to be able to put them back —
+  other profiles by design) and a restore has to be able to put them back --
   blocking them would break the undo path, which is the point of the vault. New
   read-only `protected-destination-probe` engine action makes the guard testable
   in Audit Mode as well as Full Mode. Found by a `/cso` audit
   (bd `vanish-uninstaller-2xt`).
 * **Fixed: the data directory lock could not hold, and said it had (HIGH).**
   Vanish state lived directly in the Electron `userData` root, which is also
-  Chromium's profile directory — so the ACL that stops a standard user rewriting
+  Chromium's profile directory -- so the ACL that stops a standard user rewriting
   `manifest.json` (which the engine reads as *elevated instructions*) was the
   same ACL that would stop Chromium writing `Preferences` and `Cache` on the next
   Audit Mode run. The lock was therefore unfixable in place. State now lives in a
@@ -2421,15 +2464,15 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   the whole subtree rather than the root alone (an object's owner keeps
   `WRITE_DAC` and can hand itself write access back whatever the DACL says), and
   the health check now inspects owners as well as the DACL. That last one was the
-  load-bearing bug — `main.js` only re-applies the ACL when the check reports
+  load-bearing bug -- `main.js` only re-applies the ACL when the check reports
   `protected: false`, so a directory with a perfect DACL and user-owned children
   was declared safe and never revisited. Found by a `/cso` audit
   (bd `vanish-uninstaller-z2a`).
 * **Fixed: shell command injection in the single-app uninstaller (CRITICAL).**
   The `uninstall-native` channel took a command *string* from the renderer and
   handed it to `exec()`, which on Windows means `cmd.exe`, as administrator. That
-  string came from the registry — including `HKCU\...\Uninstall`, which any
-  standard user can write — so an entry planted with shell metacharacters
+  string came from the registry -- including `HKCU\...\Uninstall`, which any
+  standard user can write -- so an entry planted with shell metacharacters
   (`"...uninstall.exe" /S & <payload>`) was a one-click privilege escalation: the
   planted app just had to look like something worth uninstalling. The channel now
   takes a *pointer* (a registry path, or a package full name for Store apps) and
@@ -2547,10 +2590,10 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 ## [0.2.0] - 2026-06-26
 
 ### Added
-* **Stage 2 — Audit & Health Advisor** (`scanner.ps1`, `main.js`, `preload.js`,
+* **Stage 2 -- Audit & Health Advisor** (`scanner.ps1`, `main.js`, `preload.js`,
   `index.html`, `index.css`, `renderer.js`):
   * `Get-SystemDiagnostics`: CIM-based OS, CPU, RAM, GPU, disk volume, and machine
-    metadata queries — all via narrow `SELECT` filters to minimise query latency.
+    metadata queries -- all via narrow `SELECT` filters to minimise query latency.
   * `Get-StartupItems`: Enumerates Registry Run hives (HKLM 64/32-bit, HKCU,
     RunOnce variants), logon-triggered Scheduled Tasks (non-Microsoft path only),
     and third-party auto-start services. Each item includes `exeExists` flag for
@@ -2606,7 +2649,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 ### Added
 * **Technical stack foundation**: Electron + Node.js host window executing an
   asynchronous PowerShell backend via `spawn`.
-* **`scanner.ps1` — execution engine**:
+* **`scanner.ps1` -- execution engine**:
   * Unified JSON interface with Base64 payload encoding to prevent command-line
     argument escaping issues.
   * Desktop app mapping across `HKLM`, `HKCU`, and `Wow6432Node` Uninstall hives.

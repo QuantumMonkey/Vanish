@@ -256,6 +256,7 @@ function setupHygieneTab() {
   if (!btn) return;
   btn.addEventListener('click', () => runHygieneScan());
   hygieneWired = true;
+  wireHygieneDecisionBar();
 }
 
 // Arriving at the tab renders what is already known. It does NOT scan: these
@@ -272,6 +273,7 @@ function renderHygienePanel() {
 }
 
 function renderHygieneInvitation() {
+  refreshHygieneDecisionBar(null);
   const verdict = document.getElementById('hygiene-verdict');
   if (verdict) {
     verdict.innerHTML = `
@@ -444,12 +446,16 @@ function renderHygieneAll() {
   renderHygieneModules(decision, false);
   renderHygieneUnreadable(decision);
   renderHygieneChecklist();
+  // Last, and with the decision that was actually drawn: the bar must never
+  // describe a state the panel below has already moved past.
+  refreshHygieneDecisionBar(decision);
 }
 
 // While the scan is running this is a PROGRESS report and says nothing about
 // the machine. Naming a terminal state here - even the reassuring one - would
 // be claiming a result from a third of the evidence.
 function renderHygieneProgress() {
+  refreshHygieneDecisionBar(hygieneDecision);
   const el = document.getElementById('hygiene-verdict');
   if (!el) return;
 
@@ -480,6 +486,11 @@ function renderHygieneProgress() {
 }
 
 function renderHygieneVerdictFailed(why) {
+  refreshHygieneDecisionBar({
+    state: window.VanishFindings.UI_FAILED,
+    findings: [], unreadable: [],
+    findingCount: 0, unreadableCount: 0, examinedCount: 0, totalBytes: 0
+  });
   const el = document.getElementById('hygiene-verdict');
   if (!el) return;
   el.innerHTML = `
@@ -503,6 +514,385 @@ function renderHygieneVerdictFailed(why) {
 // One element, four outcomes, four different sentences. They license different
 // next actions, which is exactly why they must not share a rendering: "I looked
 // and found nothing" invites you to stop; "I could not finish looking" does not.
+// ---------------------------------------------------------------------------
+// THE DECISION BAR (949 / one-click decisions)
+//
+// The panel below answers "what did we find". This answers the only question
+// the operator actually has, which is "so what do I do now", and it answers it
+// with ONE recommended click.
+//
+// WHY IT CANNOT BE A CLEAN BUTTON, which is the obvious thing to build here
+// and the wrong thing. Nothing on this screen is removable by Vanish in either
+// mode; the lede says so and every finder is audit-only. A one-click action
+// that deleted things would not be a faster version of this screen, it would
+// be a different product -- the one this project exists as an alternative to.
+// So every action here opens, filters, scrolls or copies. The bar says that
+// out loud, permanently, rather than relying on the operator to infer it.
+//
+// THE RULE THAT DOES THE REAL WORK: the recommended click is chosen by COST,
+// never by size. The biggest number on this screen is a package cache, and it
+// is the least consequential thing here; the most consequential is a folder of
+// uncommitted work that fits in a megabyte. A bar that led with "free 14.3 GB"
+// would be teaching exactly the habit that loses people their data. Bytes
+// appear on the SECONDARY action or not at all. lib/findings.js already ranks
+// findings this way and explains why; this is the same rule at the level of
+// the offer rather than the list.
+//
+// AND: no action is offered from evidence that is not complete. decide()
+// exposes `trustworthy`, and a scan with unreadable locations does not get an
+// act-on-the-total button, because the total is a floor and not a total. The
+// control is DISABLED and says why -- never hidden, never enabled-then-sorry.
+// A control the operator can click that the system will refuse is a promise
+// the screen cannot keep.
+// ---------------------------------------------------------------------------
+
+// The standing promise, rendered in every phase including the empty one.
+const HYGIENE_NEVER = 'Nothing on this screen deletes anything. These actions open, filter or copy.';
+
+function hygieneCostCounts(findings) {
+  const counts = { cheap: 0, moderate: 0, expensive: 0, irreplaceable: 0, unknown: 0 };
+  for (const f of Array.isArray(findings) ? findings : []) {
+    const k = String((f && f.costClass) || 'unknown');
+    if (Object.prototype.hasOwnProperty.call(counts, k)) counts[k] += 1;
+    else counts.unknown += 1;
+  }
+  return counts;
+}
+
+function hygieneModuleBytes(findings, moduleKey) {
+  let n = 0;
+  for (const f of Array.isArray(findings) ? findings : []) {
+    if (f && f.module === moduleKey) n += Number(f.bytes) || 0;
+  }
+  return n;
+}
+
+function hygieneAct(id, label, enabled, why, tone) {
+  return { id: id, label: label, enabled: !!enabled, why: why || '', tone: tone || '' };
+}
+
+// PURE. Takes the decision and where the scan is up to; returns what the bar
+// should offer. No DOM, no globals, so the rules above can be asserted
+// directly instead of inferred from rendered HTML.
+//
+//   ctx: { scanning, returned, total, loadErrorCount }
+function hygieneDecisionActions(decision, ctx) {
+  const c = ctx || {};
+  const F = window.VanishFindings;
+  const d = decision || null;
+  const never = HYGIENE_NEVER;
+
+  // A decision from a partial run is not a decision. This outranks every other
+  // rule here, including a perfectly good has-work state built from three of
+  // thirteen checks.
+  if (c.scanning) {
+    const seen = Number(c.returned) || 0;
+    const all = Number(c.total) || 0;
+    const why = 'The checks are still running. A recommendation from a partial run is not a recommendation.';
+    return {
+      phase: 'scanning',
+      headline: all > 0 ? `Checking: ${seen} of ${all} back` : 'Checking',
+      sub: 'No action is offered until every check has returned.',
+      primary: hygieneAct('wait', 'Checks are running', false, why),
+      secondary: [
+        hygieneAct('copy', 'Copy report', false, why),
+        hygieneAct('open-clean', 'Open System Clean', false, why)
+      ],
+      caveat: '',
+      never: never
+    };
+  }
+
+  if (!d || d.state === F.UI_FAILED) {
+    const nothingYet = 'Nothing has been scanned, so there is nothing to act on yet.';
+    return {
+      phase: d ? 'failed' : 'not-run',
+      headline: d ? 'The checks did not run' : 'Nothing scanned yet',
+      sub: d
+        ? 'Treat this screen as blank. It is not a result.'
+        : 'These checks read your profile and take a while, so they run when you ask.',
+      primary: hygieneAct('run', 'Run the checks', true, '', 'go'),
+      secondary: [
+        hygieneAct('copy', 'Copy report', false, nothingYet),
+        hygieneAct('open-clean', 'Open System Clean', false, nothingYet)
+      ],
+      caveat: '',
+      never: never
+    };
+  }
+
+  const counts = hygieneCostCounts(d.findings);
+  const reclaimBytes = hygieneModuleBytes(d.findings, 'reclaim');
+  const blind = Number(d.unreadableCount) || 0;
+  // The reason a byte total cannot be acted on, reused verbatim wherever a
+  // control is disabled for it, so the operator meets one explanation.
+  const floorWhy =
+    `${blind} location${blind === 1 ? '' : 's'} could not be read, so the total is a floor and not a total. ` +
+    'Vanish will not offer an action computed from it.';
+
+  if (d.state === F.UI_NOTHING_FOUND) {
+    return {
+      phase: 'nothing-found',
+      headline: 'Nothing to decide',
+      sub: `${d.examinedCount} location${d.examinedCount === 1 ? '' : 's'} checked, every one readable. This is the only state here that means clean.`,
+      primary: hygieneAct('none', 'No action needed', false, 'There is nothing to act on. That is the finding.'),
+      secondary: [
+        hygieneAct('copy', 'Copy report', true, ''),
+        hygieneAct('run', 'Run again', true, '')
+      ],
+      caveat: '',
+      never: never
+    };
+  }
+
+  if (d.state === F.UI_INCOMPLETE) {
+    return {
+      phase: 'incomplete',
+      headline: 'No decision available',
+      sub:
+        `Nothing was found in the ${d.examinedCount} location${d.examinedCount === 1 ? '' : 's'} that could be read, ` +
+        `and ${blind} could not be read at all. That is not "clean", and no action will be offered from it.`,
+      primary: hygieneAct('run', 'Run again', true, '', 'go'),
+      secondary: [
+        hygieneAct('copy', 'Copy report', true, ''),
+        hygieneAct('open-clean', 'Open System Clean', false, floorWhy)
+      ],
+      caveat: 'Running elevated lets the checks read locations that were refused this time.',
+      never: never
+    };
+  }
+
+  // has-work. The one branch where a recommendation exists, and the one place
+  // the cost-before-size rule actually bites.
+  //
+  // The order below is the whole point. Irreplaceable first, ALWAYS, even when
+  // it is one file and the reclaim column says fourteen gigabytes. Then
+  // expensive. Only when nothing on the machine is hard to get back does the
+  // bar mention bytes at all.
+  let primary;
+  if (counts.irreplaceable > 0) {
+    primary = hygieneAct(
+      'go-rescue',
+      `Look at ${counts.irreplaceable} irreplaceable item${counts.irreplaceable === 1 ? '' : 's'} first`,
+      true,
+      '',
+      'rescue'
+    );
+  } else if (counts.unknown > 0) {
+    // Unmeasured is not cheap. lib/findings.js sorts 'unknown' last for the
+    // same reason, and it must not fall through to a bytes-led offer here.
+    primary = hygieneAct(
+      'go-unknown',
+      `Look at ${counts.unknown} item${counts.unknown === 1 ? '' : 's'} of unmeasured cost first`,
+      true,
+      '',
+      'rescue'
+    );
+  } else if (counts.expensive > 0) {
+    primary = hygieneAct(
+      'go-expensive',
+      `Look at ${counts.expensive} expensive item${counts.expensive === 1 ? '' : 's'} first`,
+      true,
+      '',
+      'warn'
+    );
+  } else {
+    primary = hygieneAct(
+      'go-all',
+      `Review ${d.findingCount} finding${d.findingCount === 1 ? '' : 's'}`,
+      true,
+      '',
+      'go'
+    );
+  }
+
+  // System Clean is the only screen that can act on any of this, and it is
+  // offered ONLY when the evidence is complete and there is something
+  // regenerable to act on. Both conditions get their own refusal text: a
+  // control that is off for two different reasons and says one of them is a
+  // control that lies.
+  let cleanAct;
+  if (reclaimBytes <= 0) {
+    cleanAct = hygieneAct('open-clean', 'Open System Clean', false,
+      'Nothing regenerable was found, so there is nothing for System Clean to do.');
+  } else if (blind > 0) {
+    cleanAct = hygieneAct('open-clean', 'Open System Clean', false, floorWhy);
+  } else {
+    cleanAct = hygieneAct('open-clean', `Open System Clean (${hygieneBytes(reclaimBytes) || 'regenerable'})`, true, '');
+  }
+
+  return {
+    phase: 'has-work',
+    // NOT the finding count. The verdict block directly below already says
+    // '8 things worth your attention', and a bar that repeated it word for
+    // word would be spending its only headline restating what is already on
+    // screen. This line says what ORDER to work in; the verdict says how
+    // many. Seen side by side in a real screenshot, the duplication was the
+    // most obvious thing wrong with the first version.
+    headline:
+      counts.irreplaceable > 0
+        ? 'Start with what you cannot get back'
+        : counts.unknown > 0
+          ? 'Start with what has not been measured'
+          : counts.expensive > 0
+            ? 'Start with what is expensive to rebuild'
+            : 'Nothing here is hard to replace',
+    sub:
+      counts.irreplaceable > 0
+        ? 'Ranked by what it would cost to get back, not by size. The top of the list is the part you cannot rebuild.'
+        : 'Ranked by what it would cost to get back, not by size.',
+    primary: primary,
+    secondary: [hygieneAct('copy', 'Copy report', true, ''), cleanAct],
+    caveat: blind > 0 ? floorWhy : '',
+    never: never
+  };
+}
+
+function renderHygieneDecisionBar(model) {
+  const el = document.getElementById('hygiene-decisionbar');
+  if (!el || !model) return;
+
+  // A disabled control keeps its reason ON THE PAGE, not only in a title
+  // attribute. A tooltip is not an explanation for someone who never hovers,
+  // and "refuse by name, with a reason" is the whole tier model.
+  const btn = (a, kind) => {
+    if (!a) return '';
+    const cls = `hygiene-act ${kind}${a.tone ? ` tone-${hygieneEsc(a.tone)}` : ''}${a.enabled ? '' : ' is-off'}`;
+    return `
+      <button type="button" class="${cls}" data-act="${hygieneEsc(a.id)}"
+              ${a.enabled ? '' : 'disabled aria-disabled="true"'}
+              ${a.why ? `title="${hygieneEsc(a.why)}"` : ''}>
+        ${hygieneEsc(a.label)}
+      </button>`;
+  };
+
+  const offReasons = []
+    .concat(model.primary && !model.primary.enabled && model.primary.why ? [model.primary.why] : [])
+    .concat((model.secondary || []).filter((a) => !a.enabled && a.why).map((a) => a.why));
+  const uniqueReasons = offReasons.filter((r, i) => offReasons.indexOf(r) === i);
+
+  el.innerHTML = `
+    <div class="hygiene-decisionbar phase-${hygieneEsc(model.phase)}">
+      <div class="hygiene-decision-text">
+        <div class="hygiene-decision-headline">${hygieneEsc(model.headline)}</div>
+        <div class="hygiene-decision-sub">${hygieneEsc(model.sub)}</div>
+      </div>
+      <div class="hygiene-decision-acts">
+        ${btn(model.primary, 'primary')}
+        ${(model.secondary || []).map((a) => btn(a, 'secondary')).join('')}
+      </div>
+    </div>
+    ${model.caveat ? `<div class="hygiene-decision-caveat">${hygieneEsc(model.caveat)}</div>` : ''}
+    ${
+      uniqueReasons.length > 0
+        ? `<div class="hygiene-decision-off">${uniqueReasons.map((r) => `<div>${hygieneEsc(r)}</div>`).join('')}</div>`
+        : ''
+    }
+    <div class="hygiene-decision-never">${hygieneEsc(model.never)}</div>
+  `;
+}
+
+// Scroll to the first finding of a given cost class and mark it, rather than
+// filtering the list. Filtering would hide the ranking, and the ranking is the
+// argument this screen is making.
+function hygieneFocusCost(costClass) {
+  const host = document.getElementById('hygiene-modules');
+  if (!host) return false;
+  host.querySelectorAll('.hygiene-finding.is-focused').forEach((n) => n.classList.remove('is-focused'));
+  const target = costClass
+    ? host.querySelector(`.hygiene-finding.cost-${costClass}`)
+    : host.querySelector('.hygiene-finding');
+  if (!target) return false;
+  target.classList.add('is-focused');
+  if (typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+  return true;
+}
+
+function hygieneReportText() {
+  const d = hygieneDecision;
+  const lines = [];
+  lines.push('Vanish -- Machine Hygiene');
+  if (!d) {
+    lines.push('No scan has been run.');
+    return lines.join('\n');
+  }
+  lines.push(`State: ${d.state}`);
+  lines.push(`${d.findingCount} finding(s), ${d.examinedCount} location(s) examined, ${d.unreadableCount} unreadable`);
+  if (d.unreadableCount > 0) {
+    lines.push('Byte totals below are a floor, not a total: some locations could not be read.');
+  }
+  lines.push('');
+  for (const f of d.findings) {
+    lines.push(`[${String(f.costClass || 'unknown')}] ${f.title || ''}`);
+    if (f.path) lines.push(`    ${f.path}`);
+  }
+  if (d.unreadable.length > 0) {
+    lines.push('');
+    lines.push('Could not read:');
+    for (const u of d.unreadable) lines.push(`    ${u.path || ''} (${u.reason || 'unknown'})`);
+  }
+  return lines.join('\n');
+}
+
+// One delegated listener on the container, wired once. The bar re-renders on
+// every state change, so per-button listeners would be re-attached each time
+// and a stale one would fire twice.
+function wireHygieneDecisionBar() {
+  const el = document.getElementById('hygiene-decisionbar');
+  if (!el || el.dataset.wired === '1') return;
+  el.dataset.wired = '1';
+  el.addEventListener('click', (ev) => {
+    const b = ev.target && ev.target.closest ? ev.target.closest('button[data-act]') : null;
+    if (!b || b.disabled) return;
+    const act = b.getAttribute('data-act');
+    if (act === 'run') {
+      const scan = document.getElementById('btn-hygiene-scan');
+      if (scan && !scan.disabled) scan.click();
+      return;
+    }
+    if (act === 'open-clean') {
+      if (typeof window.switchTab === 'function') window.switchTab('system-clean');
+      return;
+    }
+    if (act === 'copy') {
+      const text = hygieneReportText();
+      const done = (ok) => {
+        b.textContent = ok ? 'Copied' : 'Could not copy';
+        setTimeout(() => { b.textContent = 'Copy report'; }, 1600);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => done(true), () => done(false));
+      } else {
+        done(false);
+      }
+      return;
+    }
+    if (act === 'go-rescue') { hygieneFocusCost('irreplaceable'); return; }
+    if (act === 'go-unknown') { hygieneFocusCost('unknown'); return; }
+    if (act === 'go-expensive') { hygieneFocusCost('expensive'); return; }
+    if (act === 'go-all') { hygieneFocusCost(''); return; }
+  });
+}
+
+// Called from every place the verdict or the progress view is drawn, so the
+// bar can never describe a state the panel below has moved on from.
+function refreshHygieneDecisionBar(decision) {
+  const total = hygieneFinders.length;
+  const returned = Object.keys(hygieneStatus).filter(
+    (k) => hygieneStatus[k] === 'done' || hygieneStatus[k] === 'error'
+  ).length;
+  renderHygieneDecisionBar(
+    hygieneDecisionActions(decision === undefined ? hygieneDecision : decision, {
+      scanning: hygieneScanning,
+      returned: returned,
+      total: total,
+      loadErrorCount: hygieneLoadErrors.length
+    })
+  );
+}
+
 function renderHygieneVerdict(decision) {
   const el = document.getElementById('hygiene-verdict');
   if (!el) return;
@@ -696,7 +1086,7 @@ function renderHygieneModules(decision, partial) {
     }
 
     blocks.push(`
-      <div class="hygiene-module ${found.length > 0 ? 'has-findings' : ''}">
+      <div class="hygiene-module ${found.length > 0 ? 'has-findings' : ''}" id="hygiene-mod-${hygieneEsc(mod.key)}">
         <div class="hygiene-module-head">
           <i class="fa-solid ${mod.icon}"></i>
           <span class="hygiene-module-title">${hygieneEsc(mod.title)}</span>
