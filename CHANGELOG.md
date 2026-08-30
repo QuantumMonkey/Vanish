@@ -10,6 +10,51 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ## [Unreleased]
 
+### Added -- a rule that stops the same defect being found a fifth time
+
+Four separate releases fixed the same underlying mistake in four different
+places: a directory walk that follows a junction. A junction is a second name
+for a folder, so following one means the same folder gets walked twice, the
+same repository gets reported four times, and a scan budget gets spent on
+folders it has already seen under another name.
+
+Each fix was correct. Nothing stopped the next walk from repeating it, and
+every one of the four was found by accident while working on something else.
+
+There is now one rule, checked against every check Vanish has:
+
+> No check may report a finding at a path that is not the real path.
+
+`test/walker-invariants-verify.ps1` builds a folder containing a real
+repository, a junction that aliases it, and a junction pointing into a folder
+the scan is supposed to skip. It runs the whole engine over that folder,
+asks the file system what each reported path really is, and fails if any
+finding is named by an alias or if one real folder is reported twice.
+
+It checks the outcome rather than the technique, so a check that handles
+junctions a different way -- "duplicate content" records them and refuses to
+descend, rather than skipping silently -- satisfies it too, and a check
+written next year is covered without anyone remembering to add it.
+
+Verified by putting the bug back: with the junction handling removed from two
+walkers, the same fixture produces fourteen findings instead of seven, exactly
+doubled, and the rule fails. A test that stays green when the defect is
+reintroduced is decoration.
+
+### Changed -- the test summary now says which half of itself it ran
+
+The suite's pass count is not a constant, and reading it as one wastes time.
+An elevated run executes the Full Mode suites but cannot construct a
+permission-denied folder, because an administrator reads through the denial --
+so nine suites skip the assertions that prove Vanish says "I could not look"
+rather than "there is nothing there". An ordinary run is the mirror image.
+Measured on one machine, same code, hours apart: 2047 passed elevated, 1830
+unelevated.
+
+The total line now carries the tier and the skip count, and says plainly that
+it is one half of the suite and must not be compared against a number from the
+other half.
+
 ### Fixed -- the credential check was looking in the wrong place, and finding nothing
 
 "Local-only credentials" is the check that exists because two keystore

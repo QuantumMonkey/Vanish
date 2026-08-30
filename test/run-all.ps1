@@ -106,6 +106,7 @@ $suites = @(
     @{ Name = "Hygiene report (z22)";          Kind = "node";     Path = "test/hygiene-report-verify.js" },
     @{ Name = "Shared sizer (lhf)";           Kind = "ps";       Path = "test\finder-sizer-verify.ps1" },
     @{ Name = "Shared tree walk (3l8, lxl, e6gn)";        Kind = "ps";       Path = "test\shared-walk-verify.ps1" },
+    @{ Name = "Walker invariants (no alias paths)"; Kind = "ps"; Path = "test\walker-invariants-verify.ps1" },
     @{ Name = "Hygiene panel (5p5 UI)";        Kind = "electron"; Path = "test/hygiene-panel-verify.js" },
     @{ Name = "Settings lock (mp4)";           Kind = "electron"; Path = "test/settings-lock-verify.js" },
     # Needs an ELEVATED shell: only an elevated token can take ownership or
@@ -191,7 +192,25 @@ foreach ($r in $results) {
 }
 
 Write-Host ""
-Write-Host ("  TOTAL: {0} passed, {1} failed" -f $totalPassed, $totalFailed) -ForegroundColor $(if ($totalFailed -gt 0) { "Red" } else { "Green" })
+# pnor: the TOTAL is not a constant, and reading it as one wastes a session.
+# Elevation flips WHICH tests can run, in both directions: an elevated shell
+# runs the Full Mode suites and CANNOT build an access-denied condition (an
+# Administrator token reads through a Deny ACE), so nine suites skip their
+# could-not-look assertions. Unelevated is the mirror image.
+#
+# Measured on one machine, same commit, hours apart:
+#   Full Mode   2047 passed
+#   Audit Mode  1830 passed
+#
+# Neither is the whole suite. The tier and the skip count go on the TOTAL
+# line so a number can never be compared against one from the other tier
+# without the difference being visible in the same breath.
+$totalSkipped = 0
+foreach ($r in $results) { if ($r.SkipLines) { $totalSkipped += @($r.SkipLines).Count } }
+$tierLabel = if ($isAdmin) { "Full Mode" } else { "Audit Mode" }
+Write-Host ("  TOTAL: {0} passed, {1} failed, {2} skipped   [{3}]" -f $totalPassed, $totalFailed, $totalSkipped, $tierLabel) -ForegroundColor $(if ($totalFailed -gt 0) { "Red" } else { "Green" })
+Write-Host ("  This is one half of the suite. Run it again {0} to cover the other half," -f $(if ($isAdmin) { "WITHOUT elevation" } else { "ELEVATED" })) -ForegroundColor DarkGray
+Write-Host ("  and do not compare this total against one taken in the other tier.") -ForegroundColor DarkGray
 
 # 6d7: the counts alone are not a finding. A batch run that reports one
 # failure out of 838 has to name WHICH assertion, here, at the bottom, where
