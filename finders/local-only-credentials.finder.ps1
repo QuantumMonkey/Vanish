@@ -189,6 +189,30 @@ function script:Invoke-Ho2CredentialWalk {
             }
 
             if ($child.PSIsContainer) {
+                # o1mj: a junction is a SECOND NAME for a directory, and this
+                # walk had no test for one. That is not merely double work -
+                # it defeated the prune list. AppData is pruned by name, but
+                # Local Settings and Application Data are junctions TO
+                # AppDataLocal and are not, so the walk went round its own
+                # prune and spent the entire 15,000-directory budget in there.
+                #
+                # Measured on the operator machine, warm, one line changed:
+                #
+                #   shipped        23,160 ms  15,000 dirs   9 repos  0 candidates  CAPPED
+                #   skip reparse    2,958 ms   2,991 dirs  12 repos  4 candidates
+                #
+                # Read the last column first. This is not a speed fix. The
+                # nine repos it used to find were all alias paths; it missed
+                # all five real ones under DocumentsGitHub, and it reported
+                # ZERO credential files on a machine that has four. It said
+                # could-not-look rather than clean, so the contract held -
+                # but the operator was handed "incomplete" instead of four
+                # real credentials.
+                #
+                # A junction whose target is OUTSIDE the root is now skipped
+                # with no record, which is bd vanish-uninstaller-127o and
+                # affects every walker in this repo the same way.
+                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
                 if ($script:Ho2PruneSegments -contains $child.Name) { continue }
                 if ($cur.Depth -ge $maxDepth) { continue }
                 $stack.Push(@{ Path = $child.FullName; Depth = $cur.Depth + 1; RepoRoot = $repoRootHere })

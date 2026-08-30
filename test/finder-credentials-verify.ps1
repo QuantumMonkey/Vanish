@@ -245,6 +245,93 @@ try {
         $ErrorActionPreference = 'SilentlyContinue'
         try { $null = & icacls.exe "$blindDir" /remove:d "$($env:USERNAME)" 2>&1 } catch {} finally { $ErrorActionPreference = $prevEap }
     }
+
+
+
+    # ==================================================================
+    Write-Host ""
+    Write-Host "A junction is not walked, and the prune list is not routed around (o1mj)" -ForegroundColor Cyan
+    # THE DEFECT THIS REPLACES, measured on the operator machine before the fix:
+    #   shipped        23,160 ms  15,000 dirs   9 repos  0 candidates  CAPPED
+    #   skip reparse    2,958 ms   2,991 dirs  12 repos  4 candidates
+    # Read the last column first. Every one of the nine repos it used to find
+    # was an alias path reached through My Documents or Local Settings; it
+    # missed all five real ones, and it reported ZERO credential files on a
+    # machine that has four. Speed was the side effect, not the point.
+    #
+    # Driven through hygiene-scan like every other case here, not by calling
+    # the walker directly: a finder that works as a function and is wired up
+    # wrong is a finder that never runs for real.
+    $jRoot = Join-Path $work "junctionprobe"
+    $jRepo = Join-Path $jRoot "realrepo"
+    $null = New-Item -ItemType Directory -Path $jRepo -Force
+    Push-Location $jRepo
+    try {
+        $null = & git.exe init 2>&1
+        $null = & git.exe config user.email "t@example.com" 2>&1
+        $null = & git.exe config user.name "t" 2>&1
+        Set-Content -LiteralPath (Join-Path $jRepo ".gitignore") -Value ".env" -Encoding ASCII
+        Set-Content -LiteralPath (Join-Path $jRepo ".env") -Value "SECRET=1" -Encoding ASCII
+        $null = & git.exe add .gitignore 2>&1
+        $null = & git.exe commit -m init 2>&1
+    } finally { Pop-Location }
+
+    $aliasParent = Join-Path $jRoot "alias"
+    $null = New-Item -ItemType Directory -Path $aliasParent -Force
+    $linkPath = Join-Path $aliasParent "link"
+    $madeJunction = $false
+    $prevEap2 = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        $null = & cmd.exe /c mklink /J "$linkPath" "$jRepo" 2>&1
+        $madeJunction = Test-Path -LiteralPath $linkPath
+    } catch { $madeJunction = $false } finally { $ErrorActionPreference = $prevEap2 }
+
+    if (-not $madeJunction) {
+        Write-Skip "junction not created on this machine, so the reparse rule cannot be exercised here"
+    } else {
+        # The premise. Without it, "found once" could pass because the fixture
+        # was only ever reachable once, and would prove nothing at all.
+        Assert-True ((Test-Path -LiteralPath (Join-Path $linkPath ".git")) -and (Test-Path -LiteralPath (Join-Path $jRepo ".git"))) `
+            "premise: the same repo is reachable by BOTH its real path and a junction"
+
+        $jr = Invoke-CredentialScan -scanRoots @($jRoot)
+        $paths = @(@($jr.findings) | ForEach-Object { [string]$_.path })
+        $viaLink = @($paths | Where-Object { $_ -like "*$([System.IO.Path]::GetFileName($aliasParent))*" })
+
+        Assert-True (@($paths | Where-Object { $_ -like "*.env" }).Count -eq 1) `
+            "the ignored .env is reported ONCE, not once per name that reaches it" `
+            "paths: $($paths -join ' | ')"
+        Assert-True (@($viaLink).Count -eq 0) `
+            "and it is reported at its real path, never through the junction" `
+            "via junction: $($viaLink -join ' | ')"
+
+        # The prune list is matched by NAME, so a junction pointing at a pruned
+        # directory used to walk straight into it. That is what spent the entire
+        # 15,000-directory budget inside AppData on the real machine: AppData is
+        # pruned, but Local Settings and Application Data are junctions to it
+        # and are not.
+        $prunedTarget = Join-Path $jRoot "node_modules"
+        $null = New-Item -ItemType Directory -Path (Join-Path $prunedTarget "deep") -Force
+        Set-Content -LiteralPath (Join-Path $prunedTarget "deep\.env") -Value "X=1" -Encoding ASCII
+        $pruneLink = Join-Path $jRepo "nm-alias"
+        $madePruneLink = $false
+        $ErrorActionPreference = "SilentlyContinue"
+        try {
+            $null = & cmd.exe /c mklink /J "$pruneLink" "$prunedTarget" 2>&1
+            $madePruneLink = Test-Path -LiteralPath $pruneLink
+        } catch { $madePruneLink = $false } finally { $ErrorActionPreference = $prevEap2 }
+
+        if (-not $madePruneLink) {
+            Write-Skip "second junction not created, so the prune-bypass case cannot be exercised here"
+        } else {
+            $jr2 = Invoke-CredentialScan -scanRoots @($jRoot)
+            $leaked = @(@($jr2.findings) | ForEach-Object { [string]$_.path } | Where-Object { $_ -like "*nm-alias*" })
+            Assert-True (@($leaked).Count -eq 0) `
+                "a junction pointing INTO a pruned directory does not carry the walk past the prune list" `
+                "leaked: $($leaked -join ' | ')"
+        }
+    }
 }
 finally {
     Remove-Ho2TestTree $work

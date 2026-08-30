@@ -10,6 +10,52 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ## [Unreleased]
 
+### Fixed -- the credential check was looking in the wrong place, and finding nothing
+
+"Local-only credentials" is the check that exists because two keystore
+passwords once survived a cleanup by luck. It walks your profile and your
+project drives looking for gitignored files that exist nowhere but this
+machine. On the machine it was built on it reported **nothing at all**, and
+there were four.
+
+Windows puts junctions in every home directory: `My Documents` is a second
+name for `Documents`, and `Local Settings` and `Application Data` are both
+second names for `AppData\Local`. The walk had no test for one. It also has a
+15,000-directory budget per search root, so it spent the entire budget walking
+through those aliases into `AppData` -- which the check already excludes by
+name, and which the aliases route straight around -- and stopped before
+reaching the real project folders.
+
+Measured, warm, one line changed:
+
+| | before | after |
+|---|---|---|
+| time | 23,160 ms | **2,958 ms** |
+| directories walked | 15,000 (budget exhausted) | 2,991 |
+| repositories found | 9, every one an alias path | **12, all real** |
+| credential files found | **0** | **4** |
+
+Read the last row first. This was never a speed problem. The check said "I
+could not finish looking", which is true and is what it is designed to say
+rather than claiming the machine is clean -- but the operator got that
+sentence instead of four real credential files. The nine repositories it did
+find were all duplicates reached through aliases; it missed all five real ones
+under `Documents\GitHub`.
+
+The walk now refuses to follow a junction, which is what every other walker in
+Vanish already did.
+
+### Known, and not fixed here
+
+`D:\Dependencies` still exhausts its budget on this machine and reports no
+repository, even though it was chosen as a search root precisely because it
+holds one. The walk is depth-first, so the budget goes into the deepest branch
+it happens to enter -- a 14 GB package cache -- while the repository sitting
+one level down is never reached. A breadth-first walk spends the budget on the
+shallowest directories instead, which are the ones most likely to be projects.
+That is `vanish-uninstaller-087y`, filed with the measurement rather than
+bundled into an already-verified change.
+
 ### Added -- a decision bar above Machine Hygiene
 
 The panel told you what it found. It did not tell you what to do about it, and

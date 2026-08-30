@@ -115,6 +115,57 @@ neither one was ever touching the slowest thing the panel does. That is bd
 Theoretical floor for this profile is `max(40.0, 148.7 / 3)` = 49.6 s against
 59.9 s actual, so perfect scheduling is worth about 10 s (`4v8`).
 
+### The scan's tail was not a speed problem (o1mj)
+
+`local-only-credentials` was the slowest unit in Run 003 at 40.0 s, and the
+only one neither shared-walk change had touched. Profiled alone, warm, nothing
+else on the disk:
+
+| Root | Time | Directories | Repos | Candidates |
+|---|---|---|---|---|
+| `C:\Users\Anand` | 24,458 ms | 15,000 **capped** | 9 | 0 |
+| `D:\Dependencies` | 9,544 ms | 15,000 **capped** | 0 | 0 |
+| `D:\Claude Setups` | 501 ms | 517 | 1 | 0 |
+| `D:\quickhelp` | 79 ms | 57 | 1 | 0 |
+| `D:\Ideations` | 45 ms | 71 | 1 | 0 |
+| `C:\tmp` | 8 ms | 8 | 1 | 0 |
+| `D:\Vault` | 2 ms | 3 | 1 | 0 |
+| **total** | **34,637 ms** | 30,656 | 14 | **0** |
+
+Two of seven roots exhausted their 15,000-directory budget and between them
+account for 34.0 s of the 34.6. The other five cost 0.6 s together.
+
+`Get-Ho2DefaultRoots` takes 80 ms and returns seven roots with no overlap, so
+neither root selection nor duplicated roots is the cost. There is one walk per
+root, not one per credential pattern, so this is not e6gn's defect either. The
+`git check-ignore` subprocess per candidate costs nothing here because there
+were no candidates -- which was itself the finding.
+
+**The budget was being spent going round the check's own prune list.**
+`AppData` is pruned by name. `Local Settings` and `Application Data` are
+junctions to `AppData\Local` and are not pruned, and the walk had no
+reparse-point test. Same tree, one line added:
+
+| | shipped | skip reparse points |
+|---|---|---|
+| `C:\Users\Anand` | 23,160 ms, 15,000 dirs, 9 repos, **0 candidates**, capped | 2,958 ms, 2,991 dirs, 12 repos, **4 candidates** |
+
+Every one of the nine repositories the shipped walk found was an alias path.
+It missed all five real ones under `Documents\GitHub`, and it reported zero
+credential files on a machine with four `.npmrc` files inside repositories.
+The check was reporting could-not-look, correctly, and the operator was
+getting that instead of four real findings.
+
+`D:\Dependencies` still caps either way, and that is a different defect: the
+walk is depth-first, so the budget goes into `D:\Dependencies\Gradle` (163,476
+files, see the sizing note above) while `D:\Dependencies\Flutter`, which has
+the `.git` that made the folder a search root in the first place, is never
+popped off the stack. Filed as `vanish-uninstaller-087y`.
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File test\sandbox\ho2-profile-probe.ps1
+```
+
 ### Why this table is shaped like this
 
 Until this run the scheduling probe printed only the SLOWEST unit. One number
