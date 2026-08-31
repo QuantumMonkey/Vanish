@@ -212,6 +212,65 @@ Write-Host ("  TOTAL: {0} passed, {1} failed, {2} skipped   [{3}]" -f $totalPass
 Write-Host ("  This is one half of the suite. Run it again {0} to cover the other half," -f $(if ($isAdmin) { "WITHOUT elevation" } else { "ELEVATED" })) -ForegroundColor DarkGray
 Write-Host ("  and do not compare this total against one taken in the other tier.") -ForegroundColor DarkGray
 
+# 686 / pnor: A SUITE THAT QUIETLY ASSERTS LESS.
+#
+# The tier line above makes the ELEVATION axis visible. It does nothing for
+# the other way a total moves without meaning anything: a suite that cannot
+# run an assertion and simply does not run it, recording no skip. Measured
+# twice on one machine in one afternoon, same commit, same tier:
+#
+#   GPU payload shape (aaw)   14 passed, 0 failed   then   10 passed, 0 failed
+#
+# No skip line either time. Four assertions vanished and the run was green.
+# The only evidence was the number, and nothing was checking the number.
+#
+# So it is checked here: each suite reports passed + failed + skipped, and
+# that total is compared against the last run ON THIS MACHINE IN THIS TIER.
+# A DROP is reported. It is advisory and never fails the run - a suite may
+# legitimately shrink when tests are deleted - but it can no longer happen
+# without being said out loud, which is the whole complaint.
+$baselineDir  = Join-Path $root ("test" + [char]92 + "logs" + [char]92 + $env:COMPUTERNAME)
+$baselineFile = Join-Path $baselineDir ("assertion-baseline-" + $tierLabel.Replace(" ", "-") + ".json")
+$previous = @{}
+if (Test-Path -LiteralPath $baselineFile) {
+    try {
+        $raw = Get-Content -LiteralPath $baselineFile -Raw | ConvertFrom-Json
+        foreach ($p in $raw.PSObject.Properties) { $previous[$p.Name] = [int]$p.Value }
+    } catch { $previous = @{} }
+}
+
+$current = @{}
+foreach ($r in $results) {
+    if ($null -eq $r.Passed) { continue }
+    $sk = if ($r.SkipLines) { @($r.SkipLines).Count } else { 0 }
+    $current[$r.Name] = [int]$r.Passed + [int]$r.Failed + [int]$sk
+}
+
+$shrunk = @()
+foreach ($name in $current.Keys) {
+    if (-not $previous.ContainsKey($name)) { continue }
+    if ($current[$name] -lt $previous[$name]) {
+        $shrunk += ("{0}: {1} -> {2}" -f $name, $previous[$name], $current[$name])
+    }
+}
+if ($shrunk.Count -gt 0) {
+    Write-Host ""
+    Write-Host " Suites that ran FEWER assertions than last time in this tier" -ForegroundColor Yellow
+    Write-Host " ------------------------------------------------------------" -ForegroundColor Yellow
+    foreach ($line in $shrunk) { Write-Host ("      " + $line) -ForegroundColor Yellow }
+    Write-Host "      Not a failure. Either tests were deleted, or a suite skipped" -ForegroundColor DarkGray
+    Write-Host "      an assertion without recording a skip - and only the second" -ForegroundColor DarkGray
+    Write-Host "      one is a bug (bd vanish-uninstaller-686)." -ForegroundColor DarkGray
+}
+
+try {
+    if (-not (Test-Path -LiteralPath $baselineDir)) { $null = New-Item -ItemType Directory -Path $baselineDir -Force }
+    # NO BOM. PowerShell 5.1 Set-Content -Encoding UTF8 writes one, and this
+    # file is meant to be readable by anything - a BOM makes JSON.parse throw
+    # in node and is the same trap the .wsb generator documents.
+    [System.IO.File]::WriteAllText($baselineFile, ($current | ConvertTo-Json -Depth 3), (New-Object System.Text.UTF8Encoding $false))
+} catch { }
+
 # 6d7: the counts alone are not a finding. A batch run that reports one
 # failure out of 838 has to name WHICH assertion, here, at the bottom, where
 # the reader already is - not 3000 scrolled lines up.

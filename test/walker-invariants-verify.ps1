@@ -212,6 +212,7 @@ try {
             'and no check reports one real directory twice under two names' `
             ($dupes -join "`n        ")
 
+        # ==================================================================
         # A junction pointing INTO a pruned directory must not carry any walk
         # past the prune list. Prune lists match by NAME, so this is the exact
         # hole that let o1mj spend a whole scan budget inside AppData.

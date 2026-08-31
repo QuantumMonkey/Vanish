@@ -404,7 +404,17 @@ function Measure-FinderPathBytes {
         }
         try {
             foreach ($d in $dir.EnumerateDirectories()) {
-                if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    # 127o. Recording this sets hadError, which used to make a
+                    # caller discard the whole measurement; since gkib it
+                    # reports the total as a FLOOR instead, which is exactly
+                    # what a skipped subtree makes it.
+                    if (-not (Test-PathIsInside -candidate $d.FullName -root $path)) {
+                        $blind.Add($d.FullName)
+                        if (-not $firstDetail) { $firstDetail = 'A junction or symbolic link whose target is OUTSIDE this search root. It is not followed (following one double-counts at best and loops at worst), and nothing else reaches it, so this subtree was NOT searched.' }
+                    }
+                    continue
+                }
                 $stack.Push($d)
             }
         } catch {
@@ -460,6 +470,88 @@ function Measure-FinderPathBytes {
 # case a second walk instead of a wrong answer.
 #
 # THE CACHE IS SCOPED TO ONE SCAN, for the reason Clear-FinderSizeCache
+# 127o: WHERE DOES THIS JUNCTION ACTUALLY GO.
+#
+# Every walker here refuses to descend into a reparse point, and until now
+# said nothing about it. That is right when the junction points somewhere
+# INSIDE the walk root - the content is reached under its real name, and
+# calling it "not searched" would be a false could-not-look, which is this
+# project's own defect pointed backwards. It is wrong when the target is
+# OUTSIDE the root: nothing else visits it, and the scan has a hole it never
+# mentions.
+#
+# Telling those apart needs the real target, and Get-Item .Target CANNOT
+# provide it. Measured 2026-08-30: it returns EMPTY for the three junctions
+# every Windows home directory has (My Documents, Local Settings,
+# Application Data) and returned the PARENT of the target for a junction
+# created for the test. GetFinalPathNameByHandle is the only thing that
+# answers correctly.
+#
+# THE Add-Type IS LAZY ON PURPOSE. Compiling it costs about 345 ms (measured
+# for the Restart Manager, docs/BENCHMARKS.md Run 001) and every hygiene scan
+# starts several engine processes. A machine whose walk never meets a
+# reparse point must not pay for a resolver it never uses.
+$script:ReparseResolverReady = $false
+
+function Initialize-ReparseResolver {
+    if ($script:ReparseResolverReady) { return $true }
+    try {
+        Add-Type -Namespace Vanish -Name FinalPath -MemberDefinition @'
+[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+public static extern System.IntPtr CreateFileW(string lpFileName, uint dwDesiredAccess,
+    uint dwShareMode, System.IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+    uint dwFlagsAndAttributes, System.IntPtr hTemplateFile);
+[DllImport("kernel32.dll", SetLastError=true, CharSet=CharSet.Unicode)]
+public static extern uint GetFinalPathNameByHandleW(System.IntPtr hFile,
+    System.Text.StringBuilder lpszFilePath, uint cchFilePath, uint dwFlags);
+[DllImport("kernel32.dll", SetLastError=true)]
+public static extern bool CloseHandle(System.IntPtr hObject);
+'@ -ErrorAction Stop
+        $script:ReparseResolverReady = $true
+    } catch {
+        # Already compiled in this process, or blocked. Either way the call
+        # below decides by trying, never by assuming.
+        $script:ReparseResolverReady = ($null -ne ('Vanish.FinalPath' -as [type]))
+    }
+    return $script:ReparseResolverReady
+}
+
+function Resolve-FinalPath {
+    <#
+    .SYNOPSIS
+        The real path behind a name, following junctions and symlinks.
+        Returns the input unchanged if it cannot be resolved - a caller must
+        never treat "could not resolve" as "resolves to somewhere else".
+    #>
+    param([Parameter(Mandatory = $true)][string]$path)
+    if (-not (Initialize-ReparseResolver)) { return $path }
+    # access 0 is query-only; FILE_FLAG_BACKUP_SEMANTICS (0x02000000) is what
+    # makes a DIRECTORY openable at all; share 7 so nothing is blocked.
+    $h = [Vanish.FinalPath]::CreateFileW($path, 0, 7, [System.IntPtr]::Zero, 3, 0x02000000, [System.IntPtr]::Zero)
+    if ($h -eq [System.IntPtr](-1)) { return $path }
+    try {
+        $sb = New-Object System.Text.StringBuilder 32768
+        if ([Vanish.FinalPath]::GetFinalPathNameByHandleW($h, $sb, 32768, 0) -eq 0) { return $path }
+        $s = $sb.ToString()
+        $prefix = ([string][char]92) + ([string][char]92) + "?" + ([string][char]92)
+        if ($s.StartsWith($prefix)) { $s = $s.Substring(4) }
+        return $s
+    } finally { [void][Vanish.FinalPath]::CloseHandle($h) }
+}
+
+function Test-PathIsInside {
+    <#
+    .SYNOPSIS
+        Is $candidate the same as, or under, $root? Compared on RESOLVED
+        paths, so a junction inside the root does not read as outside it.
+    #>
+    param([Parameter(Mandatory = $true)][string]$candidate, [Parameter(Mandatory = $true)][string]$root)
+    $c = (Resolve-FinalPath $candidate).TrimEnd([char]92).ToLowerInvariant()
+    $r = (Resolve-FinalPath $root).TrimEnd([char]92).ToLowerInvariant()
+    if ($c -eq $r) { return $true }
+    return $c.StartsWith($r + [string][char]92)
+}
+
 # gives: a second run exists because something changed.
 $script:SharedWalkCache = @{}
 $script:SharedWalkMarkers = [System.Collections.Generic.List[string]]::new()
@@ -656,7 +748,16 @@ function Invoke-SharedTreeWalk {
                 }
                 continue
             }
-            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                # 127o: silent only when the target is INSIDE the root, where the
+                # content is reached under its real name anyway. Outside it,
+                # nothing reaches it and the scan has a hole - which is exactly
+                # what could-not-look exists to name.
+                if (-not (Test-PathIsInside -candidate $child.FullName -root $root)) {
+                    $unreadable.Add((New-Unreadable -path $child.FullName -reason 'not-searched' -detail 'A junction or symbolic link whose target is OUTSIDE this search root. It is not followed (following one double-counts at best and loops at worst), and nothing else reaches it, so this subtree was NOT searched.'))
+                }
+                continue
+            }
             if ($skipDirs -contains $child.Name) { continue }
             if ($cur.Depth -ge $maxDepth) { continue }
             $stack.Push(@{ Path = $child.FullName; Depth = $cur.Depth + 1 })

@@ -227,7 +227,15 @@ function script:Invoke-Ho2CredentialWalk {
                 # A junction whose target is OUTSIDE the root is now skipped
                 # with no record, which is bd vanish-uninstaller-127o and
                 # affects every walker in this repo the same way.
-                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }
+                if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+                    # 127o, and it matters more here than anywhere: this is the
+                    # check that exists to find credentials that exist nowhere
+                    # else. A subtree it never searched must be named.
+                    if (-not (Test-PathIsInside -candidate $child.FullName -root $root)) {
+                        $unreadable.Add((New-Unreadable -path $child.FullName -reason 'not-searched' -detail 'A junction or symbolic link whose target is OUTSIDE this search root. It is not followed (following one double-counts at best and loops at worst), and nothing else reaches it, so this subtree was NOT searched.'))
+                    }
+                    continue
+                }
                 if ($script:Ho2PruneSegments -contains $child.Name) { continue }
                 if ($cur.Depth -ge $maxDepth) { continue }
                 $queue.Enqueue(@{ Path = $child.FullName; Depth = $cur.Depth + 1; RepoRoot = $repoRootHere })

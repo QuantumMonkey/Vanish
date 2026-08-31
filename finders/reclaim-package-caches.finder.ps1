@@ -219,21 +219,46 @@ Register-Finder -name 'reclaim-package-caches' `
             }
 
             $size = Get-PiuCacheDirBytes -path $cachePath
-            if ($size.hadError) {
+
+            # gkib: a PARTIAL measurement is still a measurement, and it used
+            # to be thrown away. This block used to record the unreadable and
+            # then `continue`, so one subdirectory Windows would not enumerate
+            # dropped the whole cache out of the findings. On the operator
+            # machine that meant a 14.35 GB Gradle cache - the largest reclaim
+            # target on the disk - vanished from the panel and the check said
+            # could-not-look instead.
+            #
+            # aeu was satisfied by that (a partial total was never passed off
+            # as a whole one) and the operator was still worse off: "at least
+            # 12 GB, one folder could not be read" is equally honest and
+            # actually useful. So the unreadable record STAYS, and the finding
+            # is reported alongside it with the total labelled as a floor.
+            #
+            # bytes = 0 with an error is different and still drops out: there
+            # is no floor to report, only an unreadable location.
+            $partial = [bool]$size.hadError
+            if ($partial) {
                 $unreadable.Add((New-Unreadable -path $cachePath -reason 'access-denied' `
                     -detail "Could not fully measure '$cachePath': $($size.detail)"))
-                continue
             }
             if ($size.bytes -le 0) { continue }
+
+            # Every number this finding shows is prefixed once, here, so the
+            # floor cannot appear unqualified in one place and qualified in
+            # another.
+            $atLeast = if ($partial) { 'at least ' } else { '' }
+            $floorNote = if ($partial) {
+                "Part of this folder could not be read ($($size.detail)), so both numbers are a FLOOR and the real cache is larger. "
+            } else { '' }
 
             $consumerNote = Get-PiuCacheConsumerNote -markers $spec.markers -roots $roots -maxDepth $maxDepth
 
             $findings.Add((New-Finding `
                 -id          "reclaim-package-caches|$($spec.tool)" `
-                -title       "$($spec.tool) cache ($(Format-PiuCacheBytes $size.bytes))" `
+                -title       "$($spec.tool) cache ($atLeast$(Format-PiuCacheBytes $size.bytes))" `
                 -path        $cachePath `
                 -bytes       $size.bytes `
-                -evidence    "$sourceDesc; contains $($size.fileCount) file(s) totalling $(Format-PiuCacheBytes $size.bytes). $($spec.evidence) $consumerNote" `
+                -evidence    "$sourceDesc; contains $atLeast$($size.fileCount) file(s) totalling $atLeast$(Format-PiuCacheBytes $size.bytes). $floorNote$($spec.evidence) $consumerNote" `
                 -rebuildCost $spec.rebuild `
                 -costClass   'cheap' `
                 -action      'audit'))

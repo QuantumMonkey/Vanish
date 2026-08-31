@@ -586,7 +586,10 @@ function renderNetworkActivity(net) {
              </table>
            </div>
            <div class="panel-inline-note">Windows does not tell any program how many bytes each other program used
-             without a kernel-level trace, so this is what each one has open - not a share of the speed.</div>`
+             without a kernel-level trace, so this is what each one has open - not a share of the speed.
+             <strong>Ordered by how many sockets each program holds, which is not the same as how busy it is:</strong>
+             a program can hold sockets and be connected to nothing, and one moving a lot of data over UDP
+             (games, BitTorrent) shows no connections at all. Read the two right-hand columns, not the order.</div>`
         : ''
     }`;
 

@@ -355,6 +355,69 @@ try {
 
     # ==================================================================
     Write-Host ''
+    Write-Host 'A junction OUT of the root is named; one INSIDE it is not (127o)' -ForegroundColor Cyan
+    # Every walker here refuses to descend into a junction. Only ONE of the two
+    # cases is a hole in the scan.
+    #
+    #   target INSIDE the root  -> stay silent. The content is reached under its
+    #                              real name, so naming it would be a FALSE
+    #                              could-not-look. Every Windows home directory
+    #                              has three of these (My Documents, Local
+    #                              Settings, Application Data), so getting this
+    #                              wrong would put unreadableCount above zero on
+    #                              every machine and make UI_NOTHING_FOUND - the
+    #                              one state that means clean - unreachable.
+    #   target OUTSIDE the root -> record it. Nothing else reaches it.
+    $jRootB = Join-Path $work 'reparse'
+    $inside = Join-Path $jRootB 'real'
+    $null = New-Item -ItemType Directory -Path $inside -Force
+    Set-Content -LiteralPath (Join-Path $inside 'package.json') -Value '{}' -Encoding ASCII
+    $outsideTarget = Join-Path $work 'beyond-the-root'
+    $null = New-Item -ItemType Directory -Path $outsideTarget -Force
+    Set-Content -LiteralPath (Join-Path $outsideTarget 'package.json') -Value '{}' -Encoding ASCII
+
+    $jOut = Join-Path $jRootB 'outward'
+    $jIn  = Join-Path $jRootB 'inward'
+    $madeBoth = $false
+    $prevEapB = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    try {
+        $null = & cmd.exe /c mklink /J "$jOut" "$outsideTarget" 2>&1
+        $null = & cmd.exe /c mklink /J "$jIn" "$inside" 2>&1
+        $madeBoth = (Test-Path -LiteralPath $jOut) -and (Test-Path -LiteralPath $jIn)
+    } catch { } finally { $ErrorActionPreference = $prevEapB }
+
+    if (-not $madeBoth) {
+        Write-Skip 'could not create both junctions, so the inside/outside distinction cannot be exercised here'
+    } else {
+        Assert-True ((Resolve-FinalPath $jOut) -ne $jOut) `
+            'premise: the resolver sees through a junction, so the checks below are not passing by accident'
+
+        Clear-SharedWalkCache
+        $w127 = Invoke-SharedTreeWalk -root $jRootB -maxDepth 6 -maxDirs 15000 -skipDirs @()
+        $ns = @($w127.unreadable | Where-Object { $_.reason -eq 'not-searched' })
+        Assert-True (@($ns | Where-Object { $_.path -like '*outward*' }).Count -eq 1) `
+            'a junction whose target is OUTSIDE the root is named as not-searched' `
+            "recorded: $(@($ns | ForEach-Object { $_.path }) -join ' | ')"
+        Assert-True (@($ns | Where-Object { $_.path -like '*inward*' }).Count -eq 0) `
+            'and one whose target is INSIDE the root is NOT - it is reached under its real name' `
+            "recorded: $(@($ns | ForEach-Object { $_.path }) -join ' | ')"
+
+        # The sizer takes the same rule, and since gkib an unreachable subtree
+        # makes its total a FLOOR rather than discarding the measurement.
+        Clear-FinderSizeCache
+        $mz = Measure-FinderPathBytes -path $jRootB
+        Assert-True ($mz.hadError -eq $true) 'the sizer reports a partial total when a junction leaves the root'
+        Assert-True (@($mz.unreadable | Where-Object { $_ -like '*outward*' }).Count -eq 1) `
+            'and names the junction it did not follow' `
+            "blind: $(@($mz.unreadable) -join ' | ')"
+        Assert-True (@($mz.unreadable | Where-Object { $_ -like '*inward*' }).Count -eq 0) `
+            'and does not name the one that stays inside'
+    }
+
+
+    # ==================================================================
+    Write-Host ''
     Write-Host 'THE CONTROL: four sharing a walk answer what four separate walks answered' -ForegroundColor Cyan
     # This is the assertion the whole change stands on. Everything above tests
     # the mechanism; this tests that the mechanism did not change the ANSWER,

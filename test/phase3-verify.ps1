@@ -175,10 +175,25 @@ if (-not $isAdmin) {
         Write-Host "        (the override + restore logic below is still checked)" -ForegroundColor DarkGray
     }
 
-    $countBefore = @(Get-ComputerRestorePoint -ErrorAction SilentlyContinue).Count
+    # v7bo: IDENTITIES, not a count. This used to read the total before and
+    # after and expect it to rise by two, which is only true while shadow
+    # storage has headroom. At the cap Windows EVICTS an older restore point
+    # to make room for a new one, so two successful creations can raise the
+    # total by one, or by none.
+    #
+    # It failed exactly that way on 2026-08-30 (32 -> 33) with 9.22 GB used
+    # of a 9.98 GB allocation, one run after passing on the same commit. The
+    # assertion immediately below - that both checkpoint calls succeeded -
+    # passed in that run: the product did what it was asked and the test
+    # measured it wrongly. Comparing sequence numbers is correct at any
+    # storage level and does not care what Windows chose to evict.
+    $seqBefore = @(Get-ComputerRestorePoint -ErrorAction SilentlyContinue | ForEach-Object { [string]$_.SequenceNumber })
+    $countBefore = @($seqBefore).Count
     $rp1 = Invoke-Engine "restore-point" @{ description = "Vanish verify 1" }
     $rp2 = Invoke-Engine "restore-point" @{ description = "Vanish verify 2" }
-    $countAfter = @(Get-ComputerRestorePoint -ErrorAction SilentlyContinue).Count
+    $pointsAfter = @(Get-ComputerRestorePoint -ErrorAction SilentlyContinue)
+    $countAfter = @($pointsAfter).Count
+    $newPoints = @($pointsAfter | Where-Object { $seqBefore -notcontains [string]$_.SequenceNumber })
     $after = Get-SrFrequency
 
     Assert-True ($after -eq $before) "creation-frequency value restored to its prior state (before=$before after=$after)"
@@ -207,7 +222,8 @@ if (-not $isAdmin) {
 
     if ($srEnabled) {
         Assert-True ($rp1.success -eq $true -and $rp2.success -eq $true) "both consecutive checkpoint calls succeeded"
-        Assert-True ($countAfter -ge $countBefore + 2) "two back-to-back restore points were actually created ($countBefore -> $countAfter)"
+        Assert-True (@($newPoints).Count -ge 2) `
+            "two back-to-back restore points were actually created - $(@($newPoints).Count) new sequence number(s), total $countBefore -> $countAfter (a total that does not rise by two is fine: at the storage cap Windows evicts an older point)"
     } else {
         Assert-True ($rp1.frequencyOverridden -eq $true -or $rp1.success -eq $false) "override was attempted even with protection disabled"
     }

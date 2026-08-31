@@ -262,6 +262,64 @@ try {
 
     # ==================================================================
     Write-Host ""
+    Write-Host "gkib A partly-unreadable cache is reported as a FLOOR, not discarded" -ForegroundColor Cyan
+    # This used to record the unreadable location and then `continue`, so one
+    # subdirectory Windows would not enumerate dropped the entire cache out of
+    # the findings. On the operator machine that removed a 14.35 GB Gradle
+    # cache - the largest reclaim target on the disk - and reported
+    # could-not-look instead. aeu was satisfied and the operator was still
+    # worse off: "at least 12 GB, one folder could not be read" is equally
+    # honest and actually useful.
+    $gkWork  = Join-Path $env:TEMP "vanish-gkib-verify"
+    if (Test-Path -LiteralPath $gkWork) { & icacls.exe $gkWork /reset /T 2>&1 | Out-Null; Remove-Item -LiteralPath $gkWork -Recurse -Force -ErrorAction SilentlyContinue }
+    $gkCache = Join-Path $gkWork "npm-cache"
+    $null = New-Item -ItemType Directory -Path (Join-Path $gkCache "readable") -Force
+    # Big enough that Format-PiuCacheBytes prints something other than 0.
+    Set-Content -LiteralPath (Join-Path $gkCache "readable\payload.bin") -Value ("x" * 200000) -Encoding ASCII
+    $gkBlocked = Join-Path $gkCache "blocked"
+    $null = New-Item -ItemType Directory -Path $gkBlocked -Force
+    Set-Content -LiteralPath (Join-Path $gkBlocked "hidden.bin") -Value ("y" * 50000) -Encoding ASCII
+
+    $gkPremise = $false
+    $gkWhy = ''
+    try {
+        $o = & icacls.exe $gkBlocked /deny "$($env:USERNAME):(OI)(CI)(RX)" 2>&1
+        if ($LASTEXITCODE -ne 0) { throw "icacls exited $LASTEXITCODE - $($o -join ' ')" }
+        $pe = $null
+        $null = Get-ChildItem -LiteralPath $gkBlocked -ErrorAction SilentlyContinue -ErrorVariable +pe
+        $gkPremise = (@($pe).Count -gt 0)
+        if (-not $gkPremise) { $gkWhy = 'the deny ACE was applied but enumeration still succeeded on this account' }
+    } catch { $gkWhy = $_.Exception.Message }
+
+    if (-not $gkPremise) {
+        Write-Host "  SKIP  could not construct a cache directory this account cannot fully read ($gkWhy) - an elevated session reads through a Deny ACE, so this case needs an unelevated run" -ForegroundColor Yellow
+    } else {
+        # The finder resolves its cache path from the redirect variable first,
+        # and the engine is a child process, so setting it here reaches it.
+        $gkSaved = [Environment]::GetEnvironmentVariable('npm_config_cache')
+        $env:npm_config_cache = $gkCache
+        try {
+            $gk = Get-ReclaimResult (Invoke-Engine "hygiene-scan" @{ module = 'reclaim'; finders = @('reclaim-package-caches'); roots = @($gkWork) }) 'reclaim-package-caches'
+            $npmFinding = @(@($gk.findings) | Where-Object { $_.path -eq $gkCache })[0]
+
+            Assert-True ($null -ne $npmFinding) "the cache is still REPORTED even though part of it could not be read"
+            if ($null -ne $npmFinding) {
+                Assert-True ($npmFinding.bytes -gt 0) "and it carries the bytes that WERE readable ($($npmFinding.bytes))"
+                Assert-True ($npmFinding.title -like '*at least*') "and its title says the number is a floor (title: $($npmFinding.title))"
+                Assert-True ($npmFinding.evidence -like '*FLOOR*') "and the evidence says so too, so the number is never read as a total"
+            }
+            Assert-True ($gk.unreadableCount -gt 0) "the unreadable location is STILL recorded - reporting a floor does not hide what could not be read"
+            Assert-True ($gk.state -eq 'found') "and the state is 'found', because something WAS found ($($gk.state))"
+        } finally {
+            if ($null -eq $gkSaved) { Remove-Item Env:\npm_config_cache -ErrorAction SilentlyContinue }
+            else { $env:npm_config_cache = $gkSaved }
+        }
+    }
+    try { & icacls.exe $gkWork /reset /T 2>&1 | Out-Null } catch { }
+    Remove-Item -LiteralPath $gkWork -Recurse -Force -ErrorAction SilentlyContinue
+
+    # ==================================================================
+    Write-Host ""
     Write-Host "piu.7 New-Finding enforces rebuildCost in code, not just in convention" -ForegroundColor Cyan
 
     . (Join-Path $root "finders\_contract.ps1")
