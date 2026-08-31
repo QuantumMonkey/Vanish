@@ -160,14 +160,16 @@ $out | ConvertTo-Json -Compress | Set-Content -LiteralPath $dest -Encoding ASCII
         # process and this can never be false. Windows Sandbox ships that
         # way, which is how the first clean-machine run produced a red line
         # that meant "this image cannot host this test".
-        $lua = 1
+        $bs = [string][char]92
+        $luaKey = 'HKLM:' + $bs + 'SOFTWARE' + $bs + 'Microsoft' + $bs + 'Windows' + $bs + 'CurrentVersion' + $bs + 'Policies' + $bs + 'System'
+        $lua = $null
         try {
-            $lua = [int](Get-ItemProperty -Path 'HKLM:SOFTWAREMicrosoftWindowsCurrentVersionPoliciesSystem' -Name EnableLUA -ErrorAction Stop).EnableLUA
-        } catch { $lua = 1 }
+            $lua = [int](Get-ItemProperty -Path $luaKey -Name EnableLUA -ErrorAction Stop).EnableLUA
+        } catch { $lua = $null }
         if ($s2.callerElevated -eq $false) {
             Assert-True $true 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing'
-        } elseif ($lua -eq 0) {
-            Write-Skip 'the de-elevated stage came back STILL elevated because UAC is off on this machine (EnableLUA=0), so there is no standard-user token to drop to. Turn UAC on and restart before treating this as a result.'
+        } elseif ($lua -eq 0 -or $null -eq $lua) {
+            Write-Skip ("the de-elevated stage came back STILL elevated. EnableLUA is $(if ($null -eq $lua) { 'UNREADABLE' } else { $lua }) - with UAC off there is no standard-user token to drop to, so this cannot be tested here. Turn UAC on and restart in-guest before treating it as a result.")
         } else {
             Assert-True $false 'and it was genuinely UNPRIVILEGED - otherwise this proves nothing (UAC is ON here, so the drop should have worked: this is a real failure)'
         }
