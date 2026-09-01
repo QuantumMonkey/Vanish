@@ -38,6 +38,40 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# ONE INSTANCE, AND IT FAILS SILENTLY. Windows Sandbox permits a single VM.
+# Launching against a live one does nothing at all: no dialog, no exit code,
+# no log - and this script cheerfully prints "Starting Windows Sandbox"
+# either way. That cost two launches on 2026-09-01, both of which reported
+# success and started nothing, and the second was only noticed because a
+# marker file never appeared.
+#
+# vmmemWindowsSandbox also OUTLIVES the window by minutes: the client can be
+# gone while the VM still holds its memory, and a launch in that gap fails
+# the same silent way. So both are checked, and the wait is explicit.
+function Get-SandboxProcesses {
+    return @(Get-Process -Name 'WindowsSandboxClient', 'WindowsSandboxServer', 'vmmemWindowsSandbox' -ErrorAction SilentlyContinue)
+}
+
+if (-not $GenerateOnly) {
+    $live = Get-SandboxProcesses
+    if ($live.Count -gt 0) {
+        Write-Host ''
+        Write-Host 'A Windows Sandbox instance is already running or still shutting down:' -ForegroundColor Yellow
+        foreach ($p in $live) { Write-Host ('    {0} (pid {1})' -f $p.Name, $p.Id) -ForegroundColor Yellow }
+        Write-Host 'Windows Sandbox allows ONE at a time, and starting a second does nothing' -ForegroundColor Yellow
+        Write-Host 'without reporting anything. Waiting up to 5 minutes for it to release.' -ForegroundColor DarkGray
+        $waited = 0
+        while ((Get-SandboxProcesses).Count -gt 0 -and $waited -lt 300) {
+            Start-Sleep -Seconds 5
+            $waited += 5
+        }
+        if ((Get-SandboxProcesses).Count -gt 0) {
+            throw "A Windows Sandbox instance is still running after ${waited}s. Close it and run this again - starting a second one would silently do nothing."
+        }
+        Write-Host ('  released after {0}s' -f $waited) -ForegroundColor DarkGray
+    }
+}
+
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path.TrimEnd('\')
 
 # Fail with the actual reason rather than letting Sandbox show its own dialog.
