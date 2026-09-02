@@ -126,31 +126,55 @@ async function loadAuditData(force = false) {
       draw: (diag) => {
         renderSysInfoCards(diag);
         renderDiskBars(diag.disks || [], diag.disksError);
+        // 90% is renderDiskBars' OWN danger threshold, reused rather than
+        // re-decided. A second opinion about what "full" means, living in a
+        // different function, is how two halves of one screen come to disagree.
+        const full = (diag.disks || []).filter((d) => (d.pctUsed ?? 0) >= 90);
+        auditReportWork(full.length, full.length === 1 ? 'drive almost full' : 'drives almost full');
+        if (diag.disksError) auditReportBlind('your drives');
       },
       fail: (msg) => {
         auditSectionFailed('audit-sysinfo-grid', 'read this machine', msg);
         auditSectionFailed('audit-disk-list', 'read your drives', msg);
+        auditReportBlind('this machine and its drives');
       }
     },
     {
       run: () => window.api.getNetworkActivity(),
       draw: (network) => renderNetworkActivity(network),
-      fail: (msg) => auditSectionFailed('audit-network-body', 'measure network activity', msg)
+      // Never contributes work: a transfer rate is not a problem, and putting
+      // one in the headline would make it read as one.
+      fail: (msg) => { auditSectionFailed('audit-network-body', 'measure network activity', msg); auditReportBlind('network activity'); }
     },
     {
       run: () => window.api.getListeners(),
       draw: (listeners) => renderListeners(listeners),
-      fail: (msg) => auditSectionFailed('audit-listeners-body', 'check what is listening', msg)
+      // Never contributes work. This panel refuses to rank reachability on
+      // purpose, and counting listeners into a headline would rank them by
+      // placement instead - the same claim made more loudly.
+      fail: (msg) => { auditSectionFailed('audit-listeners-body', 'check what is listening', msg); auditReportBlind('what is listening'); }
     },
     {
       run: () => window.api.getWindowsUpdates(),
       draw: (updates) => renderWindowsUpdates(updates),
-      fail: (msg) => auditSectionFailed('audit-updates-body', 'ask Windows Update', msg)
+      // Never contributes work: updates are Windows' business and Vanish is
+      // not entitled to nag about them. Shown for context, not as a task.
+      fail: (msg) => { auditSectionFailed('audit-updates-body', 'ask Windows Update', msg); auditReportBlind('Windows Update'); }
     },
     {
       run: () => window.api.getSoftwareRedundancy(),
-      draw: (redundancy) => renderRedundancyGroups(redundancy),
-      fail: (msg) => auditSectionFailed('audit-redundancy-list', 'group installed programs', msg)
+      draw: (redundancy) => {
+        renderRedundancyGroups(redundancy);
+        // The section already subtracts the groups you waived before badging
+        // the rest as "still needs a look". Reusing that number rather than
+        // counting groups again is what stops the headline from contradicting
+        // the badge three inches below it.
+        const groups = redundancy.groups || [];
+        const waived = new Set(appSettings.redundancyWaivers || []);
+        const active = groups.filter((g) => !waived.has(g.category)).length;
+        auditReportWork(active, active === 1 ? 'group of overlapping programs' : 'groups of overlapping programs');
+      },
+      fail: (msg) => { auditSectionFailed('audit-redundancy-list', 'group installed programs', msg); auditReportBlind('overlapping programs'); }
     },
     {
       // Slowest by a wide margin, and deliberately last so it is started last.
@@ -159,10 +183,21 @@ async function loadAuditData(force = false) {
       // that element has gone, so overwriting the wrapper would leave this
       // section blank forever with no error raised anywhere.
       run: () => window.api.getStartupItems(),
-      draw: (startup) => renderStartupTable(startup),
-      fail: (msg) => auditRowFailed('audit-startup-tbody', 5, 'read your startup items', msg)
+      draw: (startup) => {
+        renderStartupTable(startup);
+        // Exactly the number already on the "N broken" pill. An orphaned entry
+        // points at a program that is gone, which is a fact rather than a
+        // severity judgement -- which is why this one qualifies as work and
+        // the reachable-from-outside count does not.
+        const orphans = startup.orphans ?? 0;
+        auditReportWork(orphans, orphans === 1 ? 'broken startup entry' : 'broken startup entries');
+      },
+      fail: (msg) => { auditRowFailed('audit-startup-tbody', 5, 'read your startup items', msg); auditReportBlind('your startup items'); }
     }
   ];
+
+  resetAuditTally(sections.length);
+  renderAuditVerdict();
 
   const settled = sections.map((section) =>
     section
@@ -177,6 +212,10 @@ async function loadAuditData(force = false) {
         }
       })
       .catch((err) => section.fail(err.message))
+      // Settled means REPORTED, not succeeded. A section that failed has still
+      // finished, and the verdict must not sit at "checking 5 of 6" forever
+      // because one of them could not be read.
+      .then(() => auditSectionSettled())
   );
 
   await Promise.all(settled);
@@ -223,6 +262,17 @@ function renderSysInfoCards(diag) {
     { label: gpus.length > 1 ? `Graphics (${gpus.length})` : 'Graphics', values: gpus, sub: '' },
     { label: 'Machine',           value: `${diag.manufacturer ?? ''} ${diag.model ?? ''}`.trim() || 'Unknown', sub: '' }
   ];
+
+  // 949: the one-line summary that stands in for the six cards until someone
+  // opens them. OS and machine model, because those are the two facts that
+  // identify WHICH machine this is - the only question this section actually
+  // answers, and the reason it is worth keeping at all.
+  const line = document.getElementById('audit-machine-summary');
+  if (line) {
+    const os = diag.os?.caption ?? 'Unknown OS';
+    const box = `${diag.manufacturer ?? ''} ${diag.model ?? ''}`.trim();
+    line.textContent = box ? `${os} on ${box}` : os;
+  }
 
   // Every value wraps, not just the graphics one: "AMD Ryzen 9 5900HX with Ra..."
   // and "ASUSTeK COMPUTER INC. RO..." were the same defect on the same row,
@@ -1927,4 +1977,130 @@ function renderHygieneCard() {
       if (typeof window.switchTab === 'function') window.switchTab('hygiene');
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// 949: the Health Advisor verdict.
+// ---------------------------------------------------------------------------
+//
+// The landing page opened with six cards of hardware specification -- OS, CPU,
+// RAM, GPU, motherboard -- and then eight sections, each of which rendered
+// itself and none of which said anything about the whole. A page called Health
+// Advisor that opens by telling you your own CPU model is not advising; it is
+// msinfo32 with rounded corners.
+//
+// THE RULE THIS FOLLOWS, and it is the one thing that keeps it honest: this
+// aggregates only judgements the sections HAVE ALREADY MADE and already show as
+// badges. Disks at 90% are already painted 'danger' by renderDiskBars. Broken
+// startup entries are already counted into the 'N broken' pill. Redundancy
+// groups already subtract the ones you waived. Nothing here scores, ranks, or
+// rates anything, because several of these sections refuse to do that on
+// purpose -- the listeners panel says so in as many words: 'being reachable is
+// not the same as being unsafe, and Vanish does not score or rank these'.
+//
+// So the verdict is NOT 'your machine is healthy'. It is the same four states
+// the finders use: is there work, is there none, or could this page not finish
+// looking. A completeness verdict, not a health score.
+//
+// WHAT DELIBERATELY DOES NOT COUNT AS WORK:
+//   listeners        the panel refuses to rank reachability, and a count of
+//                    them at the top of the page would rank it by placement.
+//   network activity  a rate is not a problem.
+//   Windows updates   Windows' business. Shown for context, and 'you have
+//                    updates' is not something Vanish is entitled to nag about.
+//   system overview   identity, not health.
+
+let auditTally = null;
+
+// The total is DERIVED from the sections array, never written down twice. A
+// hardcoded 6 beside a list of six is a mirror, and mirrors drift: the count
+// would still read "6 of 6" after a seventh section was added, so the verdict
+// would conclude while a section was still running and report a partial page
+// as a whole one. Same defect as a test model that stops matching the file it
+// models, which this codebase has now been bitten by more than once.
+function resetAuditTally(total) {
+  auditTally = { settled: 0, total, work: [], blind: [] };
+}
+
+// Called by each section as it lands. `items` is a count of things the section
+// has ALREADY decided need a look; `label` is how the strip names them.
+function auditReportWork(count, label) {
+  if (!auditTally) return;
+  if (count > 0) auditTally.work.push({ count, label });
+}
+
+function auditReportBlind(what) {
+  if (!auditTally) return;
+  auditTally.blind.push(what);
+}
+
+function auditSectionSettled() {
+  if (!auditTally) return;
+  auditTally.settled += 1;
+  renderAuditVerdict();
+}
+
+function renderAuditVerdict() {
+  const el = document.getElementById('audit-verdict');
+  if (!el || !auditTally) return;
+
+  const t = auditTally;
+  const done = t.settled >= t.total;
+
+  // While sections are still landing this is PROGRESS and says nothing about
+  // the machine. Naming a state here -- especially the reassuring one -- would
+  // be concluding from a fraction of the evidence, which is the defect the
+  // hygiene panel was rebuilt to make unrepresentable.
+  if (!done) {
+    el.innerHTML = `
+      <div class="audit-verdict checking">
+        <div class="audit-verdict-head">
+          <i class="fa-solid fa-spinner fa-spin"></i>
+          <span>Checking this machine -- ${t.settled} of ${t.total} done</span>
+        </div>
+      </div>
+    `;
+    return;
+  }
+
+  const totalWork = t.work.reduce((n, w) => n + w.count, 0);
+  const parts = t.work.map((w) => `${w.count} ${w.label}`);
+  const blindNote = t.blind.length > 0
+    ? `${t.blind.length} of ${t.total} check${t.blind.length === 1 ? '' : 's'} could not be read (${t.blind.join('; ')}), so this is not a complete picture.`
+    : '';
+
+  let tone;
+  let icon;
+  let head;
+  let body;
+
+  if (totalWork > 0) {
+    tone = 'work';
+    icon = 'fa-circle-exclamation';
+    head = `${totalWork} thing${totalWork === 1 ? '' : 's'} on this page can be acted on`;
+    body = `${parts.join(', ')}. ${blindNote}`;
+  } else if (t.blind.length > 0) {
+    // Nothing found AND something unreadable is NOT a clean machine. This is
+    // the distinction the whole project is built on.
+    tone = 'incomplete';
+    icon = 'fa-circle-question';
+    head = 'Nothing needs you in what could be read';
+    body = `${blindNote} That is not the same as nothing being wrong.`;
+  } else {
+    tone = 'clear';
+    icon = 'fa-circle-check';
+    head = 'Nothing on this page needs a decision';
+    body = `All ${t.total} checks read successfully and none of them found anything to act on. `
+         + `This page does not check everything -- Machine Hygiene is where the deeper reads live.`;
+  }
+
+  el.innerHTML = `
+    <div class="audit-verdict ${tone}">
+      <div class="audit-verdict-head">
+        <i class="fa-solid ${icon}"></i>
+        <span>${esc(head)}</span>
+      </div>
+      <div class="audit-verdict-body">${esc(body)}</div>
+    </div>
+  `;
 }

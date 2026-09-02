@@ -62,6 +62,118 @@ never by the process refresh loop. The pre-warm mitigation described in
 
 ---
 
+## Run 004 - 2026-09-02 - the same machine, warm, after 127o and 087y
+
+| Condition | Value |
+|---|---|
+| CPU | AMD Ryzen 9 5900HX (8 cores / 16 threads) |
+| RAM | 15 GB |
+| Storage | NVMe SSD |
+| Windows | Windows 11 Pro, build 26200 |
+| Run type | Warm |
+| Elevation | Full Mode |
+| Pool | `HYGIENE_CONCURRENCY = 3` |
+
+Run 003 is superseded for `local-only-credentials` and for the shape of the
+tail. Two fixes landed between them: `127o` (skip reparse points in the shared
+walk) and `087y` (breadth-first, so the directory budget is not spent down one
+branch). Per `machine-timing-volatility`, cross-run figures on this machine are
+worth 1.5x of noise, so the cross-run claims below are only made where the
+change is far outside that band or where the CORRECTNESS changed too.
+
+### `local-only-credentials`, profiled alone (`ho2-profile-probe.ps1`)
+
+| | Run 003 | Run 004 | |
+|---|---|---|---|
+| total walk | 34,637 ms | **15,988 ms** | 2.2x faster |
+| directories | 30,656 | 18,644 | |
+| roots hitting the 15,000 cap | 2 of 7 | 1 of 7 | |
+| **candidates found** | **0** | **4** | |
+
+The last row is the one that matters. Run 003's zero was not a clean machine,
+it was a walk going round its own prune list through `Local Settings` and
+`Application Data` - junctions to `AppData\Local`, which is pruned - and
+spending the whole budget on alias paths. It reported could-not-look, correctly,
+and the operator got that instead of four real candidates.
+
+Per root, warm:
+
+| Root | Time | Dirs | Candidates | Repos |
+|---|---|---|---|---|
+| `C:\Users\Anand` | 2,850 ms | 2,986 | 4 | 12 |
+| `D:\Dependencies` | **12,547 ms** | **15,000 capped** | 0 | 1 |
+| `D:\Claude Setups` | 453 ms | 517 | 0 | 1 |
+| `D:\quickhelp` | 86 ms | 59 | 0 | 1 |
+| `D:\Ideations` | 42 ms | 71 | 0 | 1 |
+| `C:\tmp` | 8 ms | 8 | 0 | 1 |
+| `D:\Vault` | 2 ms | 3 | 0 | 1 |
+
+`C:\Users\Anand` fell from 23,160 ms / 15,000 capped dirs to 2,850 ms / 2,986
+dirs and went from 9 repos (every one an alias path) to 12 real ones. The
+reparse skip did that.
+
+`D:\Dependencies` is now 78% of the check and still caps, so it also emits a
+`scan-capped` could-not-look that no amount of re-running will clear. It is a
+search root only because `D:\Dependencies\Flutter` holds a `.git`; the selector
+knows that and discards it, and the walker re-derives it by brute force through
+`Gradle` (163,476 files). Filed as `vanish-uninstaller-nq21`.
+
+`git check-ignore` costs 64.0 ms per call over 4 candidates - 256 ms projected,
+1.6% of the check. It was never the cost.
+
+### The whole panel, all thirteen checks (`hygiene-wallclock-probe.js`)
+
+WALL CLOCK **162.6 s**, 13 checks, pool 3, decided `has-work`,
+4,144 findings / 26,773 unreadable.
+
+| Check | Elapsed while running |
+|---|---|
+| `duplicate-content` | **143,658 ms** |
+| the four reclaim checks (3l8 group) | 32,259 ms |
+| `local-only-credentials` | 21,273 ms |
+| `gitignored-unique` + `repo-health` (lxl group) | 18,900 ms |
+| `reclaim-package-caches` | 16,565 ms |
+| `redirect-variables` | 13,015 ms |
+| `duplicate-installs` | 1,777 ms |
+| `path-hygiene` | 1,027 ms |
+| `profile-list` | 1,022 ms |
+
+**THE TAIL HAS MOVED, and it is not `local-only-credentials` any more.**
+`duplicate-content` is 88% of the wall clock in this run.
+
+**But 143.7 s is a CONTENDED number, not the check's cost.** Run alone, warm,
+through the engine directly, the same check takes **36,828 ms** and returns
+4,040 findings with 46 unreadable. So roughly 107 s of its in-panel elapsed
+time is time spent sharing a disk with twelve other checks at pool 3, not work.
+
+That distinction is the whole reason this section prints both. The per-check
+column in a pooled run measures *elapsed while it was running*, which for the
+longest-running check is close to the wall clock by construction. Reading it as
+"this check costs 143 s" would send the next person to optimise a check that is
+mostly waiting.
+
+### What the panel actually hands the user
+
+| | |
+|---|---|
+| findings | 4,144 |
+| of which `duplicate-content` | 4,040 (97.5%) |
+| rendered per module | 100 (`HYGIENE_RENDER_CAP`) |
+
+`duplicate-content` is registered `-module 'rescue'`, alongside
+`local-only-credentials` and `gitignored-unique`, and every one of its findings
+is `costClass: 'cheap'`. `rankFindings` sorts cheap first. See
+`vanish-uninstaller-xr7j`.
+
+### Reproducing these
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File test\sandbox\ho2-profile-probe.ps1
+npx electron test\sandbox\hygiene-wallclock-probe.js
+```
+
+---
+
 ## Run 003 - 2026-08-29 - the same machine, warm, after a day of walking it
 
 Same hardware as Run 002. Taken late in the same day, after every tree in
@@ -116,6 +228,13 @@ Theoretical floor for this profile is `max(40.0, 148.7 / 3)` = 49.6 s against
 59.9 s actual, so perfect scheduling is worth about 10 s (`4v8`).
 
 ### The scan's tail was not a speed problem (o1mj)
+
+> **Superseded by Run 004 (2026-09-02).** Both fixes this section calls for --
+> `127o` (skip reparse points) and `087y` (breadth-first) -- have shipped. The
+> numbers below are the BEFORE state, kept because the reasoning is still the
+> record of how the cause was found. The check is now 15,988 ms and finds 4
+> candidates where this run found 0.
+
 
 `local-only-credentials` was the slowest unit in Run 003 at 40.0 s, and the
 only one neither shared-walk change had touched. Profiled alone, warm, nothing

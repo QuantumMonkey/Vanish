@@ -384,13 +384,30 @@
           <!-- Content (hidden until loaded) -->
           <div id="audit-content" style="display: none; flex-direction: column; gap: 20px;">
 
-            <!-- Section: System Overview -->
-            <div class="audit-section">
-              <div class="audit-section-title"><i class="fa-solid fa-desktop"></i> System Overview</div>
+            <!-- 949: the verdict. Health Advisor is the landing page and it had
+                 no answer anywhere on it -- eight sections each rendering
+                 themselves, opening with six cards of hardware spec. This is
+                 the same four-state contract lib/findings.js already decides
+                 for Machine Hygiene, and it aggregates ONLY judgements the
+                 sections have already made and already badge. It invents no
+                 severity of its own. -->
+            <div id="audit-verdict"><!-- injected by renderer --></div>
+
+            <!-- Section: This machine (949).
+                 Was six cards -- OS, uptime, CPU, RAM, GPU, motherboard --
+                 occupying the top of the page above everything actionable. It
+                 is IDENTITY, not health: nothing in it can be acted on and
+                 none of it was news to the person reading it. Now one line,
+                 below the verdict, expandable for the rest. -->
+            <details class="audit-machine">
+              <summary class="audit-machine-line">
+                <i class="fa-solid fa-desktop"></i>
+                <span id="audit-machine-summary">Reading this machine...</span>
+              </summary>
               <div class="audit-cards-grid" id="audit-sysinfo-grid">
                 <!-- Cards injected by renderer -->
               </div>
-            </div>
+            </details>
 
             <!-- 847: Machine Hygiene is the differentiator and the landing
                  page did not mention it existed. Someone who never clicked

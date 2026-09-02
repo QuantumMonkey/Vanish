@@ -913,6 +913,115 @@ app.whenReady().then(async () => {
   assert((src.match(/window\.VanishHygieneLastRun =/g) || []).length === 1,
     'and from exactly one place, so no progress render can slip a partial decision into it');
 
+
+  // ---- 949: the Health Advisor verdict --------------------------------------
+  //
+  // The landing page had no answer on it: eight sections rendering themselves,
+  // opening with six cards of hardware specification. What is asserted here is
+  // not that a verdict appears, but that it never claims more than it has --
+  // it stays silent while sections are still landing, it never reports a
+  // partial run as clean, and "nothing found" with something unreadable is a
+  // DIFFERENT state from "nothing found".
+  console.log('');
+  console.log('Health Advisor verdict (949)');
+  console.log('----------------------------');
+
+  const verdict = (setup) => evalInPage(`
+    resetAuditTally(6);
+    ${setup}
+    renderAuditVerdict();
+    const el = document.getElementById('audit-verdict');
+    const card = el.querySelector('.audit-verdict');
+    return {
+      cls: card ? card.className : '',
+      head: (el.querySelector('.audit-verdict-head span') || {}).textContent || '',
+      body: (el.querySelector('.audit-verdict-body') || {}).textContent || ''
+    };
+  `);
+
+  {
+    const mid = await verdict(`auditTally.settled = 4; auditReportWork(2, 'broken startup entries');`);
+    assert(/checking/.test(mid.cls),
+      'with 4 of 6 sections back it is still CHECKING, not a verdict');
+    assert(/4 of 6/.test(mid.head),
+      'and it says how far along it is rather than implying it is done');
+    assert(!/needs|nothing|acted on/i.test(mid.head),
+      'and names no state at all mid-run - concluding from a fraction of the evidence is the defect this whole panel was rebuilt to make unrepresentable');
+  }
+
+  {
+    const work = await verdict(`auditTally.settled = 6;
+      auditReportWork(2, 'broken startup entries');
+      auditReportWork(1, 'group of overlapping programs');`);
+    assert(/\bwork\b/.test(work.cls), 'a finished run with findings is toned as work');
+    assert(/^3 things/.test(work.head), `and totals them (got "${work.head}")`);
+    assert(/broken startup entries/.test(work.body) && /overlapping programs/.test(work.body),
+      'and names each contributor rather than giving a bare number');
+  }
+
+  {
+    const clear = await verdict(`auditTally.settled = 6;`);
+    assert(/clear/.test(clear.cls), 'a finished run with nothing to act on and nothing unreadable is clear');
+    assert(/Machine Hygiene/.test(clear.body),
+      'and says where the deeper reads live, so "clear" is not read as "everything was checked"');
+  }
+
+  {
+    const inc = await verdict(`auditTally.settled = 6;
+      auditReportBlind('your startup items'); auditReportBlind('Windows Update');`);
+    assert(/incomplete/.test(inc.cls),
+      'nothing found PLUS something unreadable is its own state, not the clear one');
+    assert(!/clear/.test(inc.cls),
+      'and is never toned as clear - a machine that could not be fully read is not a clean one');
+    assert(/not the same as nothing being wrong/i.test(inc.body),
+      'and says so in as many words');
+    assert(/your startup items/.test(inc.body) && /Windows Update/.test(inc.body),
+      'naming WHAT could not be read, because "2 checks failed" is not actionable');
+  }
+
+  {
+    // The dangerous combination: findings AND blindness. The count must not
+    // read as the whole answer.
+    const both = await verdict(`auditTally.settled = 6;
+      auditReportWork(1, 'drive almost full'); auditReportBlind('your startup items');`);
+    assert(/\bwork\b/.test(both.cls), 'findings plus blindness still leads with the work');
+    assert(/could not be read/.test(both.body),
+      'but still admits the blindness, so the count is never read as complete');
+  }
+
+  {
+    // Zero work must never be reported as work, whatever a section passes in.
+    const zero = await verdict(`auditTally.settled = 6; auditReportWork(0, 'broken startup entries');`);
+    assert(/clear/.test(zero.cls), 'a section reporting zero contributes nothing rather than an empty row');
+    assert(!/0 /.test(zero.body), 'and no "0 broken startup entries" appears anywhere');
+  }
+
+  {
+    // The refusals, asserted against the source so they cannot quietly change.
+    const src = require('node:fs').readFileSync(path.join(__dirname, '..', 'renderer', 'audit.js'), 'utf8');
+    const listenerBlock = src.slice(src.indexOf('getListeners()'), src.indexOf('getWindowsUpdates()'));
+    assert(!/auditReportWork/.test(listenerBlock),
+      'the listeners section never contributes to the verdict - it refuses to rank reachability, and counting it into a headline would rank it by placement');
+    const updateBlock = src.slice(src.indexOf('getWindowsUpdates()'), src.indexOf('getSoftwareRedundancy()'));
+    assert(!/auditReportWork/.test(updateBlock),
+      'and neither does Windows Update, which is Windows\' business rather than a task Vanish sets you');
+  }
+
+  {
+    // The total is derived from the sections array. This is the assertion that
+    // fails if someone writes it down a second time: a section added to the
+    // array without the count following would let the verdict conclude while
+    // that section was still running.
+    const src = require('node:fs').readFileSync(path.join(__dirname, '..', 'renderer', 'audit.js'), 'utf8');
+    assert(/resetAuditTally\(sections\.length\)/.test(src),
+      'the verdict takes its total from the sections array rather than a constant beside it');
+    assert(!/AUDIT_SECTION_COUNT/.test(src),
+      'and no hardcoded section count survives anywhere in the file');
+    const runCount = (src.match(/^\s*run: \(\) => window\.api\./gm) || []).length;
+    assert(runCount >= 6,
+      `found ${runCount} sections in the array (a low number means this scan stopped matching, not that sections were deleted)`);
+  }
+
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
   win.destroy();

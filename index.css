@@ -3900,3 +3900,73 @@ input:checked + .slider:before {
   outline-offset: 2px;
   border-radius: 8px;
 }
+
+/* 949: the Health Advisor verdict, and the demotion of System Overview.
+   Toned by the DECIDED state, never by severity. "Could not finish looking" is
+   not a warning and must not be coloured like one - it is an admission, and the
+   neutral tone is the honest rendering of it. */
+.audit-verdict {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+  border-left: 3px solid var(--color-primary);
+  background: var(--bg-glass, rgba(255, 255, 255, 0.02));
+}
+.audit-verdict-head {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  font-family: var(--font-title);
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+.audit-verdict-head i { font-size: 15px; color: var(--color-primary); }
+.audit-verdict-body {
+  color: var(--text-gray);
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding-left: 26px;
+}
+.audit-verdict.work { border-left-color: var(--color-warning); }
+.audit-verdict.work .audit-verdict-head i { color: var(--color-warning); }
+.audit-verdict.clear { border-left-color: var(--color-success); }
+.audit-verdict.clear .audit-verdict-head i { color: var(--color-success); }
+/* Incomplete is deliberately NOT amber. It is not a lesser warning, it is a
+   different kind of statement: nothing was found and the looking did not
+   finish. Colouring it as a warning would rank it against the work state. */
+.audit-verdict.incomplete { border-left-color: var(--text-gray); }
+.audit-verdict.incomplete .audit-verdict-head i { color: var(--text-gray); }
+.audit-verdict.checking { border-left-color: var(--text-gray); }
+.audit-verdict.checking .audit-verdict-head { font-weight: 600; font-size: 14px; color: var(--text-gray); }
+.audit-verdict.checking .audit-verdict-head i { color: var(--color-primary); }
+
+.audit-machine { border: none; }
+.audit-machine-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 2px;
+  color: var(--text-gray);
+  font-size: 12.5px;
+  border-radius: 6px;
+}
+.audit-machine-line::-webkit-details-marker { display: none; }
+.audit-machine-line::after {
+  content: "show details";
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: var(--color-primary);
+}
+.audit-machine[open] .audit-machine-line::after { content: "hide details"; }
+.audit-machine-line i { color: var(--text-gray); font-size: 13px; }
+.audit-machine-line:hover { color: var(--text-primary); }
+.audit-machine-line:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
+.audit-machine[open] .audit-cards-grid { margin-top: 6px; }

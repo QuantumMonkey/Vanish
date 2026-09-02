@@ -395,6 +395,15 @@ if ($TierResultFile) {
         exitCode  = $exitCode
         logDir    = $logDir
         failNames = @($withFailures | ForEach-Object { $_.Name })
+        # The de-elevated child runs inside a scheduled task, which has no
+        # console: every Write-Host above goes nowhere. The assertion-count
+        # guard measured this exact defect on itself -- it correctly caught
+        # repo-invariants dropping 8 -> 6 in the Audit tier, printed the
+        # warning to a console that does not exist, and then overwrote the
+        # baseline, so the next run had nothing left to compare against. A
+        # guard whose output is discarded is not a guard.
+        shrunk    = @($shrunk)
+        skipNames = @($withSkips | ForEach-Object { $_.Name })
     }
     # ASCII and BOM-free: the parent reads this with ConvertFrom-Json, and a
     # BOM has broken exactly this kind of handoff in this repo before.
@@ -499,6 +508,14 @@ if ($BothTiers) {
             $colour = if ($child.failed -gt 0) { "Red" } else { "Green" }
             Write-Host ("  {0}: {1} passed, {2} failed, {3} skipped" -f $child.tier, $child.passed, $child.failed, $child.skipped) -ForegroundColor $colour
             foreach ($n in @($child.failNames)) { Write-Host ("      failed suite: {0}" -f $n) -ForegroundColor Red }
+            foreach ($n in @($child.skipNames)) { Write-Host ("      skipped something: {0}" -f $n) -ForegroundColor DarkYellow }
+            # Reprinted HERE because the child had no console to print them on.
+            if (@($child.shrunk).Count -gt 0) {
+                Write-Host ("      suites that ran FEWER assertions than last time in Audit Mode:") -ForegroundColor Yellow
+                foreach ($n in @($child.shrunk)) { Write-Host ("        " + $n) -ForegroundColor Yellow }
+                Write-Host ("        Not a failure. Either tests were deleted, or a suite skipped an") -ForegroundColor DarkGray
+                Write-Host ("        assertion without recording a skip - only the second is a bug.") -ForegroundColor DarkGray
+            }
             Write-Host ("      its logs: {0}" -f $child.logDir) -ForegroundColor DarkGray
 
             Write-Host ""
