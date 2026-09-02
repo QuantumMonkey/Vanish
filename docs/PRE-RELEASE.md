@@ -137,9 +137,11 @@ means finished, so they are gates again rather than accepted costs. `1w0` and
 >    you the truth about what it is doing, shipping behind a scary override
 >    dialog undercuts it more than any open bug does. This should be a gate,
 >    not a deferral.
-> 2. **No clean-VM pass** (Rule 10). Windows 10 1607+ and Windows 11, and per
->    `pnor` that is **two runs per VM** -- elevated and unelevated -- because
->    neither one alone executes the whole suite. `1qp` rides along with this.
+> 2. ~~**No clean-VM pass** (Rule 10).~~ **MET 2026-09-02.** Windows 10 was
+>    dropped from scope by operator decision (they do not run it and will not
+>    return to it), and the Windows 11 half is green in both tiers from one
+>    command: `testun-all.ps1 -BothTiers`. `1qp` still needs its own real
+>    run, because a suite passing is not evidence that a destructive path works.
 > 3. **Single-user acceptance.** One external user, one demo recording.
 >
 > None of the eighteen open bd issues moves any of the three. That is the

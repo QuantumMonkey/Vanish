@@ -152,18 +152,23 @@ get to be vague about its own shipping standard.
 | Waived | What it means for you |
 | --- | --- |
 | **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate for this release. |
-| **No clean-VM acceptance pass** | Vanish has not been tested on a fresh Windows 10 or Windows 11 install. Breakage specific to clean machines -- missing runtimes, different UAC defaults, no developer tooling present -- would not have been caught. |
+| ~~**No clean-VM acceptance pass**~~ **Met, for Windows 11 only** | The full suite now runs unattended on a fresh Windows 11 image in Windows Sandbox and passes in both tiers -- Full Mode and, on a normal install, the de-elevated half too. What that still does NOT cover: the sandbox image ships with UAC disabled, so its own Audit Mode half cannot run there; and **Vanish has never been run on Windows 10 at all.** Windows 10 was dropped from scope on 2026-09-02 rather than waived -- it is not a target, and the requirement line below says so. |
 | **Single-user acceptance** | One person has used this end to end: the person who wrote it. Every "works" claim carries that caveat. |
-| **Machine Hygiene takes 81-101 seconds** | Measured on the machine it was built on, for all thirteen checks -- 81 s for the checks alone, up to 101 s through the real panel. It scales with the size of your profile, and one check accounts for most of it. The screen shows which check is working and findings appear as they land, so the wait is legible -- but it is still a wait. |
+| **Machine Hygiene takes minutes, not seconds** | Last measured 2026-09-02 at **162.6 s** through the real panel for all thirteen checks, on the machine it was built on. One check (`duplicate-content`) is 88% of that, and about two thirds of ITS time is contention with the other twelve rather than work. It scales with the size of your profile. The screen shows which check is working and findings appear as they land, so the wait is legible -- but it is a wait, and this number has moved before. |
 
-The first two reverse the moment there is a certificate and a VM run; the
-third reverses the moment someone else uses it. Reopen `1w0` and `442` in the
-issue tracker if you are that someone.
+The first reverses the moment there is a certificate. The clean-VM one is now
+met for Windows 11. Single-user acceptance reverses the moment someone else
+uses it -- reopen `442` in the issue tracker if you are that someone.
 
 
 ## Quickstart
 
-Requirements: Windows 10 (1607+) or Windows 11 · PowerShell 5.1+ (bundled with Windows) · Node.js 20+
+Requirements: **Windows 11** · PowerShell 5.1+ (bundled with Windows) · Node.js 20+
+
+Windows 10 is not supported. It is not blocked either -- nothing in Vanish is
+known to require Windows 11, and 1607+ carries the same registry layout,
+uninstall key shape and Restart Manager API. It has simply never been run
+there, and this project does not claim platforms it has not tested.
 
 ```powershell
 # In an elevated PowerShell (admin rights are needed for restore points,

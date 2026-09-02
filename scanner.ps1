@@ -3455,6 +3455,33 @@ function Test-ProtectedDestination {
         if ($parent.TrimEnd('\').Equals($root.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
     }
 
+    # ADVERSARIAL FINDING 2026-09-02, and it is this function's OWN threat
+    # model applied one directory further than it reached.
+    #
+    # The comment below Test-RestorableProtectedPath already states the attack
+    # exactly: "An attacker who can write entry.json writes originalPath =
+    # System32\evil.dll, supplies the payload, and asks an elevated process to
+    # move it there." System32 was blocked. Program Files was not, and a probe
+    # walked straight through:
+    #
+    #   WROTE   C:\Program Files        -> C:\Program Files\<x>\marker.txt
+    #   WROTE   C:\Program Files (x86)  -> C:\Program Files (x86)\<x>\marker.txt
+    #   WROTE   C:\ProgramData          -> C:\ProgramData\<x>\marker.txt
+    #   BLOCKED C:\Windows\System32
+    #   BLOCKED C:\ (drive root)
+    #
+    # All three are writable by Administrators and NOT by a standard user, so
+    # each one is a user-to-admin write primitive: a DLL beside an elevated
+    # executable in Program Files, or a file on a service search path under
+    # ProgramData. The preconditions are only that the attacker can rewrite the
+    # vault manifest and that the operator later clicks Restore in Full Mode --
+    # and check-data-dir reported protected=false with nonAdminWriters=[the
+    # user] on the development machine when this was found, so the first
+    # precondition was live, not theoretical.
+    #
+    # These are NOT hardcoded literals: %ProgramFiles% is redirected for a
+    # 32-bit process, which is why %ProgramW6432% is listed separately, and a
+    # machine can have them on another volume entirely.
     $blocked = @(
         $env:SystemRoot,
         (Join-Path $env:SystemRoot 'System32'),
@@ -3462,6 +3489,10 @@ function Test-ProtectedDestination {
         (Join-Path $env:SystemRoot 'WinSxS'),
         (Join-Path $env:SystemRoot 'INF'),
         (Join-Path $env:SystemRoot 'Boot'),
+        $env:ProgramFiles,
+        ${env:ProgramFiles(x86)},
+        $env:ProgramW6432,
+        $env:ProgramData,
         $PSScriptRoot
     ) | Where-Object { $_ }
 
@@ -3546,6 +3577,84 @@ function Test-VaultDataDirTrusted {
         return $false
     }
     return ($verdict -and $verdict.success -eq $true -and $verdict.protected -eq $true)
+}
+
+# Program Files / ProgramData are now blocked destinations (see the finding in
+# Test-ProtectedDestination), but leftovers from an uninstall legitimately live
+# there, and refusing to restore them would break the undo path this vault
+# exists to provide. So the block is conditional on the ONE fact that decides
+# whether the manifest can be believed.
+#
+# THE MANIFEST IS THE ONLY RECORD OF WHERE A FILE CAME FROM. If a non-admin can
+# rewrite it, "restore it to where we took it from" is a sentence the attacker
+# is writing, not the app. If the data directory is ACL-locked to Administrators
+# and SYSTEM, they cannot, and the same sentence is true.
+#
+# This costs nothing in practice and that is not a coincidence: vault-restore is
+# fullModeOnly, and main.js runs secure-data-dir on EVERY elevated start. Any
+# session that can reach a restore has already locked the directory on the way
+# in. If that securing failed, refusing the restore is the correct outcome
+# rather than an inconvenience.
+# The SHAPE test only - is this an installed-program folder at all - with no
+# opinion about whether the vault is trusted. Used solely to choose the refusal
+# MESSAGE, so an operator whose data directory is unlocked is told the thing
+# they can actually do about it instead of a flat "protected system location".
+function Test-RestorableInstalledAppPathShape {
+    param([string]$path)
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try { $full = [System.IO.Path]::GetFullPath($path) } catch { return $false }
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432, $env:ProgramData) |
+             Where-Object { $_ }
+    foreach ($root in $roots) {
+        try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
+        if (-not $rootFull.EndsWith('\')) { $rootFull += '\' }
+        if ($full.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
+function Test-RestorableInstalledAppPath {
+    param(
+        [string]$path,
+        [string]$vaultRoot
+    )
+
+    if ([string]::IsNullOrWhiteSpace($path)) { return $false }
+    try { $full = [System.IO.Path]::GetFullPath($path) } catch { return $false }
+
+    $resolved = Resolve-DestinationTarget $full
+    if (-not $resolved) { return $false }
+
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramW6432, $env:ProgramData) |
+             Where-Object { $_ }
+    if ($roots.Count -eq 0) { return $false }
+
+    # Both the literal path and the junction-resolved one, and a real subtree
+    # test rather than StartsWith on an unterminated root - "C:\Program Files"
+    # must not match "C:\Program Files Evil\".
+    foreach ($candidate in @($full, $resolved)) {
+        $ok = $false
+        foreach ($root in $roots) {
+            try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
+            if (-not $rootFull.EndsWith('\')) { $rootFull += '\' }
+            if ($candidate.StartsWith($rootFull, [System.StringComparison]::OrdinalIgnoreCase)) { $ok = $true; break }
+        }
+        if (-not $ok) { return $false }
+    }
+
+    # A direct child of the root itself is still refused. A restore puts a file
+    # back inside an application's own folder; dropping one straight into
+    # "C:\Program Files\x.dll" is the planting shape, not the undo shape.
+    foreach ($candidate in @($full, $resolved)) {
+        $parent = [System.IO.Path]::GetDirectoryName($candidate)
+        if ([string]::IsNullOrWhiteSpace($parent)) { return $false }
+        foreach ($root in $roots) {
+            try { $rootFull = [System.IO.Path]::GetFullPath($root) } catch { continue }
+            if ($parent.TrimEnd('\').Equals($rootFull.TrimEnd('\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+        }
+    }
+
+    return (Test-VaultDataDirTrusted -vaultRoot $vaultRoot)
 }
 
 function Test-RestorableProtectedPath {
@@ -3709,10 +3818,22 @@ function Invoke-QuarantineItems {
         # asked here too, so the symmetry survives the relaxation. If restore
         # would accept this path back, quarantine may take it; if not, it may
         # not. The two questions are still one function.
+        # 2026-09-02: the installed-program exception is asked HERE TOO, for
+        # exactly the reason the paragraph above gives. Adding Program Files and
+        # ProgramData to the blocked list without this line broke the symmetry
+        # in the other direction - quarantine would refuse what restore would
+        # accept, which does not strand a file but does silently remove the
+        # ability to clean leftovers out of an installed program at all. Caught
+        # by a probe that checked the legitimate path, not the attack.
         if ((Test-ProtectedDestination $src) -and
-            -not (Test-RestorableProtectedPath -path $src -vaultRoot $p.vaultRoot)) {
+            -not (Test-RestorableProtectedPath -path $src -vaultRoot $p.vaultRoot) -and
+            -not (Test-RestorableInstalledAppPath -path $src -vaultRoot $p.vaultRoot)) {
             $row.status = "failed"
-            $row.error  = "Refused: this lives in a protected system location, and the vault could not put it back afterwards. Nothing was moved."
+            $row.error  = if (Test-RestorableInstalledAppPathShape -path $src) {
+                "Refused: this lives inside an installed program, and the Vanish data directory is writable by a standard user - so the record of where this came from could not be trusted to put it back. Start Vanish elevated once to lock the directory, then retry. Nothing was moved."
+            } else {
+                "Refused: this lives in a protected system location, and the vault could not put it back afterwards. Nothing was moved."
+            }
             $fileRows.Add($row)
             continue
         }
@@ -3879,8 +4000,14 @@ function Invoke-VaultRestore {
         # claims elsewhere, and -MustNotExist means a restore can only put
         # back a file that is gone - never overwrite one that is there.
         if ((Test-ProtectedDestination $f.originalPath) -and
-            -not (Test-RestorableProtectedPath -path $f.originalPath -vaultRoot $p.vaultRoot -MustNotExist)) {
-            $res.error = if (Test-Path -LiteralPath $f.originalPath -ErrorAction SilentlyContinue) {
+            -not (Test-RestorableProtectedPath -path $f.originalPath -vaultRoot $p.vaultRoot -MustNotExist) -and
+            -not (Test-RestorableInstalledAppPath -path $f.originalPath -vaultRoot $p.vaultRoot)) {
+            $res.error = if (Test-RestorableInstalledAppPathShape -path $f.originalPath) {
+                # Named separately because the fix is different: this one is not
+                # "we will never do that", it is "lock the data directory and we
+                # will". A refusal the operator cannot act on is a dead end.
+                "Rejected: refusing to restore into an installed-program folder while the Vanish data directory is writable by a standard user. The manifest that says where this file came from is the only record of it, and an unprotected directory means that record cannot be trusted. Start Vanish elevated once to lock the directory, then retry."
+            } elseif (Test-Path -LiteralPath $f.originalPath -ErrorAction SilentlyContinue) {
                 "Rejected: something already exists at that protected system path, and overwriting it is not a restore."
             } else {
                 "Rejected: refusing to restore into a protected system location."
@@ -7744,6 +7871,13 @@ if ($Action) {
                 path       = [string]$Params.path
                 protected  = [bool](Test-ProtectedDestination ([string]$Params.path))
                 restorable = [bool](Test-RestorableProtectedPath -path ([string]$Params.path) -vaultRoot ([string]$Params.vaultRoot) -MustNotExist:$mustNotExist)
+                # 2026-09-02: a THIRD question, for the same reason the second
+                # one exists. "Protected" alone stopped expressing the policy
+                # once installed-program folders became conditionally allowed,
+                # and a test that could only see the first two would now read a
+                # deliberate exception as a regression.
+                installedAppRestorable = [bool](Test-RestorableInstalledAppPath -path ([string]$Params.path) -vaultRoot ([string]$Params.vaultRoot))
+                installedAppShape      = [bool](Test-RestorableInstalledAppPathShape -path ([string]$Params.path))
                 dataDirTrusted = [bool](Test-VaultDataDirTrusted -vaultRoot ([string]$Params.vaultRoot))
                 resolved   = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
             } | ConvertTo-Json -Depth 4 -Compress

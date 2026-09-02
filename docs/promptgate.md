@@ -175,7 +175,22 @@ The part of this rule that has not changed and must not: passing `npm test` is
 not evidence that a destructive path works. Anything that elevates, deletes,
 or restores still needs a real run against a real machine before it is called
 Complete.
-A feature or stage is only marked Complete in `docs/handoff.md` or `CHANGELOG.md` when it has been manually verified on a clean Windows 10 VM (build 1607+) and a clean Windows 11 VM. Coded and passing local tests is "In Progress."
+
+**Amended again 2026-09-02, operator decision: Windows 10 is out of scope.**
+The operator does not run Windows 10 and will not return to it, so a Windows 10
+VM pass is no longer a gate, no longer a waiver, and no longer a debt. It is
+simply not a target. Windows 11 is the supported platform.
+
+What this costs, stated rather than hidden: Vanish is untested on Windows 10
+and nothing here claims otherwise. Registry layouts, the uninstall key shape
+and Restart Manager all behave the same way on 1607+, so it would most likely
+work -- but "most likely" is not a test result, and README must say Windows 11
+rather than implying broader support.
+
+The paragraph below this one used to restate the ORIGINAL rule verbatim,
+immediately under the amendment that superseded it, so the file both required
+and did not require a Windows 10 pass depending on which line you stopped at.
+Removed 2026-09-02.
 
 ---
 

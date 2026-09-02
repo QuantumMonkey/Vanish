@@ -146,7 +146,7 @@ Before tagging any `1.x.x` release:
 
 - [ ] Built with `npm ci` from a committed, unmodified `package-lock.json`
 - [ ] `npm audit` reviewed and clean, or every finding explicitly accepted
-- [ ] All Core tier stages tested on clean Windows 10 VM (build 1607+)
+- [x] ~~All Core tier stages tested on clean Windows 10 VM (build 1607+)~~ -- Windows 10 dropped from scope 2026-09-02 by operator decision (promptgate Rule 10, amended). Not a waiver: not a target.
 - [ ] All Core tier stages tested on clean Windows 11 VM
 - [ ] Performance targets validated and logged in `BENCHMARKS.md`
 - [ ] `README.md` up to date with current screenshots

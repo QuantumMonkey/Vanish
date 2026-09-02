@@ -71,6 +71,10 @@ Write-Host ("Tier: {0}" -f $(if ($isAdmin) { "Full Mode" } else { "Audit Mode - 
 
 $suites = @(
     @{ Name = "Vault engine (TASK-01)";        Kind = "ps";       Path = "test\vault-verify.ps1" },
+    # The restore destination guard, attacked rather than confirmed. Performs a
+    # real elevated write attempt against a throwaway vault, and asserts the
+    # undo path still works when the data directory is locked.
+    @{ Name = "Restore destination guard";   Kind = "ps";       Path = "test\vault-destination-verify.ps1" },
     @{ Name = "Elevation tiers (TASK-04)";     Kind = "electron"; Path = "test/tier-verify.js" },
     @{ Name = "Vault IPC (TASK-02/03)";        Kind = "electron"; Path = "test/vault-ipc-verify.js" },
     @{ Name = "Startup actions IPC (dmu)";     Kind = "electron"; Path = "test/startup-action-ipc-verify.js" },
@@ -377,7 +381,7 @@ if ($missingSuites.Count -gt 0) {
 Write-Host ""
 Write-Host ("Every suite's full output: {0}" -f $logDir) -ForegroundColor DarkGray
 Write-Host "Rule 10 reminder: passing here is 'In Progress', not 'Complete'." -ForegroundColor DarkGray
-Write-Host "Complete requires a clean Windows 10 (1607+) and Windows 11 VM pass (TASK-17)." -ForegroundColor DarkGray
+Write-Host "Complete requires a real run of anything that elevates, deletes or restores." -ForegroundColor DarkGray
 
 $exitCode = [int](($totalFailed -gt 0) -or ($missingSuites.Count -gt 0))
 

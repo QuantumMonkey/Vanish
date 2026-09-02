@@ -163,12 +163,65 @@ foreach ($c in $mustRefuse) {
     Assert-True ((Test-Destination $c.Path).protected -eq $true) ("refused: " + $c.Why)
 }
 
-# Allowed: Vanish quarantines application leftovers from all of these, so a
-# restore has to be able to put them back. Blocking them would break the undo
-# path, which is the entire point of the vault.
-$mustAllow = @(
+# CONDITIONALLY allowed, changed 2026-09-02 -- and the change reverses what
+# this block used to assert, so the reasoning is worth reading before it is
+# reverted again.
+#
+# It used to read: "Vanish quarantines application leftovers from all of
+# these, so a restore has to be able to put them back. Blocking them would
+# break the undo path, which is the entire point of the vault." That is still
+# true, and it is why the fix is a condition rather than a block.
+#
+# WHAT THE OLD RULE COST, found by an adversarial probe on 2026-09-02. The
+# restore loop's own comment states the threat model: "The manifest is
+# user-writable; the restore runs elevated. Both the source it reads and the
+# destination it writes are untrusted." System32 was blocked on exactly that
+# reasoning. Program Files was not, and the probe walked through:
+#
+#   WROTE   C:\Program Files        C:\Program Files (x86)        C:\ProgramData
+#   BLOCKED C:\Windows\System32     C:\ (drive root)
+#
+# All three are writable by Administrators and not by a standard user, so each
+# is a user-to-admin write primitive -- a DLL beside an elevated executable, or
+# a file on a service search path. check-data-dir reported protected=false with
+# nonAdminWriters=[the user] on the development machine at the time, so the
+# precondition was live rather than theoretical.
+#
+# THE RULE NOW HAS TWO PARTS and this block tests both:
+#   protected                 = true   (the path is in the blocked set)
+#   installedAppRestorable    = true   ONLY when the data directory is ACL-
+#                                      locked, which is what makes the manifest
+#                                      believable in the first place
+#
+# It costs nothing in practice: vault-restore and quarantine-items are both
+# Full-Mode-only, and main.js runs secure-data-dir on every elevated start, so
+# any session that can reach either has already locked the directory. If that
+# securing failed, refusing is the correct outcome rather than an inconvenience
+# -- and INV-1 symmetry means the refusal lands at QUARANTINE, so a file is
+# never taken out of a place the vault could not put it back into.
+$installedApp = @(
     @{ Path = 'C:\Program Files\SomeApp\leftover.dll';            Why = 'Program Files leftovers' },
-    @{ Path = (Join-Path $env:ProgramData 'SomeApp\leftover.dat'); Why = 'ProgramData leftovers' },
+    @{ Path = (Join-Path $env:ProgramData 'SomeApp\leftover.dat'); Why = 'ProgramData leftovers' }
+)
+foreach ($c in $installedApp) {
+    $v = Test-Destination $c.Path
+    Assert-True ($v.protected -eq $true) ("now guarded: " + $c.Why + " (was unconditionally allowed until 2026-09-02)")
+    Assert-True ($v.installedAppShape -eq $true) ("recognised as an installed-program path: " + $c.Why)
+    # With no vaultRoot passed there is no trusted directory, so the exception
+    # must NOT fire. This is the assertion that fails if someone widens the
+    # exception into an unconditional allow again.
+    Assert-True ($v.installedAppRestorable -eq $false) ("and refused when the data directory is not locked: " + $c.Why)
+}
+
+# A direct child of the root is never an undo shape, locked directory or not.
+foreach ($p in @('C:\Program Files\lone.dll', (Join-Path $env:ProgramData 'lone.dat'))) {
+    $v = Test-Destination $p
+    Assert-True ($v.installedAppRestorable -eq $false) ("a file dropped straight into the root is refused: " + $p)
+}
+
+# Still unconditionally allowed: user-writable locations, where an elevated
+# write buys an attacker nothing they did not already have.
+$mustAllow = @(
     @{ Path = (Join-Path $env:LOCALAPPDATA 'SomeApp\leftover.dat');Why = 'LocalAppData leftovers' },
     @{ Path = 'C:\Users\OtherUser\AppData\Roaming\App\x.dat';      Why = 'another profile (REQ-17 sweeps these by design)' }
 )
