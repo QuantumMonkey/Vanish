@@ -230,6 +230,23 @@ Neither run is the whole suite. **Rule 10's clean-VM pass is therefore two
 passes per VM, elevated and not**, and a green number from one of them is not
 evidence about the other.
 
+**Both halves from one session, 2026-09-02.** `testun-all.ps1 -BothTiers`,
+started from an elevated shell, runs Full Mode itself and then re-runs itself
+through a scheduled task at `RunLevel Limited` for the Audit Mode half. That is
+the same de-elevation mechanism `scanner.ps1` ships, chosen because it is the
+only one of three that measurably works here -- `runas /trustlevel` exits 1 and
+`CreateProcessWithTokenW` on the explorer token dies `0xc0000142`. The two
+totals are printed side by side and deliberately **not added**: most suites run
+in both tiers, so a sum would count the same assertion twice and read as growth.
+
+It checks the child's own elevation rather than trusting the drop. Where UAC is
+disabled (`EnableLUA=0`, which is what the Windows Sandbox image ships) there is
+no standard-user token to drop to, the child comes back elevated, and the run
+says the other half **could not run** instead of counting a second Full Mode
+pass as coverage. So this makes Rule 10 one command per machine on a normal
+Windows install, and changes nothing about the sandbox, which still needs UAC
+enabled in-guest and a restart to produce its Audit Mode half.
+
 
 ### Phase 4 -- cut the release
 

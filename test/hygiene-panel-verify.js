@@ -840,6 +840,79 @@ app.whenReady().then(async () => {
     (await run(`['g-node','g-zip','g-dart','g-gradle'].every(n => hygieneStatus[n] === 'error')`)) === true,
     'and the checklist marks all four as failed, so the screen agrees with the decision'
   );
+
+  // ---- 847: the Health Advisor card ---------------------------------------
+  //
+  // The landing page did not mention Machine Hygiene existed. What is asserted
+  // here is not that a card is drawn but that it never OVERSTATES: it is an
+  // invitation until a scan has actually finished, it carries the age of what
+  // it shows, and past the staleness window it stops leading with a verdict.
+  console.log('');
+  console.log('Health Advisor card (847)');
+  console.log('-------------------------');
+
+  await evalInPage(`
+    delete window.VanishHygieneLastRun;
+    renderHygieneCard();
+  `);
+  const invite = await evalInPage(`
+    const el = document.getElementById('audit-hygiene-body');
+    return { html: el.innerHTML, hasButton: !!document.getElementById('btn-audit-open-hygiene') };
+  `);
+  assert(/have not been run/i.test(invite.html),
+    'with no scan this session the card says the checks have not been run rather than showing nothing');
+  assert(invite.hasButton, 'and offers a way through to the panel, which is the whole point of the card');
+  assert(/several minutes/i.test(invite.html),
+    'and names the cost before the click - a card offering a ten-minute run without saying so is a trap');
+  assert(!/Nothing found/i.test(invite.html),
+    'and makes no claim about the machine, because nothing has looked at it yet');
+
+  // A finished scan, one second old.
+  const fresh = await evalInPage(`
+    window.VanishHygieneLastRun = {
+      at: Date.now() - 1000,
+      decision: { state: window.VanishFindings.UI_NOTHING_FOUND, headline: 'Nothing found. 9 locations checked, all of them readable.', findingCount: 0, examinedCount: 9, unreadableCount: 0 }
+    };
+    renderHygieneCard();
+    const el = document.getElementById('audit-hygiene-body');
+    return { html: el.innerHTML, card: el.querySelector('.hygiene-card').className };
+  `);
+  assert(/Nothing found/.test(fresh.html),
+    'a verdict from a minute ago leads with the verdict');
+  assert(/just now|minute/.test(fresh.html),
+    'and carries its own age, so it is never read as a standing claim');
+  assert(/clean/.test(fresh.card),
+    'and is toned by the decided state rather than by severity');
+
+  // The same verdict, an hour old.
+  const stale = await evalInPage(`
+    window.VanishHygieneLastRun = {
+      at: Date.now() - 61 * 60 * 1000,
+      decision: { state: window.VanishFindings.UI_NOTHING_FOUND, headline: 'Nothing found. 9 locations checked, all of them readable.', findingCount: 0, examinedCount: 9, unreadableCount: 0 }
+    };
+    renderHygieneCard();
+    const el = document.getElementById('audit-hygiene-body');
+    const head = el.querySelector('.hygiene-card-head span').textContent.trim();
+    return { html: el.innerHTML, head, card: el.querySelector('.hygiene-card').className };
+  `);
+  assert(/^Last checked/.test(stale.head),
+    `an hour-old verdict leads with its AGE, not with the verdict (got "${stale.head}")`);
+  assert(/may have changed/i.test(stale.html),
+    'and says the machine may have moved, because a stale verdict presented as current is worse than none');
+  assert(/stale/.test(stale.card),
+    'and is toned as history rather than as the brightest thing on the page');
+  assert(/Nothing found/.test(stale.html),
+    'while still reporting what that run actually said, as history rather than as a claim');
+
+  // The recording rule: only a TERMINAL decision is kept.
+  const src = require('node:fs').readFileSync(path.join(__dirname, '..', 'renderer', 'hygiene.js'), 'utf8');
+  const setIdx = src.indexOf('window.VanishHygieneLastRun =');
+  const verdictIdx = src.indexOf('hygieneDecision = window.VanishFindings.decide(hygieneResults);\n\n  // 847');
+  assert(setIdx > 0 && verdictIdx > 0 && setIdx > verdictIdx,
+    'the card is only ever fed from the point where a verdict becomes legitimate, never from a partial one');
+  assert((src.match(/window\.VanishHygieneLastRun =/g) || []).length === 1,
+    'and from exactly one place, so no progress render can slip a partial decision into it');
+
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
   win.destroy();

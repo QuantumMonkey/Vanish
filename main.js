@@ -194,6 +194,38 @@ const bootstrapped = app.whenReady().then(async () => {
             outcome: 'error',
             meta: elevationMismatchDiagnostic
           });
+        } else if (!recent) {
+          // gnu: a marker older than the window is weak evidence about THIS
+          // boot, so it still produces no verdict and no diagnostic banner.
+          // But "too old to judge" and "never happened" were previously the
+          // same thing - both silently deleted - and the case the window
+          // excludes is the worst one: a relaunch that reports success and
+          // then never restarts at all. The app quits, nothing comes back, the
+          // user reopens it an hour later, and the only record that anything
+          // was ever attempted is thrown away unread.
+          //
+          // So the EVIDENCE is written even though the VERDICT is withheld.
+          // outcome is 'unknown' rather than 'error' on purpose: whether this
+          // is a failure genuinely cannot be determined from here, and calling
+          // it one would be the same overreach as calling a could-not-look a
+          // nothing. Whoever reads the oplog gets the timestamps and can tell.
+          store.appendOplog({
+            action: 'relaunch-attempt-unresolved',
+            tier: currentTier,
+            items: {},
+            outcome: 'unknown',
+            meta: {
+              attemptedAt: marker.attemptedAt,
+              trigger: marker.trigger,
+              direction: marker.direction || 'elevate',
+              wantedTier: wanted,
+              landedTier: landed,
+              msSinceAttempt,
+              why: msSinceAttempt < 0
+                ? 'the marker is timestamped in the future, so the clock moved or the timestamp is malformed'
+                : 'the marker is older than the 5-minute window, so this boot cannot be attributed to that attempt'
+            }
+          });
         }
       }
     }

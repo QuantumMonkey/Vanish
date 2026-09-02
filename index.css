@@ -3536,6 +3536,49 @@ input:checked + .slider:before {
 .audit-pending i { color: var(--color-primary); font-size: 13px; }
 .audit-pending.failed, .audit-pending.failed i { color: var(--color-danger); }
 
+/* 847: the Machine Hygiene card on the landing page. Toned by the DECIDED
+   state rather than by severity, because "could not finish looking" is not a
+   warning and must not be coloured like one - it is an admission, and the
+   neutral tone is the honest rendering of it. */
+.hygiene-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  border: 1px solid var(--border-glass);
+  border-left: 3px solid var(--text-gray);
+  background: var(--bg-glass, rgba(255, 255, 255, 0.02));
+}
+.hygiene-card-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text-primary);
+}
+.hygiene-card-head i { font-size: 14px; color: var(--text-gray); }
+.hygiene-card-body {
+  color: var(--text-gray);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.hygiene-card-foot { margin-top: 2px; }
+.hygiene-card-open { padding: 6px 14px; font-size: 12px; }
+
+.hygiene-card.work { border-left-color: var(--color-warning, #e0a33e); }
+.hygiene-card.work .hygiene-card-head i { color: var(--color-warning, #e0a33e); }
+.hygiene-card.clean { border-left-color: var(--color-success, #3ea06a); }
+.hygiene-card.clean .hygiene-card-head i { color: var(--color-success, #3ea06a); }
+.hygiene-card.failed { border-left-color: var(--color-danger); }
+.hygiene-card.failed .hygiene-card-head i { color: var(--color-danger); }
+.hygiene-card.neutral { border-left-color: var(--color-primary); }
+.hygiene-card.neutral .hygiene-card-head i { color: var(--color-primary); }
+/* Stale is deliberately the DULLEST of the set. A half-hour-old verdict should
+   not be the brightest thing on the page. */
+.hygiene-card.stale { border-left-color: var(--text-gray); }
+
 .audit-pending-cell {
   padding: 22px 16px;
   color: var(--text-gray);

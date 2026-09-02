@@ -42,15 +42,32 @@ const FIVE_MIN = 5 * 60 * 1000;
 // Mirrors main.js: wanted tier is derived from the recorded direction, landed
 // tier from the live elevation check, and a recent marker landing anywhere
 // other than where it intended is a mismatch.
+//
+// gnu: a marker OUTSIDE the window now returns a third thing rather than null.
+// The verdict is still withheld - too old to attribute to this boot is a real
+// reason to withhold one - but the attempt is recorded, because "too old to
+// judge" and "never happened" were previously indistinguishable and the case
+// the window excludes is the worst one: a relaunch that reports success and
+// never restarts at all, so nothing is around to notice within five minutes.
 function evaluate(marker, isFull, now) {
   if (!marker || typeof marker.attemptedAt !== 'string') return null;
   const msSinceAttempt = now - Date.parse(marker.attemptedAt);
+  if (Number.isNaN(msSinceAttempt)) return null;
   const recent = msSinceAttempt >= 0 && msSinceAttempt < FIVE_MIN;
   const wanted = marker.direction === 'deelevate' ? TIER_AUDIT : TIER_FULL;
   const landed = isFull ? TIER_FULL : TIER_AUDIT;
-  if (!recent || landed === wanted) return null;
+  if (!recent) {
+    return {
+      action: 'relaunch-attempt-unresolved',
+      outcome: 'unknown',
+      wantedTier: wanted,
+      landedTier: landed
+    };
+  }
+  if (landed === wanted) return null;
   return {
     action: marker.direction === 'deelevate' ? 'relaunch-deelevated-mismatch' : 'relaunch-elevated-mismatch',
+    outcome: 'error',
     wantedTier: wanted,
     landedTier: landed
   };
@@ -97,11 +114,26 @@ console.log('==================================');
 
 // --- staleness guards ------------------------------------------------------
 {
-  assert(evaluate({ attemptedAt: longAgo, direction: 'deelevate' }, true, now) === null,
-    'an hour-old marker is not evidence about THIS boot - a crash before cleanup must not misfire later');
-  const future = new Date(now + 60 * 1000).toISOString();
-  assert(evaluate({ attemptedAt: future, direction: 'deelevate' }, true, now) === null,
-    'a marker from the future is discarded rather than trusted (clock skew)');
+  // gnu: stale means NO VERDICT, which is what these guard. It no longer
+  // means no record - the attempt is logged as unresolved, with outcome
+  // 'unknown' rather than 'error', because whether it failed genuinely
+  // cannot be determined from here and saying otherwise would be the same
+  // overreach as reporting a could-not-look as a nothing.
+  {
+    const stale = evaluate({ attemptedAt: longAgo, direction: 'deelevate' }, true, now);
+    assert(stale !== null && stale.action === 'relaunch-attempt-unresolved',
+      'an hour-old marker is RECORDED as an unresolved attempt rather than thrown away unread');
+    assert(stale && stale.outcome === 'unknown',
+      'and its outcome is unknown, not error - a stale marker is not evidence that anything failed');
+    assert(stale && stale.action !== 'relaunch-deelevated-mismatch' && stale.action !== 'relaunch-elevated-mismatch',
+      'an hour-old marker is not evidence about THIS boot - a crash before cleanup must not misfire as a mismatch');
+  }
+  {
+    const future = new Date(now + 60 * 1000).toISOString();
+    const skewed = evaluate({ attemptedAt: future, direction: 'deelevate' }, true, now);
+    assert(skewed !== null && skewed.action === 'relaunch-attempt-unresolved',
+      'a marker from the future is recorded as unresolved rather than trusted as a mismatch (clock skew)');
+  }
   assert(evaluate(null, true, now) === null, 'no marker means nothing to report');
   assert(evaluate({ direction: 'deelevate' }, true, now) === null, 'a malformed marker is ignored, not guessed at');
 }
@@ -118,6 +150,13 @@ console.log('==================================');
   assert(main.includes('relaunch-deelevated-mismatch'), 'main.js can log a de-elevation mismatch');
   assert(/wanted\s*=\s*marker\.direction === 'deelevate'/.test(main),
     'main.js derives the wanted tier from the recorded direction rather than assuming elevate');
+  // gnu: the model above is a MIRROR of main.js, so it can pass while main.js
+  // has drifted away from it. This is the one check that fails if the stale
+  // branch is removed from the real file.
+  assert(main.includes('relaunch-attempt-unresolved'),
+    'main.js records a stale marker as an unresolved attempt instead of deleting it unread');
+  assert(new RegExp('relaunch-attempt-unresolved[\\s\\S]{0,400}outcome: .unknown.').test(main),
+    'and records it with outcome unknown, so a withheld verdict is never read as a failure');
 
   const scanner = fs.readFileSync(path.join(root, 'scanner.ps1'), 'utf8');
   const deelev = scanner.slice(scanner.indexOf('"relaunch-deelevated"'), scanner.indexOf('"list-lockers"'));

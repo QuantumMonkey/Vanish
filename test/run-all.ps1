@@ -3,6 +3,27 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File test\run-all.ps1
 
+# pnor: -BothTiers runs the WHOLE suite from one elevated session. Elevation
+# does not just add tests, it REMOVES them: an Administrator token reads
+# through a Deny ACE, so nine suites cannot build the access-denied condition
+# they exist to test and skip it. Either tier alone is a green number about
+# less than it claims. With -BothTiers this run does Full Mode itself, then
+# re-runs itself de-elevated through a scheduled task at RunLevel Limited and
+# reports both halves together.
+#
+#   powershell -NoProfile -ExecutionPolicy Bypass -File test\run-all.ps1 -BothTiers
+
+param(
+    # Run Full Mode here, then the Audit Mode half through a limited token.
+    # Requires an elevated shell: the drop only goes downwards.
+    [switch]$BothTiers,
+
+    # Internal, set only on the de-elevated child: where to leave its counts
+    # for the parent to read. Its presence is also what tells the child to use
+    # its own log directory, so it cannot overwrite the parent run mid-flight.
+    [string]$TierResultFile = ""
+)
+
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
@@ -25,14 +46,20 @@ Set-Location $root
 # Keyed by computer name because that is what actually differs between the host
 # and the VM, and the wipe now only clears THIS machine's directory. Two
 # machines sharing one checkout can no longer erase each other.
+# pnor: the de-elevated child shares this machine name, so without a suffix it
+# would hit the wipe below and destroy the parent's logs while the parent was
+# still writing them. That is 6d7 again, one process later.
 $logDir = Join-Path (Join-Path $PSScriptRoot "logs") $env:COMPUTERNAME
+if ($TierResultFile) { $logDir = $logDir + "-audit" }
 if (-not (Test-Path -LiteralPath $logDir)) { New-Item -ItemType Directory -Path $logDir -Force | Out-Null }
 Get-ChildItem -LiteralPath $logDir -Filter *.log -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
 
 # Stray logs from before the per-machine split, so an old flat set cannot be
 # mistaken for this run's.
-Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "logs") -Filter *.log -ErrorAction SilentlyContinue |
-    Remove-Item -Force -ErrorAction SilentlyContinue
+if (-not $TierResultFile) {
+    Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot "logs") -Filter *.log -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
@@ -97,6 +124,10 @@ $suites = @(
     # names skips and non-runs at the bottom for exactly this reason.
     @{ Name = "Finder contract (aeu/4rn)";     Kind = "ps";       Path = "test\finder-contract-verify.ps1" },
     @{ Name = "Seam decider (5p5)";            Kind = "node";     Path = "test/findings-verify.js" },
+    # Repository facts nothing else owns: the version stamped in two files, and
+    # every suite registered in this list being on disk. Both drifted silently
+    # before this existed, and both were found by a human reading a file.
+    @{ Name = "Repo invariants (rkt3/z6k)";    Kind = "node";     Path = "test/repo-invariants-verify.js" },
     @{ Name = "Wizard leftover state (dga)";   Kind = "electron"; Path = "test/wizard-state-verify.js" },
     @{ Name = "Local-only credentials (ho2)";  Kind = "ps";       Path = "test\finder-credentials-verify.ps1" },
     @{ Name = "Gitignored-and-unique (sgn)";   Kind = "ps";       Path = "test\finder-gitignored-verify.ps1" },
@@ -126,6 +157,21 @@ $results = @()
 foreach ($suite in $suites) {
     Write-Host ""
     Write-Host ("--- {0} ---" -f $suite.Name) -ForegroundColor Yellow
+
+    # z6k: a suite file that is NOT THERE and a suite that started and died are
+    # two different problems wanting two different responses -- "your working
+    # tree is missing a tracked file" against "go read the log" -- and until now
+    # both printed the same line, which led with "needs Full Mode" and so
+    # actively proposed the wrong one first. When phase2-verify.ps1 was
+    # quarantined out from under the runner on 2026-08-27 that cost two hours.
+    # Test-Path is one call and it separates the two states permanently.
+    if (-not (Test-Path -LiteralPath $suite.Path)) {
+        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; Missing = $true; Path = $suite.Path; FailLines = @(); WarnLines = @(); SkipLines = @(); Log = $null }
+        Write-Host ("  SUITE FILE MISSING: {0}" -f $suite.Path) -ForegroundColor Red
+        Write-Host ("  Nothing ran, and this is a working-tree problem rather than a test") -ForegroundColor DarkYellow
+        Write-Host ("  result: the file is registered in run-all.ps1 but is not on disk.") -ForegroundColor DarkYellow
+        continue
+    }
 
     $output = switch ($suite.Kind) {
         "ps"       { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $suite.Path 2>&1 }
@@ -178,9 +224,15 @@ Write-Host "=======================================" -ForegroundColor Cyan
 
 $totalPassed = 0
 $totalFailed = 0
+$missingSuites = @()
 foreach ($r in $results) {
     if (-not $r.Ran) {
-        Write-Host ("  {0,-32} NOT RUN" -f $r.Name) -ForegroundColor DarkYellow
+        if ($r.Missing) {
+            Write-Host ("  {0,-32} FILE MISSING  ({1})" -f $r.Name, $r.Path) -ForegroundColor Red
+            $missingSuites += $r
+        } else {
+            Write-Host ("  {0,-32} NOT RUN  (needs Full Mode, or it crashed -- read its log)" -f $r.Name) -ForegroundColor DarkYellow
+        }
         continue
     }
     $totalPassed += $r.Passed
@@ -309,9 +361,159 @@ if ($withWarnings.Count -gt 0) {
     }
 }
 
+# z6k: a missing suite file exits NON-ZERO even though nothing failed. The
+# alternative is a green exit code on a run that silently tested less than the
+# registered suite list says it does, which is the same defect as an unnamed
+# skip and is worse for being invisible to CI.
+if ($missingSuites.Count -gt 0) {
+    Write-Host ""
+    Write-Host " Suite files MISSING from the working tree" -ForegroundColor Red
+    Write-Host " -----------------------------------------" -ForegroundColor Red
+    foreach ($r in $missingSuites) { Write-Host ("  {0,-32} {1}" -f $r.Name, $r.Path) -ForegroundColor Red }
+    Write-Host ("  These are registered in run-all.ps1 and are not on disk. Nothing ran for") -ForegroundColor Red
+    Write-Host ("  them, so the TOTAL above is missing their assertions entirely.") -ForegroundColor Red
+}
+
 Write-Host ""
 Write-Host ("Every suite's full output: {0}" -f $logDir) -ForegroundColor DarkGray
 Write-Host "Rule 10 reminder: passing here is 'In Progress', not 'Complete'." -ForegroundColor DarkGray
 Write-Host "Complete requires a clean Windows 10 (1607+) and Windows 11 VM pass (TASK-17)." -ForegroundColor DarkGray
 
-exit ([int]($totalFailed -gt 0))
+$exitCode = [int](($totalFailed -gt 0) -or ($missingSuites.Count -gt 0))
+
+# ---------------------------------------------------------------------------
+# pnor: the de-elevated child hands its counts back and stops here.
+# ---------------------------------------------------------------------------
+if ($TierResultFile) {
+    $payload = [ordered]@{
+        tier      = $tierLabel
+        isAdmin   = $isAdmin
+        passed    = $totalPassed
+        failed    = $totalFailed
+        skipped   = $totalSkipped
+        missing   = $missingSuites.Count
+        exitCode  = $exitCode
+        logDir    = $logDir
+        failNames = @($withFailures | ForEach-Object { $_.Name })
+    }
+    # ASCII and BOM-free: the parent reads this with ConvertFrom-Json, and a
+    # BOM has broken exactly this kind of handoff in this repo before.
+    [System.IO.File]::WriteAllText($TierResultFile, ($payload | ConvertTo-Json -Depth 4), (New-Object System.Text.UTF8Encoding $false))
+    exit $exitCode
+}
+
+# ---------------------------------------------------------------------------
+# pnor: run the OTHER half from this same session.
+# ---------------------------------------------------------------------------
+#
+# The drop uses a scheduled task at RunLevel Limited, not runas.exe. That is
+# measured, not chosen: test/deelevation-probe.ps1 found runas /trustlevel
+# exits 1 here, CreateProcessWithTokenW on the explorer token dies 0xc0000142,
+# and only the scheduled task actually lands at Medium Mandatory Level. The
+# same mechanism is what scanner.ps1 ships for Audit Mode relaunch, so this
+# exercises the product's own de-elevation path as a side effect.
+#
+# The child's own isAdmin is checked rather than assumed. With UAC disabled
+# (EnableLUA=0, which is what Windows Sandbox ships) there is no standard-user
+# token to drop to and RunLevel Limited comes back elevated. Reporting that as
+# "both halves covered" would be the exact defect this whole project is about,
+# so it is reported as a half that COULD NOT RUN, with the reason.
+if ($BothTiers) {
+    Write-Host ""
+    Write-Host "=======================================" -ForegroundColor Cyan
+    Write-Host " Other half: Audit Mode" -ForegroundColor Cyan
+    Write-Host "=======================================" -ForegroundColor Cyan
+
+    if (-not $isAdmin) {
+        Write-Host "  COULD NOT RUN. This shell is already unelevated, and the drop only goes" -ForegroundColor DarkYellow
+        Write-Host "  downwards. Obtaining Full Mode from here needs a UAC prompt, which is a" -ForegroundColor DarkYellow
+        Write-Host "  person rather than a switch. Start an elevated shell and use -BothTiers there." -ForegroundColor DarkYellow
+        Write-Host ""
+        Write-Host ("  COMBINED: not available. This is the Audit Mode half only ({0} passed)." -f $totalPassed) -ForegroundColor DarkYellow
+    } else {
+        $taskName   = "VanishSuiteAuditHalf"
+        $resultFile = Join-Path $env:TEMP ("vanish-audit-half-{0}.json" -f $PID)
+        if (Test-Path -LiteralPath $resultFile) { Remove-Item -LiteralPath $resultFile -Force }
+
+        $selfPath = Join-Path $PSScriptRoot "run-all.ps1"
+        $childOk  = $false
+        $child    = $null
+        $whyNot   = $null
+
+        try {
+            $argLine = ('-NoProfile -ExecutionPolicy Bypass -File "{0}" -TierResultFile "{1}"' -f $selfPath, $resultFile)
+            $action  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument $argLine -WorkingDirectory $root
+
+            $principal = New-ScheduledTaskPrincipal -UserId ("{0}\{1}" -f $env:USERDOMAIN, $env:USERNAME) -LogonType Interactive -RunLevel Limited
+
+            # Zero means UNLIMITED. The default is 72 hours, but the suite has
+            # run over an hour on a cold machine and a task killed mid-run would
+            # report a partial total as a real one.
+            $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
+
+            Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force -ErrorAction Stop | Out-Null
+
+            Write-Host "  Registered a scheduled task at RunLevel Limited and started it." -ForegroundColor DarkGray
+            Write-Host "  The de-elevated half runs in the background; this waits for its counts." -ForegroundColor DarkGray
+
+            Start-ScheduledTask -TaskName $taskName -ErrorAction Stop
+
+            # Evidence that it FINISHED is the file appearing, not the task
+            # state going Ready. A task that failed to start reads Ready too,
+            # and 1dq is the whole lesson about trusting that.
+            $deadline = (Get-Date).AddMinutes(90)
+            while ((Get-Date) -lt $deadline) {
+                if (Test-Path -LiteralPath $resultFile) { Start-Sleep -Milliseconds 400; break }
+                Start-Sleep -Seconds 5
+            }
+
+            if (Test-Path -LiteralPath $resultFile) {
+                $child   = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+                $childOk = $true
+            } else {
+                $info   = Get-ScheduledTaskInfo -TaskName $taskName -ErrorAction SilentlyContinue
+                $whyNot = ("the de-elevated half left no result file within 90 minutes (last task result: {0})" -f $(if ($info) { $info.LastTaskResult } else { "unknown" }))
+            }
+        } catch {
+            $whyNot = ("the scheduled task could not be registered or started: {0}" -f $_.Exception.Message)
+        } finally {
+            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+            if (Test-Path -LiteralPath $resultFile) { Remove-Item -LiteralPath $resultFile -Force -ErrorAction SilentlyContinue }
+        }
+
+        if (-not $childOk) {
+            Write-Host ("  COULD NOT RUN: {0}" -f $whyNot) -ForegroundColor Red
+            Write-Host "  The Full Mode total above stands on its own. The Audit Mode half is" -ForegroundColor Red
+            Write-Host "  NOT covered by this run." -ForegroundColor Red
+            $exitCode = 1
+        } elseif ($child.isAdmin) {
+            # The drop reported success and came back elevated. That is the
+            # relaunch-deelevated-mismatch shape from the operator's oplog, and
+            # the honest answer is that the other half did not run.
+            Write-Host "  COULD NOT RUN: the de-elevated half came back STILL ELEVATED, so it ran" -ForegroundColor DarkYellow
+            Write-Host "  the same tier again rather than the other one. With UAC disabled" -ForegroundColor DarkYellow
+            Write-Host "  (EnableLUA=0) there is no standard-user token for RunLevel Limited to" -ForegroundColor DarkYellow
+            Write-Host "  drop to. Its counts are discarded rather than added." -ForegroundColor DarkYellow
+            Write-Host ("  COMBINED: not available. Full Mode only ({0} passed)." -f $totalPassed) -ForegroundColor DarkYellow
+        } else {
+            $colour = if ($child.failed -gt 0) { "Red" } else { "Green" }
+            Write-Host ("  {0}: {1} passed, {2} failed, {3} skipped" -f $child.tier, $child.passed, $child.failed, $child.skipped) -ForegroundColor $colour
+            foreach ($n in @($child.failNames)) { Write-Host ("      failed suite: {0}" -f $n) -ForegroundColor Red }
+            Write-Host ("      its logs: {0}" -f $child.logDir) -ForegroundColor DarkGray
+
+            Write-Host ""
+            # Deliberately NOT a sum of the two totals. The halves overlap
+            # heavily, since most suites run in both tiers, so adding them would
+            # invent a number that counts the same assertion twice and reads as
+            # growth. Both are printed; neither is merged.
+            $bothGreen = ($totalFailed -eq 0) -and ($child.failed -eq 0) -and ($missingSuites.Count -eq 0) -and ($child.missing -eq 0)
+            Write-Host ("  BOTH TIERS RAN.  Full Mode {0} passed / {1} failed   Audit Mode {2} passed / {3} failed" -f $totalPassed, $totalFailed, $child.passed, $child.failed) -ForegroundColor $(if ($bothGreen) { "Green" } else { "Red" })
+            Write-Host "  These are not added together: most suites run in both tiers, so a sum" -ForegroundColor DarkGray
+            Write-Host "  would count the same assertion twice. What both halves green means is" -ForegroundColor DarkGray
+            Write-Host "  that no suite was skipped by BOTH of them." -ForegroundColor DarkGray
+            if ($child.exitCode -ne 0) { $exitCode = 1 }
+        }
+    }
+}
+
+exit $exitCode

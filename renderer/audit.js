@@ -108,6 +108,9 @@ async function loadAuditData(force = false) {
 
   auditSectionPending('audit-sysinfo-grid', 'reading this machine');
   auditSectionPending('audit-disk-list', 'reading your drives');
+  // 847: not a pending section - it asks nothing of the system and has an
+  // answer immediately, either a verdict from this session or an invitation.
+  renderHygieneCard();
   auditSectionPending('audit-network-body', 'sampling the adapter');
   auditSectionPending('audit-listeners-body', 'checking what is listening');
   auditSectionPending('audit-updates-body', 'asking Windows Update');
@@ -1805,4 +1808,123 @@ function renderListeners(res) {
         </div>`;
     })
     .join('');
+}
+
+// ---------------------------------------------------------------------------
+// 847: the Machine Hygiene card on the landing page.
+// ---------------------------------------------------------------------------
+//
+// Health Advisor is the landing page and Machine Hygiene is the thing nothing
+// else in this category does, and until now the landing page did not mention
+// it existed. Someone who never clicked the second sidebar entry never learned
+// the app can tell them what a delete would destroy.
+//
+// TWO RULES, both from the issue and both about not claiming more than is due:
+//
+// 1. A STALE VERDICT PRESENTED AS CURRENT IS WORSE THAN NO VERDICT. The last
+//    result is held in memory for this session only, never persisted, and
+//    always carries its own age. Persisting it across launches would mean
+//    claiming something about a machine that has been installed to, uninstalled
+//    from and rebooted since, and the whole point of the hygiene panel is that
+//    it makes no claim it has not just earned. Past HYGIENE_CARD_STALE_MS the
+//    card stops leading with the verdict and leads with the age instead.
+//
+// 2. A CARD OFFERING A TEN-MINUTE RUN IS A TRAP. The invitation names the cost
+//    in the same breath as the offer rather than after the click.
+//
+// Reads window.VanishHygieneLastRun, which renderer/hygiene.js sets when and
+// only when a scan reaches a terminal decision. If no scan has run this session
+// the property is undefined and the card is an invitation, which is correct.
+
+const HYGIENE_CARD_STALE_MS = 30 * 60 * 1000;
+
+function hygieneCardAgeLabel(ms) {
+  if (ms < 60 * 1000) return 'just now';
+  const mins = Math.round(ms / 60000);
+  if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago`;
+  const hours = Math.round(mins / 60);
+  return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+}
+
+function hygieneCardTone(state) {
+  const F = window.VanishFindings;
+  if (!F) return 'neutral';
+  if (state === F.UI_HAS_WORK) return 'work';
+  if (state === F.UI_NOTHING_FOUND) return 'clean';
+  if (state === F.UI_FAILED) return 'failed';
+  return 'neutral';
+}
+
+function hygieneCardIcon(state) {
+  const F = window.VanishFindings;
+  if (!F) return 'fa-layer-group';
+  if (state === F.UI_HAS_WORK) return 'fa-circle-exclamation';
+  if (state === F.UI_NOTHING_FOUND) return 'fa-circle-check';
+  if (state === F.UI_FAILED) return 'fa-circle-xmark';
+  return 'fa-circle-question';
+}
+
+function renderHygieneCard() {
+  const el = document.getElementById('audit-hygiene-body');
+  if (!el) return;
+
+  const last = window.VanishHygieneLastRun || null;
+  const open = '<button class="btn-sec hygiene-card-open" id="btn-audit-open-hygiene"><i class="fa-solid fa-arrow-right"></i> Open Machine Hygiene</button>';
+
+  if (!last || !last.decision) {
+    el.innerHTML = `
+      <div class="hygiene-card neutral">
+        <div class="hygiene-card-head">
+          <i class="fa-solid fa-layer-group"></i>
+          <span>These checks have not been run.</span>
+        </div>
+        <div class="hygiene-card-body">
+          Machine Hygiene finds credentials that exist in one place only, work that is not
+          committed anywhere, and caches worth reclaiming, and it says what each one would cost
+          to get back. Nothing on that screen deletes anything. It reads only, works in Audit
+          Mode, and can take several minutes on a disk with many repositories.
+        </div>
+        <div class="hygiene-card-foot">${open}</div>
+      </div>
+    `;
+  } else {
+    const age = Date.now() - last.at;
+    const stale = age > HYGIENE_CARD_STALE_MS;
+    const d = last.decision;
+    const tone = stale ? 'stale' : hygieneCardTone(d.state);
+    const icon = stale ? 'fa-clock-rotate-left' : hygieneCardIcon(d.state);
+
+    // When it is stale the AGE leads and the verdict follows as history. A
+    // headline reading "Nothing found" at the top of a card is a claim about
+    // NOW, and after half an hour of installing and deleting it is not one
+    // this app has earned the right to make.
+    const head = stale
+      ? `Last checked ${hygieneCardAgeLabel(age)}`
+      : (d.headline || '');
+    const body = stale
+      ? `That run said: ${esc(d.headline || '')} This machine may have changed since, so it is
+         history rather than a current verdict. Run the checks again for one about now.`
+      : `${d.findingCount} finding${d.findingCount === 1 ? '' : 's'} across ${d.examinedCount}
+         location${d.examinedCount === 1 ? '' : 's'}${d.unreadableCount > 0
+           ? `, and ${d.unreadableCount} that could not be read`
+           : ''}. Taken ${hygieneCardAgeLabel(age)}.`;
+
+    el.innerHTML = `
+      <div class="hygiene-card ${tone}">
+        <div class="hygiene-card-head">
+          <i class="fa-solid ${icon}"></i>
+          <span>${esc(head)}</span>
+        </div>
+        <div class="hygiene-card-body">${body}</div>
+        <div class="hygiene-card-foot">${open}</div>
+      </div>
+    `;
+  }
+
+  const btn = document.getElementById('btn-audit-open-hygiene');
+  if (btn) {
+    btn.addEventListener('click', () => {
+      if (typeof window.switchTab === 'function') window.switchTab('hygiene');
+    });
+  }
 }

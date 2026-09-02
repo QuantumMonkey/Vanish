@@ -171,20 +171,89 @@ app.whenReady().then(async () => {
 
   // Turning it back off restores the ordinary view, and does not strand the
   // user inside a filter they cannot see the edge of.
+  //
+  // 686: this assertion failed 1 run in 3 on a machine with a real install
+  // history, reporting "149 of 72". 149 is the row count INCLUDING components,
+  // which is the state where runtimesOnly cleared but showComponents stayed
+  // true - that is, the FIRST dispatch took effect and the SECOND did not.
+  // Both handlers are synchronous and renderTable writes innerHTML inline, so
+  // a late render cannot produce it and raising the fixed wait would only hide
+  // it. Per AGP-20 the next change here adds EVIDENCE rather than a fourth
+  // guess: the block below records, for each step, the row count, the caption,
+  // both checkbox states, whether each dispatch was actually HEARD by a
+  // listener, and whether the checkbox nodes were still the same objects
+  // afterwards (a toolbar re-render would replace them and silently discard
+  // the startup listeners, which is the leading candidate).
   const restored = await js(`(() => {
-    const box = document.getElementById('chk-only-runtimes');
-    box.checked = false;
-    box.dispatchEvent(new Event('change'));
-    const cb = document.getElementById('chk-show-components');
-    cb.checked = false;
-    cb.dispatchEvent(new Event('change'));
-    return {
+    const snap = (tag) => ({
+      tag,
       rows: document.querySelectorAll('#apps-tbody tr.app-row').length,
-      caption: document.getElementById('filter-status-text').textContent
+      caption: ((document.getElementById('filter-status-text') || {}).textContent || '').trim(),
+      runtimesChecked: !!(document.getElementById('chk-only-runtimes') || {}).checked,
+      componentsChecked: !!(document.getElementById('chk-show-components') || {}).checked
+    });
+
+    const out = { steps: [snap('before')] };
+
+    const rb0 = document.getElementById('chk-only-runtimes');
+    const cb0 = document.getElementById('chk-show-components');
+
+    // Counted by our OWN listeners. A dispatch on a node whose startup
+    // listener was lost still returns true from dispatchEvent, so the return
+    // value proves nothing and only a count does.
+    let rbHeard = 0;
+    let cbHeard = 0;
+    rb0.addEventListener('change', () => { rbHeard += 1; });
+    cb0.addEventListener('change', () => { cbHeard += 1; });
+
+    rb0.checked = false;
+    rb0.dispatchEvent(new Event('change'));
+    out.steps.push(snap('after-runtimes-off'));
+
+    cb0.checked = false;
+    cb0.dispatchEvent(new Event('change'));
+    out.steps.push(snap('after-components-off'));
+
+    out.heard = { runtimes: rbHeard, components: cbHeard };
+    out.sameNodes = {
+      runtimes: document.getElementById('chk-only-runtimes') === rb0,
+      components: document.getElementById('chk-show-components') === cb0
     };
+    out.rows = out.steps[out.steps.length - 1].rows;
+    out.caption = out.steps[out.steps.length - 1].caption;
+    return out;
   })()`);
+
   const applications = list.filter((a) => a.classification === 'application').length;
-  assert(restored.rows === applications, `turning it off restores the default list (${restored.rows} of ${applications})`);
+
+  // If it is wrong, look again a moment later before reporting. Settling means
+  // a render finished after the read (a race, and this test's fault); NOT
+  // settling means the state itself is wrong (a product bug). Those want
+  // opposite fixes and the failure line has never distinguished them.
+  let settled = null;
+  if (restored.rows !== applications) {
+    await new Promise((r) => setTimeout(r, 750));
+    settled = await js(`(() => ({
+      rows: document.querySelectorAll('#apps-tbody tr.app-row').length,
+      caption: ((document.getElementById('filter-status-text') || {}).textContent || '').trim()
+    }))()`);
+  }
+
+  const evidence = restored.rows === applications ? '' : [
+    `steps: ${restored.steps.map((s) => `${s.tag}=${s.rows}rows runtimes:${s.runtimesChecked} components:${s.componentsChecked}`).join(' | ')}`,
+    `change events heard: runtimes=${restored.heard.runtimes} components=${restored.heard.components} (0 means the startup listener was gone)`,
+    `checkbox nodes unchanged: runtimes=${restored.sameNodes.runtimes} components=${restored.sameNodes.components}`,
+    `caption: "${restored.caption}"`,
+    settled
+      ? `750ms later: ${settled.rows} rows - ${settled.rows === applications ? 'SETTLED, so this was a read racing a render' : 'STILL WRONG, so the state is wrong and not the timing'}`
+      : ''
+  ].filter(Boolean).join('\n        ');
+
+  assert(
+    restored.rows === applications,
+    `turning it off restores the default list (${restored.rows} of ${applications})`,
+    evidence
+  );
 
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);

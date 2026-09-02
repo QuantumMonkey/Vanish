@@ -425,6 +425,15 @@ async function runHygieneScan() {
 
   // ONLY NOW is a verdict legitimate. Everything above is progress.
   hygieneDecision = window.VanishFindings.decide(hygieneResults);
+
+  // 847: the Health Advisor card reads this. Set HERE and nowhere else, so a
+  // card can never show a verdict from a scan that did not finish - the
+  // partial decisions rendered during progress above are deliberately not
+  // recorded. In memory only, never persisted: a verdict that survives a
+  // restart is a claim about a machine that has been rebooted since.
+  window.VanishHygieneLastRun = { at: Date.now(), decision: hygieneDecision };
+  if (typeof window.renderHygieneCard === "function") window.renderHygieneCard();
+
   renderHygieneAll();
 }
 
