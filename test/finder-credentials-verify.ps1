@@ -46,11 +46,31 @@ function Invoke-Engine {
 }
 
 function Invoke-CredentialScan {
-    param([string[]]$scanRoots, [int]$maxDirs = 0)
+    param([string[]]$scanRoots, [int]$maxDirs = 0, [int]$repoSearchDepth = 0)
     $args = @{ module = 'rescue'; finders = @('local-only-credentials'); roots = @($scanRoots) }
     if ($maxDirs -gt 0) { $args['maxDirs'] = $maxDirs }
+    if ($repoSearchDepth -gt 0) { $args['repoSearchDepth'] = $repoSearchDepth }
     $scan = Invoke-Engine "hygiene-scan" $args
     return @($scan.results | Where-Object { $_.finder -eq 'local-only-credentials' })[0]
+}
+
+# A real git repo with a real .gitignore and a real ignored .env, because this
+# finder's verdict comes from `git check-ignore` and a fixture that only looks
+# like a repo would prove nothing about it.
+function New-Ho2Repo {
+    param([string]$path, [string]$secretName = '.env')
+    $null = New-Item -ItemType Directory -Path $path -Force
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
+    Push-Location $path
+    try {
+        $null = & git.exe init 2>&1
+        $null = & git.exe config user.email "t@example.com" 2>&1
+        $null = & git.exe config user.name "t" 2>&1
+        Set-Content -LiteralPath (Join-Path $path '.gitignore') -Value $secretName -Encoding ASCII
+        $null = & git.exe add .gitignore 2>&1
+        $null = & git.exe commit -m init 2>&1
+    } finally { $ErrorActionPreference = $prev; Pop-Location }
 }
 
 # Mirrors test/security-verify.ps1's Remove-TestTree: the icacls-deny fixture
@@ -391,6 +411,61 @@ try {
     Assert-True (@($unPaths | Where-Object { $_ -like "*a-shallow*" }).Count -eq 1) `
         "and uncapped it reports the same repo, once" `
         "found: $($unPaths -join ' | ')"
+
+    # ==================================================================
+    Write-Host ""
+    Write-Host "Outside a repo the walk stops at repoSearchDepth (nq21)" -ForegroundColor Cyan
+    # The rule that stopped D:\Dependencies eating 79,033 directories to prove
+    # a package cache holds no repositories. Four assertions, and the THIRD is
+    # the one that matters: the rule must apply only OUTSIDE a repo. If it ever
+    # truncates inside one, this finder starts missing credentials in exactly
+    # the deep project trees it exists for, and the speed-up would have been
+    # bought with the product.
+    $dp = Join-Path $work "depthprobe"
+
+    # A repo root at depth 4: d1/d2/d3/repo4. At the default it is the last
+    # depth still reachable.
+    $at4 = Join-Path $dp "d1\d2\d3\repo4"
+    New-Ho2Repo -path $at4
+    Set-Content -LiteralPath (Join-Path $at4 ".env") -Value "SECRET=4" -Encoding ASCII
+
+    # A repo root at depth 5. One level past the rule.
+    $at5 = Join-Path $dp "e1\e2\e3\e4\repo5"
+    New-Ho2Repo -path $at5
+    Set-Content -LiteralPath (Join-Path $at5 ".env") -Value "SECRET=5" -Encoding ASCII
+
+    # A repo at depth 1 holding a credential SIX levels below its own root, so
+    # the file sits at depth 7 - well past repoSearchDepth, and inside a repo.
+    $inRepo = Join-Path $dp "f-repo"
+    New-Ho2Repo -path $inRepo
+    $deepInside = Join-Path $inRepo "a\b\c\d\e\f"
+    $null = New-Item -ItemType Directory -Path $deepInside -Force
+    Set-Content -LiteralPath (Join-Path $deepInside ".env") -Value "SECRET=DEEP" -Encoding ASCII
+
+    $dr = Invoke-CredentialScan -scanRoots @($dp)
+    $drPaths = @(@($dr.findings) | ForEach-Object { [string]$_.path })
+
+    Assert-True (@($drPaths | Where-Object { $_ -like "*repo4*" }).Count -eq 1) `
+        "a repo root at exactly repoSearchDepth is still found" `
+        "found: $($drPaths -join ' | ')"
+    Assert-True (@($drPaths | Where-Object { $_ -like "*repo5*" }).Count -eq 0) `
+        "a repo root one level deeper is NOT searched at the default - the rule bites" `
+        "found: $($drPaths -join ' | ')"
+    Assert-True (@($drPaths | Where-Object { $_ -like "*f-repo*" }).Count -eq 1) `
+        "and a credential six levels INSIDE a repo is still found, because the rule is about outside-a-repo descent only" `
+        "found: $($drPaths -join ' | ')"
+
+    # The parameter is the remedy the scope rule promises, so it has to work.
+    $dr6 = Invoke-CredentialScan -scanRoots @($dp) -repoSearchDepth 6
+    $dr6Paths = @(@($dr6.findings) | ForEach-Object { [string]$_.path })
+    Assert-True (@($dr6Paths | Where-Object { $_ -like "*repo5*" }).Count -eq 1) `
+        "raising repoSearchDepth reaches it, so the narrowing is a setting and not a wall" `
+        "found: $($dr6Paths -join ' | ')"
+
+    # And the rule must not manufacture a could-not-look. It is scope, not a
+    # failure: nq21 was filed on a scan-capped record that no re-run could clear.
+    Assert-True (@($dr.unreadable | Where-Object { $_.reason -eq 'scan-capped' }).Count -eq 0) `
+        "the rule reports no scan-capped record, because nothing was prevented - this is scope"
 }
 finally {
     Remove-Ho2TestTree $work

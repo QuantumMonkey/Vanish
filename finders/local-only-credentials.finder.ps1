@@ -133,11 +133,20 @@ function script:Invoke-Ho2CredentialWalk {
         real .git as a file). Repo membership is inherited by descendants
         until a NESTED '.git' replaces it, so a submodule's own files are
         checked against the submodule's ignore rules, not the parent's.
+
+        SCOPE, stated rather than implied. Inside a repo the walk goes to
+        $maxDepth. Outside one it goes to $repoSearchDepth, because outside a
+        repo its only job is finding repo roots and a package-manager cache
+        will otherwise eat the whole budget proving there is nothing in it.
+        A repo nested deeper than $repoSearchDepth below a search root is not
+        found by the default scan; pass its path in 'roots', or raise
+        'repoSearchDepth'. See nq21 and the measurement at the rule itself.
     #>
     param(
         [Parameter(Mandatory = $true)][string]$root,
         [Parameter(Mandatory = $true)][int]$maxDepth,
-        [int]$maxDirs = 15000
+        [int]$maxDirs = 15000,
+        [int]$repoSearchDepth = 4
     )
 
     $candidates  = [System.Collections.Generic.List[object]]::new()
@@ -238,6 +247,56 @@ function script:Invoke-Ho2CredentialWalk {
                 }
                 if ($script:Ho2PruneSegments -contains $child.Name) { continue }
                 if ($cur.Depth -ge $maxDepth) { continue }
+
+                # nq21: OUTSIDE a repo, this walk is doing one job - finding
+                # repo roots - and past a few levels down it stops being able
+                # to do it within any budget worth spending.
+                #
+                # MEASURED on the operator machine, 2026-09-04, full walk to
+                # depth 8 with the prune list applied, all seven default roots:
+                #
+                #                       dirs   inside a repo   outside
+                #   D:\Dependencies   81,318           2,285    79,033
+                #   C:\Users\Anand     2,999             419     2,580
+                #   the other five       659             648        11
+                #
+                # 97% of D:\Dependencies is outside any repo, and a file
+                # outside a repo is explicitly not this finder's claim to
+                # make (see the candidate test above). It held ONE repo,
+                # Flutter, one level down. The walk was spending 13.3 s and
+                # its entire 15,000-directory budget re-deriving that, then
+                # emitting a scan-capped could-not-look that no number of
+                # re-runs could ever clear.
+                #
+                # Outside-a-repo directories by depth, D:\Dependencies:
+                #
+                #   depth 0-4        290
+                #   depth 5       25,246   <- the package caches fan out here
+                #   depth 6       25,868
+                #   depth 7       17,988
+                #   depth 8        9,641
+                #
+                # And every repo on this machine, across all seven roots:
+                # three at depth 0, three at depth 1, five at depth 3
+                # (Documents\GitHub\<repo>), seven at depth 4
+                # (.bmad\cache\external-modules\<x>, .claude\plugins\...).
+                # None deeper. So 4 is the shallowest cutoff that loses no
+                # repo here - 3 would lose seven - and it takes
+                # D:\Dependencies' outside-repo work from 79,033 directories
+                # to 290.
+                #
+                # WHY THIS IS SILENT, deliberately, when the cap is not. This
+                # is SCOPE, the same category as $Ho2PruneSegments and
+                # maxDepth, both of which narrow the search without comment
+                # because they are part of what the check IS. A could-not-look
+                # means something stopped us from establishing an answer;
+                # nothing stopped us here. Recording it would also hand every
+                # machine a permanent 'incomplete', which is the exact defect
+                # nq21 was filed about, moved one line down. It is a scan
+                # parameter instead, so a machine that nests repos deeper can
+                # raise it and a test can drive it.
+                if ($null -eq $repoRootHere -and $cur.Depth -ge $repoSearchDepth) { continue }
+
                 $queue.Enqueue(@{ Path = $child.FullName; Depth = $cur.Depth + 1; RepoRoot = $repoRootHere })
             }
         }
@@ -379,6 +438,14 @@ Register-Finder -name 'local-only-credentials' `
         try { $maxDirs = [int](Get-FieldValue -record $p -name 'maxDirs' -default 15000) } catch { $maxDirs = 15000 }
         if ($maxDirs -le 0) { $maxDirs = 15000 }
 
+        # nq21: how far below a search root a repo root can still be found.
+        # Settable for the same reason maxDepth and maxDirs are - it decides
+        # how much of the disk this check covers, and a machine that nests its
+        # repositories deeper than this one does should be able to say so.
+        $repoSearchDepth = 0
+        try { $repoSearchDepth = [int](Get-FieldValue -record $p -name 'repoSearchDepth' -default 4) } catch { $repoSearchDepth = 4 }
+        if ($repoSearchDepth -lt 0) { $repoSearchDepth = 4 }
+
         if ($roots.Count -eq 0) {
             $roots = @(Get-Ho2DefaultRoots)
         }
@@ -410,7 +477,7 @@ Register-Finder -name 'local-only-credentials' `
                 continue
             }
 
-            $walk = Invoke-Ho2CredentialWalk -root $root -maxDepth $maxDepth -maxDirs $maxDirs
+            $walk = Invoke-Ho2CredentialWalk -root $root -maxDepth $maxDepth -maxDirs $maxDirs -repoSearchDepth $repoSearchDepth
             $dirsTotal += $walk.dirsVisited
             foreach ($u in $walk.unreadable) { $unreadable.Add($u) }
             $reposSeen += @($walk.repoRoots).Count

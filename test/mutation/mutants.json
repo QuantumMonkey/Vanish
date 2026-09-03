@@ -187,5 +187,19 @@
   "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/shared-walk-verify.ps1",
   "find": "            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {",
   "replace": "            if ($false) {"
+ },
+ {
+  "label": "ho2: the outside-a-repo depth rule stops applying (nq21 regresses)",
+  "file": "finders/local-only-credentials.finder.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-credentials-verify.ps1",
+  "find": "                if ($null -eq $repoRootHere -and $cur.Depth -ge $repoSearchDepth) { continue }",
+  "replace": "                if ($false) { continue }"
+ },
+ {
+  "label": "ho2: the depth rule applies INSIDE repos too, truncating deep project trees",
+  "file": "finders/local-only-credentials.finder.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-credentials-verify.ps1",
+  "find": "                if ($null -eq $repoRootHere -and $cur.Depth -ge $repoSearchDepth) { continue }",
+  "replace": "                if ($cur.Depth -ge $repoSearchDepth) { continue }"
  }
 ]

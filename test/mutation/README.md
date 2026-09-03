@@ -12,16 +12,16 @@ whether it did. Restores the file afterwards, including on crash.
 On 2026-09-03 this repository had 2,235 assertions and no way to say which of
 them were load-bearing. Almost all had only ever been observed *passing*, and a
 test that has never failed proves nothing. The first run found three assertions
-that could not fail at all — one of them the accumulator behind the product's
-headline sentence (`totalBytes` → "You can reclaim X GB").
+that could not fail at all -- one of them the accumulator behind the product's
+headline sentence (`totalBytes` -> "You can reclaim X GB").
 
-## What 27/27 does NOT mean
+## What 29/29 does NOT mean
 
-It does not mean the suite is complete. It means these 27 specific defects are
+It does not mean the suite is complete. It means these 29 specific defects are
 caught. Read the number as a floor on assertion quality in the areas probed,
 never as coverage.
 
-Not probed at all yet: most of `scanner.ps1`'s 8,400 lines — registry
+Not probed at all yet: most of `scanner.ps1`'s 8,400 lines -- registry
 enumeration, the reclaim finders' size arithmetic, process and network
 attribution, the uninstall and force-uninstall flows, most of the renderer.
 
@@ -72,6 +72,6 @@ exists to refuse. Closed in `security-verify.ps1`.
 ## Adding a mutant
 
 Entries in `mutants.json` are `{ label, file, find, replace, suite }`. `find`
-must match exactly once, written with `\n` line endings — the harness
+must match exactly once, written with `\n` line endings -- the harness
 normalises CRLF before matching and restores the original bytes afterwards, so
 mutants never have to care which the file uses.

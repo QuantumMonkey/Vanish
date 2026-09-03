@@ -62,6 +62,92 @@ never by the process refresh loop. The pre-warm mitigation described in
 
 ---
 
+## Run 006 - 2026-09-04 - local-only-credentials after nq21
+
+| Condition | Value |
+|---|---|
+| CPU | AMD Ryzen 9 5900HX (8 cores / 16 threads) |
+| RAM | 15 GB |
+| Storage | NVMe SSD |
+| Windows | Windows 11 Pro, build 26200 |
+| Run type | Warm, nothing else on the disk |
+| Elevation | Full Mode |
+| Probe | `test\sandbox\ho2-profile-probe.ps1` |
+
+Replaces Run 003's figure for this check, which nq21 already recorded as stale
+in both directions.
+
+### Before and after, same probe, same machine, minutes apart
+
+```
+                     BEFORE                              AFTER
+   2,988 ms   2999 dirs  4 cand  12 repos    1,524 ms   1336 dirs  4 cand  12 repos  C:\Users\Anand
+       8 ms      8 dirs  0 cand   1 repo         9 ms      8 dirs  0 cand   1 repo   C:\tmp
+     474 ms    517 dirs  0 cand   1 repo       484 ms    517 dirs  0 cand   1 repo   D:\Claude Setups
+  13,306 ms  15000 dirs  0 cand   1 repo     5,137 ms   2575 dirs  1 cand   1 repo   D:\Dependencies
+      46 ms     71 dirs  0 cand   1 repo        43 ms     71 dirs  0 cand   1 repo   D:\Ideations
+      88 ms     60 dirs  0 cand   1 repo        88 ms     60 dirs  0 cand   1 repo   D:\quickhelp
+       2 ms      3 dirs  0 cand   1 repo         4 ms      3 dirs  0 cand   1 repo   D:\Vault
+  16,910 ms  18658 dirs  4 cand   TOTAL      7,291 ms   4570 dirs  5 cand   TOTAL
+
+  1 root hit the 15,000-dir cap             0 roots capped
+```
+
+**Read the candidate column first, as with 127o.** This is not only 2.3x
+faster. It finds a FIFTH credential, inside `D:\Dependencies\Flutter` -- the
+repo that made `D:\Dependencies` a search root in the first place, and which
+the capped walk was running out of budget before reaching. The old run reported
+that root as `scan-capped`, so the contract held and the operator was told the
+check was incomplete rather than clean. They were still not told about the
+credential.
+
+The permanent could-not-look is also gone: no root caps now, so the check can
+actually report a complete answer instead of an incomplete one that no number
+of re-runs could ever settle.
+
+### Why the rule is a depth and why the depth is 4
+
+Full walk to depth 8 with the finder's prune list applied, every default root:
+
+| Root | Dirs | Inside a repo | Outside | Repos |
+|---|---|---|---|---|
+| `D:\Dependencies` | 81,318 | 2,285 | 79,033 | 1 |
+| `C:\Users\Anand` | 2,999 | 419 | 2,580 | 12 |
+| the other five | 659 | 648 | 11 | 5 |
+
+97% of `D:\Dependencies` is outside any repo, and a credential outside a repo
+is explicitly not this finder's claim to make. Its outside-repo directories by
+depth:
+
+```
+  depth 0-4        290
+  depth 5       25,246     <- the package caches fan out here
+  depth 6       25,868
+  depth 7       17,988
+  depth 8        9,641
+```
+
+And every repository on this machine, measured rather than assumed: three at
+depth 0, three at depth 1, five at depth 3 (`Documents\GitHub\<repo>`), seven
+at depth 4 (`.bmad\cache\external-modules\<x>`, `.claude\plugins\...`). None
+deeper. So 4 is the shallowest cutoff that loses no repository here -- 3 would
+lose seven -- and it takes the outside-repo work from 79,033 directories to
+290.
+
+`repoSearchDepth` is a scan parameter beside `maxDepth` and `maxDirs`, so a
+machine that nests repositories deeper can say so, and the suite drives it.
+
+### What this does NOT establish
+
+The 4 is calibrated on one machine's layout. It is a scope, stated in the
+finder's own documentation, not a discovery about how repositories are laid out
+in general. The check is silent about it for the same reason it is silent about
+`node_modules`: scope is part of what the check IS, and recording it would hand
+every machine a permanent `incomplete` -- which is the exact defect nq21 was
+filed about, moved one line down.
+
+---
+
 ## Run 005 - 2026-09-04 - the same machine - what the vault hash actually spends
 
 | Condition | Value |
