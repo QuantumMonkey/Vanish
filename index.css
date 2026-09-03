@@ -3989,3 +3989,16 @@ input:checked + .slider:before {
   image-rendering: -webkit-optimize-contrast;
   display: block;
 }
+
+/* 470o: a link out of a panel that deliberately stops short, to the panel that
+   answers the half it does not. Styled like the other in-panel text buttons
+   (colour + underline) rather than as a browser anchor, because it navigates
+   inside the app and never leaves it. */
+.inline-link {
+  color: var(--color-primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.inline-link:hover {
+  opacity: 0.85;
+}

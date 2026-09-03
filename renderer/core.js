@@ -1642,5 +1642,18 @@ function setupSidebarNavigation() {
   elements.navItems.forEach((item) => {
     item.addEventListener('click', () => switchTab(item.getAttribute('data-tab')));
   });
+
+  // 470o: any element carrying data-goto-tab navigates to that tab. Delegated
+  // from the document once, so a panel that deliberately stops short can send
+  // the reader to the one that answers the rest without each such link needing
+  // its own listener wired at its own render time - which is how the Machine
+  // Hygiene card's button had to be done, and why re-rendering that card has
+  // to remember to re-wire it.
+  document.addEventListener('click', (e) => {
+    const link = e.target.closest('[data-goto-tab]');
+    if (!link) return;
+    e.preventDefault();
+    switchTab(link.getAttribute('data-goto-tab'));
+  });
 }
 

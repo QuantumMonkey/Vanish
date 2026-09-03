@@ -421,11 +421,37 @@
               </div>
             </div>
 
-            <!-- Section: Storage -->
+            <!-- Section: Storage
+                 470o asked whether this is a strictly-worse mirror of Settings >
+                 System > Storage, which shows these same numbers PLUS a
+                 breakdown by category PLUS cleanup actions. Answered here so
+                 nobody has to re-litigate it:
+
+                 IT IS DELIBERATELY A SUBSET, AND IT IS THE VERDICT'S INPUT. The
+                 90%-full threshold in renderDiskBars is the number
+                 auditReportWork counts into the headline at the top of this
+                 page ("N things need a look"). Take the bars away and the
+                 verdict still counts drives while nothing on screen shows
+                 which. This is not a storage manager and must not grow into
+                 one - Settings is better at that and is one click away.
+
+                 What it adds is the pointer below, which is the honest version
+                 of "we have a storage panel too": the half NEITHER Settings nor
+                 WinDirStat nor WizTree can answer is whose bytes these are, and
+                 that is a real feature in System Clean rather than a promise
+                 made here. Same reasoning as the attribution card's own
+                 comment, applied to the panel that sends people to it. -->
             <div class="audit-section">
               <div class="audit-section-title"><i class="fa-solid fa-hard-drive"></i> Storage</div>
               <div id="audit-disk-list" style="display: flex; flex-direction: column; gap: 10px;">
                 <!-- Disk bars injected by renderer -->
+              </div>
+              <div class="panel-inline-note" style="margin-top: 10px;">
+                How full each drive is, and nothing more &ndash; Settings &gt; System &gt; Storage
+                breaks the same numbers down by category and offers the cleanup, and it is better
+                at that than Vanish would be. The question none of them answer is <em>whose</em>
+                bytes those are: <a href="#" class="inline-link" data-goto-tab="system-clean">Where
+                your disk space went</a> matches folders against the programs you actually have.
               </div>
             </div>
 
@@ -476,7 +502,26 @@
                  Uninstall updates is several clicks deep, shows a bare KB list
                  with no indication of what any entry is, and never says what
                  removing one costs. We build the list; the removal stays
-                 Windows' own, through wusa. -->
+                 Windows' own, through wusa.
+
+                 470o called this a strictly-worse mirror on the strength of the
+                 note below - "Vanish does not remove updates" - and that reads
+                 the wrong sentence. Not removing is the CUT (a removal engine
+                 for Windows Updates is permanently cut in PRE-RELEASE.md); it is
+                 not the feature. The feature is every field Settings does not
+                 give you and this list does: what kind of thing each update is,
+                 what removing it would cost, an install date that says "not
+                 recorded" with a reason rather than showing a blank, and newest
+                 first because the question people arrive with is "what changed
+                 just before this started going wrong".
+
+                 So: kept, and this is the written-down why. Reopen it only with
+                 evidence that Settings has started answering those. -->
+            <!-- 470o footnote: this section deliberately contributes NOTHING to
+                 the verdict at the top of the page (see the sections list in
+                 renderer/audit.js). Updates are Windows' business; a panel that
+                 counted them into "N things need a look" would be nagging. -->
+
             <div class="audit-section" id="audit-updates-section">
               <div class="audit-section-title">
                 <i class="fa-solid fa-clock"></i> Windows updates, in plain words

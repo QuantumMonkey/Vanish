@@ -15,9 +15,9 @@ test that has never failed proves nothing. The first run found three assertions
 that could not fail at all -- one of them the accumulator behind the product's
 headline sentence (`totalBytes` -> "You can reclaim X GB").
 
-## What 38/38 does NOT mean
+## What 41/41 does NOT mean
 
-It does not mean the suite is complete. It means these 38 specific defects are
+It does not mean the suite is complete. It means these 41 specific defects are
 caught. Read the number as a floor on assertion quality in the areas probed,
 never as coverage.
 

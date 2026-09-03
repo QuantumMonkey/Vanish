@@ -112,6 +112,7 @@ $suites = @(
     @{ Name = "Install date sources (mp31)";   Kind = "ps";       Path = "test\install-date-source-verify.ps1" },
     @{ Name = "Install folder sizing (mp31)";  Kind = "electron"; Path = "test/install-size-verify.js" },
     @{ Name = "Install size in the table (mp31)"; Kind = "electron"; Path = "test/install-size-render-verify.js" },
+    @{ Name = "Landing panels kept (470o)";    Kind = "electron"; Path = "test/landing-panels-verify.js" },
     @{ Name = "UAC policy lock (qyt)";          Kind = "node";     Path = "test/uac-lock-verify.js" },
     @{ Name = "UAC failure causes (ytv)";      Kind = "node";     Path = "test/uac-cause-verify.js" },
     @{ Name = "GPU payload shape (aaw)";       Kind = "node";     Path = "test/gpu-shape-verify.js" },

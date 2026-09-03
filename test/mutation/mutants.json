@@ -264,5 +264,26 @@
   "label": "size: every row is asked to be measured, including ones that already have a size",
   "find": "    const measurable = !app.sizeBytes && app.installLocation;",
   "replace": "    const measurable = app.installLocation;"
+ },
+ {
+  "file": "renderer/core.js",
+  "suite": "npx electron test/landing-panels-verify.js",
+  "label": "470o: the cross-panel link stops navigating, so a panel that stops short sends nobody anywhere",
+  "find": "    const link = e.target.closest('[data-goto-tab]');\n    if (!link) return;",
+  "replace": "    const link = e.target.closest('[data-goto-tab]');\n    if (link) return;\n    if (!link) return;"
+ },
+ {
+  "file": "renderer/audit.js",
+  "suite": "npx electron test/landing-panels-verify.js",
+  "label": "470o: Windows updates starts counting into the verdict, so the app nags about them",
+  "find": "      fail: (msg) => { auditSectionFailed('audit-updates-body', 'ask Windows Update', msg); auditReportBlind('Windows Update'); }",
+  "replace": "      report: () => auditReportWork(1, 'update'),\n      fail: (msg) => { auditSectionFailed('audit-updates-body', 'ask Windows Update', msg); auditReportBlind('Windows Update'); }"
+ },
+ {
+  "file": "renderer/audit.js",
+  "suite": "npx electron test/landing-panels-verify.js",
+  "label": "470o: Storage stops counting almost-full drives, so the verdict loses its only disk input",
+  "find": "        const full = (diag.disks || []).filter((d) => (d.pctUsed ?? 0) >= 90);",
+  "replace": "        const full = [];"
  }
 ]
