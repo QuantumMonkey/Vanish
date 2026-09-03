@@ -3970,3 +3970,22 @@ input:checked + .slider:before {
 .audit-machine-line:hover { color: var(--text-primary); }
 .audit-machine-line:focus-visible { outline: 2px solid var(--color-primary); outline-offset: 2px; }
 .audit-machine[open] .audit-cards-grid { margin-top: 6px; }
+
+/* s4cx: the program's own icon, where one could be extracted. The tile keeps
+   its exact box either way, so a row is the same height and the column does
+   not shift as icons arrive one at a time behind a scroll. */
+.app-icon-placeholder.has-icon {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-icon-img {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  image-rendering: -webkit-optimize-contrast;
+  display: block;
+}

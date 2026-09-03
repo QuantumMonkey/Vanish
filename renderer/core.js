@@ -1030,6 +1030,91 @@ function updateFilterStatus(shownCount) {
 }
 
 // Render dynamic rows in table
+// s4cx: swap the letter tile for the program's real icon, lazily.
+//
+// The engine has always shipped DisplayIcon as `icon` and this file has always
+// ignored it. 87 of 150 entries on the operator's machine carry one; none of
+// them rendered.
+//
+// WHY AN OBSERVER RATHER THAN A LOOP OVER THE ROWS. renderTable writes every
+// matching row, which on this machine is 152 of them, but only about seven are
+// on screen. Extracting 152 icons to show seven is exactly the "worse first
+// paint than letter tiles" trade this is supposed to avoid. The observer asks
+// only for rows that actually become visible, and unobserves each one as soon
+// as it has an answer.
+//
+// FAILURE IS SILENT AND PERMANENT-PER-ROW. A null answer leaves the letter tile
+// alone and the row is never asked about again. An icon carries no meaning in
+// this table, so a missing one is not a could-not-look and must not be dressed
+// as one.
+let appIconObserver = null;
+
+function ensureAppIconObserver() {
+  if (appIconObserver || typeof IntersectionObserver !== 'function') return appIconObserver;
+  appIconObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target;
+        appIconObserver.unobserve(el);
+        loadAppIcon(el);
+      }
+    },
+    // A margin so a row is fetched just before it scrolls into view rather
+    // than as it arrives, which is the difference between an icon appearing
+    // and an icon popping in.
+    { root: null, rootMargin: '200px 0px' }
+  );
+  return appIconObserver;
+}
+
+async function loadAppIcon(el) {
+  if (!el || el.dataset.iconLoaded === '1') return;
+  el.dataset.iconLoaded = '1';
+  const source = el.dataset.iconSource;
+  if (!source || !window.api || typeof window.api.getAppIcon !== 'function') return;
+
+  let res = null;
+  try {
+    res = await window.api.getAppIcon(source);
+  } catch {
+    return; // silent: the letter tile stays
+  }
+  if (!res || !res.dataUrl) return;
+
+  // Guard against a re-render swapping the element out from under an in-flight
+  // request: only paint if this element is still in the document and still
+  // about the same program.
+  if (!el.isConnected || el.dataset.iconSource !== source) return;
+
+  const img = document.createElement('img');
+  img.className = 'app-icon-img';
+  img.alt = '';
+  img.src = res.dataUrl;
+  el.textContent = '';
+  el.appendChild(img);
+  el.classList.add('has-icon');
+}
+
+// Called after each renderTable pass. Cheap: it walks only the placeholders
+// that carry a source and have not been answered yet.
+function observeAppIcons() {
+  const obs = ensureAppIconObserver();
+  const tiles = document.querySelectorAll('.app-icon-placeholder[data-icon-source]:not([data-icon-loaded])');
+  if (!obs) {
+    // No IntersectionObserver (an old harness, a headless context). Fall back
+    // to asking for a bounded number rather than all of them, so the fallback
+    // cannot become the slow path this was written to avoid.
+    let budget = 40;
+    for (const t of tiles) {
+      if (budget-- <= 0) break;
+      loadAppIcon(t);
+    }
+    return;
+  }
+  for (const t of tiles) obs.observe(t);
+}
+
 function renderTable(apps) {
   // 5rz: rows that were checked before this re-render (a sort, a filter
   // keystroke, a background refresh) stay checked if they are still in the
@@ -1099,7 +1184,7 @@ function renderTable(apps) {
       <td><input type="checkbox" class="app-row-checkbox" data-app-index="${index}"${checked ? ' checked' : ''}></td>
       <td>
         <div class="app-info-cell">
-          <div class="app-icon-placeholder">${esc(initial)}</div>
+          <div class="app-icon-placeholder"${app.icon ? ` data-icon-source="${esc(app.icon)}"` : ''}>${esc(initial)}</div>
           <div>
             <div class="app-title-name">${esc(app.name)}</div>
             <div class="app-publisher-name">${esc(app.publisher)}</div>
@@ -1145,6 +1230,10 @@ function renderTable(apps) {
   });
 
   updateBulkSelectUI();
+
+  // s4cx: after the rows exist, not during. Only the ones that scroll into
+  // view actually ask for an icon.
+  observeAppIcons();
 }
 
 // Select App handler

@@ -79,6 +79,11 @@ contextBridge.exposeInMainWorld('api', {
   getDesktopApps: stub('getDesktopApps', apps),
   getUwpApps: stub('getUwpApps', []),
   getWindowsFeatures: stub('getWindowsFeatures', { success: true, features: [], total: 0, enabled: 0 }),
+  // s4cx: the harness answers with no icon, which is the FALLBACK path -
+  // every DOM suite therefore renders letter tiles and asserts against the
+  // shape the renderer must keep working when extraction produces nothing.
+  // A suite that wants the swap can override this per test.
+  getAppIcon: stub('getAppIcon', { success: true, dataUrl: null }),
   createRestorePoint: stub('createRestorePoint', { success: true }),
   scanLeftovers: stub('scanLeftovers', { files: [], registry: [] }),
   purgeRemnants: stub('purgeRemnants', { success: true, quarantinedCount: 0, files: [], registry: [] }),

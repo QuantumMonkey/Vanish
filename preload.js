@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('api', {
   getDesktopApps: () => ipcRenderer.invoke('get-desktop-apps'),
   getUwpApps: () => ipcRenderer.invoke('get-uwp-apps'),
   getWindowsFeatures: () => ipcRenderer.invoke('get-windows-features'),
+  // s4cx: one icon at a time, asked for lazily by the row that needs it.
+  // Read-only and failure-silent - the renderer keeps its letter tile when this
+  // returns null, because an icon is decoration and its absence means nothing.
+  getAppIcon: (source) => ipcRenderer.invoke('get-app-icon', { source }),
 
   // Safe Actions
   createRestorePoint: () => ipcRenderer.invoke('create-restore-point'),

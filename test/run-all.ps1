@@ -92,6 +92,10 @@ $suites = @(
     @{ Name = "Platform uninstalls (8ns)";     Kind = "node";     Path = "test/platforms-verify.js" },
     @{ Name = "Relaunch intent (1dq)";          Kind = "node";     Path = "test/elevation-intent-verify.js" },
     @{ Name = "Icon set";                      Kind = "node";     Path = "test/icon-verify.js" },
+    # s4cx: the program icons the engine collects and the renderer draws. The
+    # parser is the subject - the first version rejected every Windows path and
+    # nothing failed, because answering null for everything is still an answer.
+    @{ Name = "Program icons (s4cx)";          Kind = "electron"; Path = "test/icon-extract-verify.js" },
     # A runtime dependency resolved by PATH rather than by require() is invisible
     # to every suite that runs from the source tree. The 0.9.0 build shipped
     # without finders/ and nothing failed, because everything degraded politely.

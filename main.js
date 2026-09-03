@@ -536,6 +536,85 @@ ipcMain.handle('get-uwp-apps', async () => {
 // 7oo.7: Windows optional features. Read-only, and deliberately available in
 // Audit Mode - the engine uses the CIM class rather than the DISM cmdlet
 // precisely so this works unelevated.
+// s4cx: the icon the engine already collected.
+//
+// scanner.ps1 reads DisplayIcon out of each uninstall key and ships it as
+// `icon`. main.js passed it through. renderer/core.js used it NOWHERE - every
+// one of the 152 rows drew a letter tile, which is why AI Noise Cancelation,
+// AMD Radeon Software and Antigravity appeared as three consecutive grey As.
+// Measured on the operator's machine: 87 of 150 desktop entries (58%) carry a
+// non-empty icon path, and 0 of 150 rendered one.
+//
+// LAZY, ONE AT A TIME, AND CACHED. 150 extractions at load would be a worse
+// first paint than letter tiles, which is the thing this is supposed to
+// improve. The renderer asks per visible row and caches by source string.
+//
+// A FAILURE IS SILENT. An icon is decoration: it carries no meaning here, so
+// its absence is not a could-not-look and must not be reported as one. Every
+// failure path returns { success: true, dataUrl: null } and the row keeps its
+// letter tile.
+const iconCache = new Map();
+const ICON_CACHE_MAX = 400;
+
+// DisplayIcon is a path, optionally quoted, optionally with a resource index:
+//   "C:\Program Files\App\app.exe",0
+//   C:\Program Files\App\app.exe,0
+//   C:\Program Files\App\icon.ico
+// The index selects which icon inside the binary; getFileIcon does not take
+// one, so it is parsed off and discarded rather than passed through as part of
+// a path that would then not exist.
+function parseDisplayIcon(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim();
+  if (!s) return null;
+
+  // A trailing ",<digits>" or ",-<digits>" is the resource index, never part
+  // of the filename. Anchored so a comma inside a directory name survives.
+  s = s.replace(/,\s*-?\d+\s*$/, '');
+  s = s.trim().replace(/^"(.*)"$/, '$1').trim();
+  if (!s) return null;
+
+  // Absolute local paths only. A relative path would resolve against whatever
+  // the main process's cwd happens to be, and a UNC path would put an icon
+  // fetch on the network, which INV-4 forbids outright.
+  // NO BACKSLASH LITERAL HERE, and that is deliberate. The first version of
+  // this line was /^[A-Za-z]:[\\/]/ and reached the working tree as
+  // /^[A-Za-z]:[\/]/ - a character class matching only a forward slash, so
+  // EVERY Windows path was rejected and the whole feature silently did
+  // nothing. It was caught by probing a real extraction rather than by any
+  // test, because a feature that returns null for everything still passes
+  // every assertion about returning null safely.
+  const SEP = String.fromCharCode(92);
+  if (s.length < 3) return null;
+  if (!/^[A-Za-z]:$/.test(s.slice(0, 2))) return null;
+  if (s[2] !== SEP && s[2] !== '/') return null;
+  return s;
+}
+
+ipcMain.handle('get-app-icon', async (event, { source } = {}) => {
+  const parsed = parseDisplayIcon(source);
+  if (!parsed) return { success: true, dataUrl: null };
+
+  if (iconCache.has(parsed)) return { success: true, dataUrl: iconCache.get(parsed) };
+
+  let dataUrl = null;
+  try {
+    if (fs.existsSync(parsed)) {
+      const img = await app.getFileIcon(parsed, { size: 'normal' });
+      if (img && !img.isEmpty()) dataUrl = img.toDataURL();
+    }
+  } catch {
+    dataUrl = null;
+  }
+
+  // The null is cached too. A path that cannot produce an icon will not start
+  // producing one, and re-asking on every sort and filter would turn a silent
+  // miss into repeated disk work.
+  if (iconCache.size >= ICON_CACHE_MAX) iconCache.clear();
+  iconCache.set(parsed, dataUrl);
+  return { success: true, dataUrl };
+});
+
 ipcMain.handle('get-windows-features', async () => {
   try {
     return await runPowerShell('list-windows-features');
