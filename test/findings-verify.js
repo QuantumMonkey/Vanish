@@ -278,6 +278,84 @@ console.log('D-1 regression: the uninstall wizard leftover screen, at the place 
   assert(empty.canAdvance === false, 'and a null payload advances nothing rather than throwing');
 }
 
+// ---- a cost class the vocabulary does not contain -------------------------
+//
+// FOUND BY MUTATION TESTING 2026-09-03, not by review. costRankIn returns
+// order.length for an unrecognised class so it sorts LAST. Changing that to 0
+// made the mutant SURVIVE - 2,235 assertions and not one noticed. The file
+// comments on this exact danger one screen up ("a ranker that treated it as
+// zero would put the most dangerous offers at the top of the list") and then
+// nothing checked it. A documented hazard with no assertion behind it is a
+// hazard, not a safeguard.
+//
+// TWO CASES THAT LOOK THE SAME AND ARE NOT, which the first version of this
+// block got wrong and these assertions now separate:
+//
+//   ABSENT       null / undefined / '' normalise to 'unknown', a class that IS
+//                in the vocabulary. It then follows the 'unknown' policy -
+//                last in reclaim, SECOND in rescue, because an unmeasured cost
+//                might be irreplaceable and burying it would be the same
+//                mistake in the other direction.
+//   UNRECOGNISED 'Cheap', 'expensive ' with a trailing space, a misspelt
+//                'irreplacable'. Not in the vocabulary at all, so it can carry
+//                no policy and must rank last in EVERY order.
+//
+// The second is not hypothetical: a finder with a typo in one string literal
+// produces it, and under the mutated ranker it would head the reclaim list -
+// at the top of the things the operator is being invited to delete.
+{
+  console.log('');
+  console.log('A cost class the vocabulary does not contain');
+  console.log('-------------------------------------------');
+
+  const unrecognised = ['Cheap', 'expensive ', 'irreplacable', 'free', 42];
+  for (const bogus of unrecognised) {
+    const shown = JSON.stringify(bogus);
+    assert(
+      f.costRankIn(f.COST_ORDER_SAFEST_FIRST, bogus) === f.COST_ORDER_SAFEST_FIRST.length,
+      `an unrecognised cost class ranks last in the reclaim order, never first (${shown})`
+    );
+    assert(
+      f.costRankIn(f.COST_ORDER_LOSS_FIRST, bogus) === f.COST_ORDER_LOSS_FIRST.length,
+      `  and last in the rescue order too - it carries no policy, so it earns no position (${shown})`
+    );
+  }
+
+  // Absent is a different thing and must keep following the 'unknown' policy.
+  for (const absent of [null, undefined, '']) {
+    const shown = JSON.stringify(absent);
+    assert(
+      f.costRankIn(f.COST_ORDER_SAFEST_FIRST, absent) === f.COST_ORDER_SAFEST_FIRST.indexOf('unknown'),
+      `an ABSENT cost class normalises to 'unknown' rather than being unrecognised (${shown})`
+    );
+    assert(
+      f.costRankIn(f.COST_ORDER_LOSS_FIRST, absent) === f.COST_ORDER_LOSS_FIRST.indexOf('unknown'),
+      `  and so keeps its deliberate second place in the rescue order (${shown})`
+    );
+  }
+
+  // End to end through decide(), because the ranker is only dangerous via it.
+  // The mistyped finding is also the BIGGEST, so a byte-first regression would
+  // put it top as well - this fails for either reason, which is what it is for.
+  const mixed = f.decide([
+    {
+      finder: 'x',
+      state: 'found',
+      module: 'reclaim',
+      findings: [
+        finding({ id: 'typo-class', costClass: 'Cheap', module: 'reclaim', bytes: 999999 }),
+        finding({ id: 'real-cheap', costClass: 'cheap', module: 'reclaim', bytes: 1 })
+      ],
+      unreadable: [],
+      examined: 1
+    }
+  ]);
+  assert(
+    mixed.findings[0].id === 'real-cheap',
+    `a mistyped cost class does not head the reclaim list even when it is the biggest (got ${mixed.findings[0].id})`
+  );
+}
+
 // ---- xr7j: the same number answers two opposite questions -----------------
 //
 // Until 2026-09-02 one cost order served every module, and it was the reclaim

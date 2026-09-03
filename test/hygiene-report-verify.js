@@ -321,6 +321,44 @@ console.log('z22.7 renderText is ASCII only (Windows PowerShell 5.1 console)');
     `the panel renders modules in the same order the ranker sorts them (panel: ${panelOrder.join(', ')} | ranker: ${findingsApi.MODULE_KEYS.join(', ')})`
   );
 
+  // FOUND BY MUTATION TESTING 2026-09-03. Replacing hygiene-report's derived
+  // MODULE_KEYS with a hardcoded list IN A DIFFERENT ORDER made the mutant
+  // SURVIVE. The assertion above checks the PANEL against findings.js, and the
+  // source comment in findings.js claims hygiene-report derives its list from
+  // there - but nothing checked the claim, so the one file the comment names
+  // was the one file not covered.
+  //
+  // This is the mirror-drift class this codebase keeps rediscovering: a comment
+  // asserting a relationship is not the relationship.
+  {
+    const reportSrc = nodeFs.readFileSync(nodePath.join(repoRoot, 'lib', 'hygiene-report.js'), 'utf8');
+    assert(
+      /const MODULE_KEYS = findings\.MODULE_KEYS/.test(reportSrc),
+      'hygiene-report.js DERIVES its module order from findings.js rather than keeping a fourth copy'
+    );
+    assert(
+      !/const MODULE_KEYS = \[/.test(reportSrc),
+      'and does not reintroduce a literal list beside the derived one'
+    );
+
+    // Behavioural, not just structural: the report's own section order has to
+    // match the ranker's, or the report and the panel disagree about "first"
+    // while each looks right on its own.
+    const decided = findingsApi.decide([
+      { finder: 'a', state: 'found', module: 'reclaim',
+        findings: [{ id: 'r', title: 'r', path: '', bytes: 1, costClass: 'cheap', module: 'reclaim' }],
+        unreadable: [], examinedCount: 1 },
+      { finder: 'b', state: 'found', module: 'rescue',
+        findings: [{ id: 's', title: 's', path: '', bytes: 1, costClass: 'irreplaceable', module: 'rescue' }],
+        unreadable: [], examinedCount: 1 }
+    ]);
+    const order = decided.findings.map((x) => x.module);
+    assert(
+      order.indexOf('rescue') < order.indexOf('reclaim'),
+      `the ranker puts rescue before reclaim, which is the order the report sections must follow (got ${order.join(', ')})`
+    );
+  }
+
   const reportKeys = require('../lib/hygiene-report');
   assert(typeof reportKeys.buildReport === 'function' || typeof reportKeys === 'object',
     'and hygiene-report.js loads with its keys derived rather than copied');

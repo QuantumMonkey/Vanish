@@ -1,0 +1,114 @@
+[
+ {
+  "label": "findings: nothing-found returned when something was unreadable",
+  "file": "lib/findings.js",
+  "suite": "node test/findings-verify.js",
+  "find": "  } else if (findings.length > 0) {",
+  "replace": "  } else if (findings.length >= 0) {"
+ },
+ {
+  "label": "findings: rescue ranks cheap first again (the xr7j defect)",
+  "file": "lib/findings.js",
+  "suite": "node test/findings-verify.js",
+  "find": "  rescue: COST_ORDER_LOSS_FIRST,",
+  "replace": "  rescue: COST_ORDER_SAFEST_FIRST,"
+ },
+ {
+  "label": "findings: unknown cost treated as cheap",
+  "file": "lib/findings.js",
+  "suite": "node test/findings-verify.js",
+  "find": "  return i === -1 ? order.length : i;",
+  "replace": "  return i === -1 ? 0 : i;"
+ },
+ {
+  "label": "findings: trustworthy true even with unreadable locations",
+  "file": "lib/findings.js",
+  "suite": "node test/findings-verify.js",
+  "find": "    trustworthy: state === UI_NOTHING_FOUND || (state === UI_HAS_WORK && unreadable.length === 0),",
+  "replace": "    trustworthy: true,"
+ },
+ {
+  "label": "findings: canAdvance true on a terminal state",
+  "file": "lib/findings.js",
+  "suite": "node test/findings-verify.js",
+  "find": "function canAdvance(state) {\n  return state === UI_HAS_WORK;\n}",
+  "replace": "function canAdvance(state) {\n  return true;\n}"
+ },
+ {
+  "label": "findings: bytes become the sort key instead of cost",
+  "file": "lib/findings.js",
+  "suite": "node test/findings-verify.js",
+  "find": "    const c = costRankIn(order, a.costClass) - costRankIn(order, b.costClass);\n    if (c !== 0) return c;\n    return (b.bytes || 0) - (a.bytes || 0);",
+  "replace": "    return (b.bytes || 0) - (a.bytes || 0);"
+ },
+ {
+  "label": "report: module keys hardcoded again, drifting from findings.js",
+  "file": "lib/hygiene-report.js",
+  "suite": "node test/hygiene-report-verify.js",
+  "find": "const MODULE_KEYS = findings.MODULE_KEYS.filter((k) => k !== 'other');",
+  "replace": "const MODULE_KEYS = ['reclaim', 'hygiene', 'rescue'];"
+ },
+ {
+  "label": "repo: package-lock version drift goes unnoticed",
+  "file": "package-lock.json",
+  "suite": "node test/repo-invariants-verify.js",
+  "find": "\"version\": \"0.9.4\",\n  \"lockfileVersion\"",
+  "replace": "\"version\": \"0.3.0\",\n  \"lockfileVersion\""
+ },
+ {
+  "label": "icons: every Windows path rejected again (the s4cx defect)",
+  "file": "main.js",
+  "suite": "npx electron test/icon-extract-verify.js",
+  "find": "  if (s[2] !== SEP && s[2] !== '/') return null;",
+  "replace": "  if (s[2] !== '/') return null;"
+ },
+ {
+  "label": "contract: could-not-look collapses into nothing (THE aeu defect)",
+  "file": "finders/_contract.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-contract-verify.ps1",
+  "find": "    } elseif ($blind.Count -eq 0) {",
+  "replace": "    } elseif ($true) {"
+ },
+ {
+  "label": "contract: findings present but state says nothing",
+  "file": "finders/_contract.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-contract-verify.ps1",
+  "find": "    $state = if ($found.Count -gt 0) {",
+  "replace": "    $state = if ($false) {"
+ },
+ {
+  "label": "contract: totalBytes silently zero",
+  "file": "finders/_contract.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-contract-verify.ps1",
+  "find": "        if ($null -ne $b) { $totalBytes += [long]$b }",
+  "replace": "        if ($false) { $totalBytes += [long]$b }"
+ },
+ {
+  "label": "column filters: AND becomes OR (widens as the user narrows)",
+  "file": "renderer/column-filter.js",
+  "suite": "npx electron test/column-filter-verify.js",
+  "find": "  return keys.every((key) => columnFilterAllows(key, row));",
+  "replace": "  return keys.some((key) => columnFilterAllows(key, row));"
+ },
+ {
+  "label": "column filters: an active exclusion stops excluding",
+  "file": "renderer/column-filter.js",
+  "suite": "npx electron test/column-filter-verify.js",
+  "find": "  return columnFilterValuesFor(spec, row).some((value) => !excluded.has(value));",
+  "replace": "  return true;"
+ },
+ {
+  "label": "queue: the same app can be queued twice",
+  "file": "lib/queue.js",
+  "suite": "npx electron test/queue-verify.js",
+  "find": "  if (queue.items.some((i) => i.appKey === app.registryPath && i.state === 'pending')) {",
+  "replace": "  if (false) {"
+ },
+ {
+  "label": "platforms: every uninstall string matches the first platform",
+  "file": "lib/platforms.js",
+  "suite": "node test/platforms-verify.js",
+  "find": "  if (!uninstallString) return null;",
+  "replace": "  if (!uninstallString) return null; if (true) { const p = PLATFORMS[0]; return { id: p.id, name: p.name, instructions: p.instructions }; }"
+ }
+]

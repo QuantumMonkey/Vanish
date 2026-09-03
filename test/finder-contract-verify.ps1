@@ -35,6 +35,13 @@ function Assert-True {
     else            { Write-Host "  FAIL  $label" -ForegroundColor Red;   $script:fail++ }
 }
 
+# A skip is not a pass. Named so a probe mode this build does not have reads
+# as "could not check" rather than silently vanishing from the count.
+function Write-Skip {
+    param([string]$label, [string]$whyNot)
+    Write-Host "  SKIP  $label -- $whyNot" -ForegroundColor DarkYellow
+}
+
 function Invoke-Engine {
     param([string]$action, [hashtable]$params = @{})
     $json = $params | ConvertTo-Json -Depth 8 -Compress
@@ -86,6 +93,37 @@ try {
     Assert-True ($partial.state -eq 'found') "findings plus unreadable entries is still found"
     Assert-True ($partial.complete -eq $false) "but NOT complete - '3 found' quietly meaning '3 of an unknown number' is the same defect wearing a success badge"
 
+
+    # ==================================================================
+    Write-Host ""
+    Write-Host "The reclaim number, which is the product's headline sentence" -ForegroundColor Cyan
+    # ==================================================================
+    #
+    # FOUND BY MUTATION TESTING 2026-09-03. Making New-FinderResult's totalBytes
+    # loop a no-op - so every finder reports 0 bytes - was caught by NOTHING.
+    # 2,235 assertions and the mutant walked.
+    #
+    # It is not a cosmetic number. It flows contract -> findings.decide()
+    # (lib/findings.js sums r.totalBytes into decided.totalBytes) ->
+    # lib/hygiene-report.js line 134, which formats it into the one sentence
+    # HANDOFF-2026-08-21 quotes verbatim as the product:
+    #
+    #     "You can reclaim X GB ... and the N things that are wrong but free"
+    #
+    # A zeroed total makes that sentence read "0 B" on a machine holding
+    # gigabytes of reclaimable duplicates, and every suite stays green.
+    $sized = Invoke-Engine "finder-probe" @{ mode = 'bytes'; bytes = @(100, 250, 1024) }
+    if ($null -eq $sized -or $sized.success -ne $true) {
+        Write-Skip "the reclaim total" "finder-probe has no 'bytes' mode on this build"
+    } else {
+        Assert-True ($sized.totalBytes -eq 1374) "totalBytes is the SUM of the findings' bytes (100+250+1024), not a placeholder"
+        Assert-True ($sized.totalBytes -ne 0) "and specifically not zero, which is what a broken accumulator reports while every other assertion stays green"
+    }
+
+    $zeroed = Invoke-Engine "finder-probe" @{ mode = 'bytes'; bytes = @() }
+    if ($null -ne $zeroed -and $zeroed.success -eq $true) {
+        Assert-True ($zeroed.totalBytes -eq 0) "no findings really is 0 bytes - the honest zero has to stay reachable"
+    }
     # ==================================================================
     Write-Host ""
     Write-Host "aeu.1b there is no way to construct the forbidden pair" -ForegroundColor Cyan

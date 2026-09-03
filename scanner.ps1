@@ -8466,6 +8466,27 @@ if ($Action) {
                     $r['success'] = $true
                     $r
                 }
+                'bytes' {
+                    # The reclaim total, asked of the contract directly.
+                    #
+                    # Added 2026-09-03 because mutation testing found that
+                    # zeroing New-FinderResult's totalBytes accumulator was
+                    # caught by nothing at all. That number is not decoration:
+                    # it flows into findings.decide() and out through
+                    # hygiene-report.js as "You can reclaim X GB", which the
+                    # handoff quotes verbatim as the product. It needs a probe
+                    # that asks for it without walking a real disk, for the
+                    # same reason 'state' exists.
+                    $fs = @()
+                    $i = 0
+                    foreach ($b in @($Params.bytes)) {
+                        $i++
+                        $fs += ,(New-Finding -id "b$i" -title "b$i" -bytes ([long]$b))
+                    }
+                    $r = New-FinderResult -finder 'probe' -title 'probe' -findings $fs -unreadable @() -examined $i
+                    $r['success'] = $true
+                    $r
+                }
                 'never-touch' {
                     $verdict = Test-NeverTouchPath ([string]$Params.path)
                     @{ success = $true; path = [string]$Params.path; neverTouch = ($null -ne $verdict); reason = $(if ($verdict) { $verdict.reason } else { '' }) }
