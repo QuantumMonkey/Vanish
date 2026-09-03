@@ -3788,13 +3788,34 @@ function Move-ItemTransactional {
 # the cap because ~6.5 s is the most this should add to a deliberate,
 # user-initiated action with a spinner on it; 5000 would have been ~16 s.
 #
-# AN OPEN QUESTION, stated rather than buried: the identical function against
-# the identical tree runs in ~270 ms standalone and ~6300 ms inside the engine.
-# Phase instrumentation puts all of it in the streaming loop, and it is not the
-# move (a tree hashed immediately after being moved into a vault-shaped path
-# still takes ~267 ms standalone), not enumeration (76 ms) and not the size
-# loop (3 ms). Twenty times is too much to leave unexplained, and the cap above
-# is set from the SLOW number so the guess cannot hurt anyone. Filed separately.
+# WHY A TREE COSTS THAT, answered 2026-09-04 (nkc7). It was recorded here as an
+# open question - the same function looked ~20x slower inside the engine than
+# standalone - with three suspects: deep call-stack variable resolution, the
+# engine's loaded state after 8,500 lines, and the move. All three are wrong.
+# The two numbers being compared were a WARM standalone read and a COLD engine
+# read, and everything else followed from that:
+#
+#   called at top level / four frames down     253 / 256 ms
+#   with scanner.ps1 dot-sourced / not          248 / 253 ms
+#   full engine quarantine, warm tree           352 ms above baseline
+#   full engine quarantine, cold tree          3024 ms above baseline
+#
+# The cost is the first OPEN of each file, not the read and not SHA256: of a
+# 2,734 ms cold pass, 2,616 ms is inside [System.IO.File]::OpenRead. It tracks
+# FILE COUNT rather than bytes (a tenth of the files at the same byte total is
+# 4.6x faster; a hundred times the bytes at the same file count is 1.7x slower)
+# and the verdict is cached machine-wide, since a second process reads the same
+# tree 35x faster. That is a filesystem filter evaluating each file the first
+# time it is opened - this machine has one attached at altitude 320400.
+#
+# SO THE CAP STAYS AT 2000, and the reasoning is now the right one. A
+# quarantine is BY DEFINITION a first touch, so the cold path is the only one
+# that matters; there is nothing to optimise, because verifying content means
+# opening every file once and the opens are the cost; and the number is a
+# property of the operator's machine rather than of Vanish, which is exactly
+# why it should not be raised on the strength of one machine's figures.
+# docs/BENCHMARKS.md Run 005, reproduced by
+# test\sandbox\vault-hash-cost-probe.ps1.
 $script:VaultHashMaxBytes = 256MB
 $script:VaultHashMaxFiles = 2000
 

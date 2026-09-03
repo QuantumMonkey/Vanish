@@ -62,6 +62,121 @@ never by the process refresh loop. The pre-warm mitigation described in
 
 ---
 
+## Run 005 - 2026-09-04 - the same machine - what the vault hash actually spends
+
+| Condition | Value |
+|---|---|
+| CPU | AMD Ryzen 9 5900HX (8 cores / 16 threads) |
+| RAM | 15 GB |
+| Storage | NVMe SSD |
+| Windows | Windows 11 Pro, build 26200 |
+| Elevation | Full Mode |
+| On-access scanner | Kaspersky (`klif.K4W-21-26`, minifilter altitude 320400). Defender `AMRunningMode: Not running` |
+| Run type | both, deliberately - this run is ABOUT cold against warm |
+
+This run closes `vanish-uninstaller-nkc7`, which recorded that
+`Get-VaultContentHash` took ~270 ms standalone and ~6,300 ms inside the engine
+on the same 2,000-file tree, and named three suspects: deep call-stack variable
+resolution, the engine's loaded state after 8,500 lines, and the move.
+
+**All three are wrong, and there is no engine-side slowdown at all.** The
+original pair of numbers compared a WARM standalone read against a COLD engine
+read. Everything else followed from that.
+
+### The three suspects, each measured rather than argued
+
+Same 2,000-file tree, same function text, one process per row:
+
+```
+function at top level, called at top level          253 ms
+function at top level, called four frames down      256 ms
+scanner.ps1 dot-sourced, called at top level        248 ms
+scanner.ps1 dot-sourced, called four frames down    248 ms
+```
+
+Call depth is worth 3 ms. Loading all 8,500 lines is worth -5 ms. Dot-sourcing
+scanner.ps1 itself costs 115 ms, once, and is not in the hash at all.
+
+The move is not it either. A real `quarantine-items` through the engine -
+process spawn, parse, protected-destination checks, `Move-ItemTransactional`,
+then the hash - against a tree whose bytes have already been read once:
+
+```
+engine spawn + parse baseline        477 ms
+quarantine, COLD tree              3,500 ms   (3,024 ms above baseline)
+restore (reads every byte)           702 ms
+quarantine, WARM tree                828 ms   (  352 ms above baseline)
+```
+
+352 ms of real engine work against 250 ms standalone. The engine is fine.
+
+### Where the cold time goes: the OPEN, not the read and not SHA256
+
+Phase instrumentation, 2,000 files written by a previous process:
+
+```
+              COLD                          WARM
+enumerate       90 ms                        87 ms
+sort            57 ms                        55 ms
+size loop        6 ms                         6 ms
+stream       2,734 ms                       164 ms
+  of which
+  OpenRead   2,616 ms                        78 ms
+```
+
+96% of the cold cost is inside `[System.IO.File]::OpenRead`. The reads and the
+SHA256 transforms are the same either way.
+
+### It tracks file COUNT, not bytes
+
+Which is what separates a per-file on-access scan from a page-cache miss. Each
+fixture written by a child process, read by the parent, then read again:
+
+| Fixture | Files | MB | Cold open | Per open | Warm open |
+|---|---|---|---|---|---|
+| 2000 x 400 B | 2000 | 0.77 | 2,569 ms | 1.29 ms | 70 ms |
+| 200 x 4 KB | 200 | 0.76 | 561 ms | 2.81 ms | 7 ms |
+| 2000 x 40 KB | 2000 | 76.30 | 4,364 ms | 2.18 ms | 67 ms |
+
+Same bytes, a tenth of the files: 4.6x less time. A hundred times the bytes at
+the same file count: 1.7x more. So the dominant term is per-file, with a
+smaller content term on top - and the verdict is cached machine-wide, because
+the second read is 35x cheaper *from a different process*.
+
+That is the signature of a filesystem filter evaluating each file the first
+time it is opened. This machine has one attached at altitude 320400 and
+Defender is not running. Stated as the shape of the cost rather than as a
+proven attribution: this run did not disable the filter to confirm it, because
+changing a machine's security posture to make a benchmark look better is not a
+measurement.
+
+### What follows for the cap
+
+`VaultHashMaxFiles` stays at 2,000, and the reasoning changes rather than the
+number. A quarantine is BY DEFINITION a first touch - the files are being moved
+somewhere precisely because nobody is using them - so the cold path is the only
+one that matters and the cap must be set from it.
+
+There is also nothing to optimise. Verifying content means opening every file
+once, the opens are where the time goes, and the reads are already free. The
+one lever left is reading in parallel so the filter's latency overlaps, which
+in PowerShell 5.1 means runspaces inside an 8,500-line script to save a couple
+of seconds on a deliberate action that already shows a spinner. Not worth it.
+
+The honest caveat is that the cost is a property of the operator's machine, not
+of Vanish: the same tree on a machine with no on-access scanner would hash in
+roughly the warm number. That is the reason not to raise the cap on the
+strength of these figures - 4,000 files is 6 s here and unknown elsewhere.
+
+### Reproducing these
+
+The four probes are in `test/sandbox/vault-hash-cost-probe.ps1`. They write
+fixtures into `%TEMP%` and delete them afterwards. Not in `run-all.ps1`, for
+the reason the previous run block gives: a timing assertion on someone else's
+disk is a flaky test wearing a performance badge.
+
+---
+
 ## Run 004 - 2026-09-02 - the same machine, warm, after 127o and 087y
 
 | Condition | Value |
