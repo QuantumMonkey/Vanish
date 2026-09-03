@@ -166,6 +166,91 @@ $ghost = Invoke-Engine "quarantine-items" @{
 Assert-True (@($ghost.entry.files)[0].status -eq "missing")  "vanished item reported as missing, not failed"
 Assert-True ($ghost.quarantinedCount -eq 0)                  "empty entry contributes nothing to the vault"
 
+# --- Content integrity (cihg) ---------------------------------------------
+# FOUND 2026-09-02 by an adversarial probe. Quarantine a file, overwrite the
+# payload inside the vault entry folder, restore: the tampered bytes went back
+# on disk and the call reported success. The manifest recorded originalPath,
+# vaultRelative, sizeBytes and status - no hash - so nothing could be checked
+# and nothing was. The tampered payload was even a different SIZE and that
+# passed silently too.
+#
+# The vault's promise is that the thing you deleted is exactly the thing you
+# get back. These are the assertions that make it one.
+Write-Host ""
+Write-Host "Content integrity (cihg)" -ForegroundColor Cyan
+
+$intFile = Join-Path $fixtures "integrity.dat"
+Set-Content -Path $intFile -Value "AUTHENTIC-CONTENT" -Encoding ASCII
+$intId = [guid]::NewGuid().ToString()
+$intQ = Invoke-Engine "quarantine-items" @{
+    vaultRoot = $vaultRoot; entryId = $intId; sourceApp = "IntegrityVerify"
+    files = @(@{ path = $intFile }); registry = @()
+}
+$intRow = @($intQ.entry.files)[0]
+Assert-True ($intRow.hashAlgo -eq "SHA256")                     "a quarantined file records the algorithm it was hashed with"
+Assert-True (-not [string]::IsNullOrWhiteSpace($intRow.contentHash)) "and records the hash itself, so a restore has something to check"
+
+# The tamper that used to succeed.
+$intPayload = Join-Path (Join-Path (Join-Path $vaultRoot $intId) "files\1") "integrity.dat"
+Assert-True (Test-Path -LiteralPath $intPayload)                "PREMISE: the payload is where the manifest says it is, so there is something to tamper with"
+Set-Content -LiteralPath $intPayload -Value "TAMPERED-BY-SOMETHING-ELSE" -Encoding ASCII
+
+$intR = Invoke-Engine "vault-restore" @{ vaultRoot = $vaultRoot; entry = $intQ.entry; onConflict = "overwrite" }
+$intRes = @($intR.files)[0]
+Assert-True (-not (Test-Path -LiteralPath $intFile))            "THE ASSERTION THIS EXISTS FOR: a tampered payload is NOT written back to disk"
+Assert-True ($intRes.status -eq "failed")                       "the file is reported as failed rather than restored"
+Assert-True ($intR.failed -ge 1)                                "and counted in the entry's failed total, so the layer above cannot read this as a clean restore"
+Assert-True ($intRes.error -match "has changed since it was quarantined") "with a reason that names what happened rather than a generic failure"
+Assert-True (Test-Path -LiteralPath $intPayload)                "and the payload is left in the vault to inspect, not deleted on the way out"
+
+# The clean case must still work, or this is not a fix.
+$cleanFile = Join-Path $fixtures "integrity-clean.dat"
+Set-Content -Path $cleanFile -Value "UNTOUCHED-CONTENT" -Encoding ASCII
+$cleanId = [guid]::NewGuid().ToString()
+$cleanQ = Invoke-Engine "quarantine-items" @{
+    vaultRoot = $vaultRoot; entryId = $cleanId; sourceApp = "IntegrityVerify"
+    files = @(@{ path = $cleanFile }); registry = @()
+}
+$cleanR = Invoke-Engine "vault-restore" @{ vaultRoot = $vaultRoot; entry = $cleanQ.entry; onConflict = "skip" }
+$cleanRes = @($cleanR.files)[0]
+Assert-True ($cleanRes.status -eq "restored")                   "an untampered payload still restores"
+Assert-True ($cleanRes.verified -eq $true)                      "and says so explicitly - verified is a claim the vault now earns"
+Assert-True ((Get-Content -LiteralPath $cleanFile -Raw).Trim() -eq "UNTOUCHED-CONTENT") "with its content intact"
+
+# Directories are hashed as a tree, so a change anywhere inside one is caught.
+$intDir = Join-Path $fixtures "IntegrityApp"
+$null = New-Item -ItemType Directory -Path $intDir -Force
+Set-Content -Path (Join-Path $intDir "config.ini") -Value "[settings]" -Encoding ASCII
+Set-Content -Path (Join-Path $intDir "data.bin")   -Value "payload"    -Encoding ASCII
+$dirId = [guid]::NewGuid().ToString()
+$dirQ = Invoke-Engine "quarantine-items" @{
+    vaultRoot = $vaultRoot; entryId = $dirId; sourceApp = "IntegrityVerify"
+    files = @(@{ path = $intDir }); registry = @()
+}
+$dirRow = @($dirQ.entry.files)[0]
+Assert-True ($dirRow.hashAlgo -eq "SHA256-TREE")                "a quarantined DIRECTORY is hashed as a tree, not skipped"
+$dirInner = Join-Path (Join-Path (Join-Path $vaultRoot $dirId) "files\1\IntegrityApp") "config.ini"
+Set-Content -LiteralPath $dirInner -Value "[tampered]" -Encoding ASCII
+$dirR = Invoke-Engine "vault-restore" @{ vaultRoot = $vaultRoot; entry = $dirQ.entry; onConflict = "overwrite" }
+Assert-True (-not (Test-Path -LiteralPath $intDir))             "and one changed file inside it is enough to refuse the whole restore"
+
+# An entry from before hashing existed must NOT be stranded.
+$legacyFile = Join-Path $fixtures "legacy.dat"
+Set-Content -Path $legacyFile -Value "LEGACY-CONTENT" -Encoding ASCII
+$legacyId = [guid]::NewGuid().ToString()
+$legacyQ = Invoke-Engine "quarantine-items" @{
+    vaultRoot = $vaultRoot; entryId = $legacyId; sourceApp = "IntegrityVerify"
+    files = @(@{ path = $legacyFile }); registry = @()
+}
+$legacyEntry = $legacyQ.entry | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+$legacyEntry.files[0].contentHash = $null
+$legacyEntry.files[0].hashAlgo    = $null
+$legacyR = Invoke-Engine "vault-restore" @{ vaultRoot = $vaultRoot; entry = $legacyEntry; onConflict = "skip" }
+$legacyRes = @($legacyR.files)[0]
+Assert-True ($legacyRes.status -eq "restored")                  "an entry with no recorded hash still restores - refusing those would strand every vault that predates this"
+Assert-True ($legacyRes.verified -eq $false)                    "but is NOT reported as verified, because nothing was checked"
+Assert-True ($legacyRes.verifyNote -match "predates content hashing") "and the note says which of the two it is, rather than leaving 'not verified' to mean either"
+
 # --- Cleanup --------------------------------------------------------------
 if (Test-Path $regKey) { Remove-Item $regKey -Recurse -Force }
 Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue

@@ -355,7 +355,36 @@ function reportRestore(res) {
   } else if (res.skipped > 0) {
     toast(`${res.skipped} item(s) skipped - something is already in their original place.`, 'warn');
   } else {
-    toast('Everything in this entry is back where it came from.', 'success');
+    // cihg: "everything is back" and "everything is back AND matched the copy
+    // the vault took" are different claims, and the second is the one this
+    // panel exists to be able to make. Entries quarantined before content
+    // hashing shipped carry no hash, so they restore correctly and cannot be
+    // vouched for - saying nothing about that would let the weaker case wear
+    // the stronger sentence, which is the same defect as a could-not-look
+    // rendered as a nothing.
+    const files = res.files || [];
+    const checked = files.filter((f) => f.verified === true).length;
+    const unchecked = files.filter((f) => f.verified !== true).length;
+    if (files.length > 0 && unchecked === 0) {
+      toast(
+        `Everything is back where it came from, and all ${checked} file(s) matched the copy the vault took.`,
+        'success'
+      );
+    } else if (checked > 0) {
+      toast(
+        `Everything is back where it came from. ${checked} file(s) matched the copy the vault took; ` +
+          `${unchecked} could not be checked against one.`,
+        'success',
+        7000
+      );
+    } else {
+      toast(
+        'Everything is back where it came from. None of it could be checked against a recorded copy - ' +
+          'this entry was quarantined before Vanish started recording one.',
+        'success',
+        7000
+      );
+    }
   }
 }
 

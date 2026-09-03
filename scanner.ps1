@@ -3747,6 +3747,147 @@ function Move-ItemTransactional {
 }
 
 # Quarantine files and registry keys into vault/<entryId>/.
+# ==========================================================================
+# cihg: THE VAULT MUST BE ABLE TO SAY WHETHER IT IS HANDING BACK WHAT IT TOOK
+# ==========================================================================
+# Found 2026-09-02 by an adversarial probe. Quarantine a file, overwrite the
+# payload inside the vault entry folder, restore:
+#
+#   restore returned success=True, and put back: 'TAMPERED-BY-SOMETHING-ELSE'
+#
+# No warning, no error, no difference in the reported outcome. The manifest
+# recorded originalPath, vaultRelative, sizeBytes and status - no hash - so
+# restore had nothing to compare against and did not try. The tampered payload
+# was even a different SIZE (26 bytes against a recorded 17) and that passed
+# silently too: a size check that exists and is ignored is worse than one that
+# was never recorded.
+#
+# WHAT IS HASHED, AND WHEN. The DESTINATION, once, after the move. That records
+# what the vault actually holds, which is exactly what a restore needs to check.
+# It deliberately does NOT attest that the move was faithful - hashing the
+# source as well would double the read cost of every quarantine, and on a
+# same-volume move (a rename, no bytes copied at all) it would read the whole
+# file twice to verify a copy that never happened. Move-ItemTransactional
+# already reports its own failures; this answers a different question.
+#
+# DIRECTORIES ARE HASHED TOO, up to a cap, because leftover folders are the
+# common case and "we did not check" on all of them would make the feature
+# mostly decorative. Above the cap it records WHY it did not, and restore says
+# so rather than claiming a verification it never performed - the same
+# could-not-look distinction the finders are built on.
+# THE CAPS ARE MEASURED, 2026-09-03, through the real engine path rather than
+# a bench harness - the difference matters and is recorded below.
+#
+#   single file, 4 KB      650 ms   (baseline: the process spawn dominates)
+#   single file, 50 MB     672 ms   free, within noise of the baseline
+#   single file, 250 MB    899 ms   about +200 ms
+#   tree, 200 files       1548 ms   about +711 ms
+#   tree, 2000 files      7102 ms   about +6064 ms
+#
+# So FILES are effectively free and TREES cost roughly 3 ms per file. 2000 is
+# the cap because ~6.5 s is the most this should add to a deliberate,
+# user-initiated action with a spinner on it; 5000 would have been ~16 s.
+#
+# AN OPEN QUESTION, stated rather than buried: the identical function against
+# the identical tree runs in ~270 ms standalone and ~6300 ms inside the engine.
+# Phase instrumentation puts all of it in the streaming loop, and it is not the
+# move (a tree hashed immediately after being moved into a vault-shaped path
+# still takes ~267 ms standalone), not enumeration (76 ms) and not the size
+# loop (3 ms). Twenty times is too much to leave unexplained, and the cap above
+# is set from the SLOW number so the guess cannot hurt anyone. Filed separately.
+$script:VaultHashMaxBytes = 256MB
+$script:VaultHashMaxFiles = 2000
+
+function Get-VaultContentHash {
+    param([string]$path)
+
+    $result = @{ algo = $null; hash = $null; why = $null }
+    if ([string]::IsNullOrWhiteSpace($path)) {
+        $result.why = 'no path'
+        return $result
+    }
+
+    try {
+        if (-not (Test-Path -LiteralPath $path)) {
+            $result.why = 'nothing at that path to hash'
+            return $result
+        }
+
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+
+        if (-not $item.PSIsContainer) {
+            $result.algo = 'SHA256'
+            $result.hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256 -ErrorAction Stop).Hash
+            return $result
+        }
+
+        # A directory. Compose one hash over the tree so a change anywhere in
+        # it moves the answer: relative path, then content hash, per file, in a
+        # STABLE order. Sorting is not cosmetic here - Get-ChildItem's order is
+        # not guaranteed, and an unsorted composite would produce a different
+        # hash for an unchanged tree and refuse every restore.
+        $files = @(Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction Stop)
+        if ($files.Count -gt $script:VaultHashMaxFiles) {
+            $result.why = "directory holds $($files.Count) files, over the $($script:VaultHashMaxFiles)-file hashing cap"
+            return $result
+        }
+        $total = 0
+        foreach ($f in $files) { $total += $f.Length }
+        if ($total -gt $script:VaultHashMaxBytes) {
+            $result.why = "directory holds $([math]::Round($total / 1MB)) MB, over the $([math]::Round($script:VaultHashMaxBytes / 1MB)) MB hashing cap"
+            return $result
+        }
+
+        $rootLen = $path.TrimEnd('\').Length + 1
+        # ONE incremental hash over the whole tree, not one Get-FileHash per
+        # file. Measured 2026-09-03 before choosing: a 200-file tree of 100 KB
+        # total cost 1,642 ms against a 708 ms baseline, so roughly 5 ms per
+        # file of pure cmdlet overhead - at the 5,000-file cap that would have
+        # been about 25 seconds added to a quarantine, for 100 KB of actual
+        # reading. Streaming removes the per-file cost entirely and makes the
+        # work proportional to bytes, which is what it should have been.
+        #
+        # The relative path is fed into the hash alongside the content, so
+        # renaming a file inside the tree changes the answer. Sorting is not
+        # cosmetic: Get-ChildItem's order is not guaranteed, and an unsorted
+        # composite would hash the same tree differently on two runs and refuse
+        # every restore.
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        try {
+            $buffer = New-Object byte[] 65536
+            foreach ($f in ($files | Sort-Object -Property FullName)) {
+                $rel = $f.FullName.Substring($rootLen).ToLowerInvariant()
+                $relBytes = [System.Text.Encoding]::UTF8.GetBytes($rel + "`n")
+                $null = $sha.TransformBlock($relBytes, 0, $relBytes.Length, $null, 0)
+
+                $stream = [System.IO.File]::OpenRead($f.FullName)
+                try {
+                    while ($true) {
+                        $read = $stream.Read($buffer, 0, $buffer.Length)
+                        if ($read -le 0) { break }
+                        $null = $sha.TransformBlock($buffer, 0, $read, $null, 0)
+                    }
+                } finally {
+                    $stream.Dispose()
+                }
+            }
+            $null = $sha.TransformFinalBlock((New-Object byte[] 0), 0, 0)
+            $result.algo = 'SHA256-TREE'
+            $result.hash = (($sha.Hash | ForEach-Object { $_.ToString('X2') }) -join '')
+        } finally {
+            $sha.Dispose()
+        }
+        return $result
+    } catch {
+        # Never throws. A hash that could not be taken is a could-not-look, and
+        # it must not take the quarantine or the restore down with it.
+        $result.algo = $null
+        $result.hash = $null
+        $result.why  = "could not hash: $($_.Exception.Message)"
+        return $result
+    }
+}
+
 function Invoke-QuarantineItems {
     param([object]$p)
 
@@ -3788,6 +3929,12 @@ function Invoke-QuarantineItems {
             status       = "failed"
             error        = $null
             aclElevated  = $false
+            # cihg. Present on every row from the start, including failed ones,
+            # so the manifest shape never varies by outcome - a reader that has
+            # to test for the existence of a field is a reader that will forget.
+            contentHash  = $null
+            hashAlgo     = $null
+            hashNote     = $null
         }
 
         if (-not (Test-Path -LiteralPath $src)) {
@@ -3865,6 +4012,16 @@ function Invoke-QuarantineItems {
         } else {
             $row.status        = "quarantined"
             $row.vaultRelative = "files/$idx/$leaf"
+
+            # cihg: hash what the vault NOW HOLDS, at its vault path, so restore
+            # has something to check the payload against. A hash that cannot be
+            # taken records why and leaves the entry restorable - refusing to
+            # quarantine because a hash failed would trade a real feature for a
+            # verification nobody asked for.
+            $h = Get-VaultContentHash -path $dest
+            $row.contentHash = $h.hash
+            $row.hashAlgo    = $h.algo
+            $row.hashNote    = $h.why
         }
         $fileRows.Add($row)
     }
@@ -3986,7 +4143,11 @@ function Invoke-VaultRestore {
 
     foreach ($f in @($p.entry.files)) {
         if (-not $f -or $f.status -ne "quarantined") { continue }
-        $res = @{ originalPath = $f.originalPath; status = "failed"; error = $null }
+        # cihg: verified/verifyNote are on the row from the start, so a caller
+        # never has to test whether the field exists to know what it means.
+        # Absent and false are the same on the wire and different in meaning,
+        # which is how a "not checked" comes to read as a "checked and fine".
+        $res = @{ originalPath = $f.originalPath; status = "failed"; error = $null; verified = $false; verifyNote = $null }
 
         # The manifest is user-writable; the restore runs elevated. Both the
         # source it reads and the destination it writes are untrusted.
@@ -4018,6 +4179,45 @@ function Invoke-VaultRestore {
         if (-not (Test-Path -LiteralPath $vaultPath)) {
             $res.error = "Vault payload missing."
             $fileResults.Add($res); continue
+        }
+
+        # cihg: CHECK THE PAYLOAD BEFORE PUTTING IT BACK.
+        #
+        # Refuse on mismatch rather than warn. A restore is an action the
+        # operator believes: they asked for the thing they deleted and they get
+        # a file. Handing back content the vault cannot vouch for, with a note
+        # somewhere, is worse than handing back nothing - the note is read once
+        # and the file is trusted forever.
+        #
+        # PER FILE, not per entry. One tampered payload in a ten-file entry must
+        # not block the other nine; the operator gets nine files back and one
+        # named refusal, which is more of their data recovered and a smaller
+        # thing to investigate.
+        #
+        # AN ENTRY WITH NO HASH IS NOT A FAILURE. Everything quarantined before
+        # this shipped has contentHash = $null, and refusing those would strand
+        # every existing vault. They restore, and the result says the payload
+        # could not be verified rather than claiming it was - the same
+        # distinction between "checked and clean" and "did not check" that the
+        # rest of this codebase is built on.
+        $res.verified = $false
+        $res.verifyNote = $null
+        if ([string]::IsNullOrWhiteSpace($f.contentHash)) {
+            $res.verifyNote = if ($f.hashNote) {
+                "Not verified: no hash was recorded when this was quarantined ($($f.hashNote))."
+            } else {
+                'Not verified: this entry predates content hashing, so there is nothing to check the payload against.'
+            }
+        } else {
+            $actual = Get-VaultContentHash -path $vaultPath
+            if ([string]::IsNullOrWhiteSpace($actual.hash)) {
+                $res.verifyNote = "Not verified: the payload could not be re-hashed now ($($actual.why))."
+            } elseif ($actual.hash -ne $f.contentHash) {
+                $res.error = "Refused: the vault payload has changed since it was quarantined. Expected $($f.hashAlgo) $($f.contentHash.Substring(0, [Math]::Min(16, $f.contentHash.Length)))..., found $($actual.hash.Substring(0, [Math]::Min(16, $actual.hash.Length))).... Nothing was written. The file is still in the vault; inspect it before restoring."
+                $fileResults.Add($res); continue
+            } else {
+                $res.verified = $true
+            }
         }
 
         if (Test-Path -LiteralPath $f.originalPath) {
