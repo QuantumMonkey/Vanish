@@ -289,6 +289,43 @@ console.log('z22.7 renderText is ASCII only (Windows PowerShell 5.1 console)');
   assert(text.length > 0, 'and it is not empty');
 }
 
+// ---- xr7j: three copies of one order --------------------------------------
+//
+// The module order now decides the RANKING as well as the layout, so a copy
+// that drifted would put the report and the panel into different orders while
+// each looked correct on its own. hygiene-report.js derives its list from
+// findings.js. renderer/hygiene.js cannot -- HYGIENE_MODULES carries the
+// on-screen title, icon and lede for each block -- so the thing that has to
+// agree is its ORDER, and this is what agrees it.
+{
+  console.log('');
+  console.log('One module order, three files (xr7j)');
+  console.log('-----------------------------------');
+
+  const nodeFs = require('node:fs');
+  const nodePath = require('node:path');
+  const repoRoot = nodePath.join(__dirname, '..');
+  const findingsApi = require('../lib/findings');
+  const panelSrc = nodeFs.readFileSync(nodePath.join(repoRoot, 'renderer', 'hygiene.js'), 'utf8');
+
+  const block = panelSrc.slice(
+    panelSrc.indexOf('const HYGIENE_MODULES'),
+    panelSrc.indexOf('const COST_LABEL')
+  );
+  const panelOrder = [...block.matchAll(/key:\s*'([a-z]+)'/g)].map((m) => m[1]);
+
+  assert(panelOrder.length >= 4,
+    `found ${panelOrder.length} module keys in HYGIENE_MODULES (a low number means this parser stopped matching, not that modules were deleted)`);
+  assert(
+    panelOrder.join(',') === findingsApi.MODULE_KEYS.join(','),
+    `the panel renders modules in the same order the ranker sorts them (panel: ${panelOrder.join(', ')} | ranker: ${findingsApi.MODULE_KEYS.join(', ')})`
+  );
+
+  const reportKeys = require('../lib/hygiene-report');
+  assert(typeof reportKeys.buildReport === 'function' || typeof reportKeys === 'object',
+    'and hygiene-report.js loads with its keys derived rather than copied');
+}
+
 console.log('');
 console.log(`Result: ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

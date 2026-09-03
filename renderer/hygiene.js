@@ -1105,12 +1105,18 @@ function renderHygieneModules(decision, partial) {
         ${found.length > 0 ? found.slice(0, HYGIENE_RENDER_CAP).map(renderHygieneFinding).join('') : ''}
         ${
           found.length > HYGIENE_RENDER_CAP
+            // xr7j: the second sentence is GENERATED from the comparator that
+            // actually ran, not written beside it. It used to be a literal, and
+            // it described the rescue ordering while every module was sorted in
+            // the reclaim one -- so on the screen whose job is "what a delete
+            // would destroy", the caption promised irreplaceable-first over a
+            // list that was cheapest-first. A sentence a human keeps in sync
+            // with a sort is a sentence that eventually stops being true.
             ? `<div class="hygiene-render-cap">
                  Showing the first ${HYGIENE_RENDER_CAP} of ${found.length}. They are the first
                  ${HYGIENE_RENDER_CAP} for a reason -- everything here is ranked by what it would cost
-                 to get back, so the ones you cannot rebuild are at the top and the ones a command
-                 regenerates are at the bottom. The count above is the real total; nothing was
-                 discarded, only left off this list.
+                 to get back, so ${hygieneEsc(window.VanishFindings.costOrderCaption(mod.key))}.
+                 The count above is the real total; nothing was discarded, only left off this list.
                </div>`
             : ''
         }

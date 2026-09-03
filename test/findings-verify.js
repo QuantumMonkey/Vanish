@@ -278,6 +278,96 @@ console.log('D-1 regression: the uninstall wizard leftover screen, at the place 
   assert(empty.canAdvance === false, 'and a null payload advances nothing rather than throwing');
 }
 
+// ---- xr7j: the same number answers two opposite questions -----------------
+//
+// Until 2026-09-02 one cost order served every module, and it was the reclaim
+// order. In the RESCUE module -- whose stated job is "what a delete would
+// destroy" -- that put the safest findings at the top. Measured on the
+// development machine: duplicate-content is registered -module 'rescue' and
+// returns 4,040 findings, every one costClass 'cheap', against a 100-row
+// per-module render cap, in the same module as local-only-credentials.
+//
+// The on-screen caption said the opposite in as many words.
+{
+  console.log('');
+  console.log('Two opposite questions, two orders (xr7j)');
+  console.log('----------------------------------------');
+
+  const one = (id, costClass, module) => finding({ id, costClass, module, bytes: 100 });
+  const rank = (module) => {
+    const d = f.decide([{
+      finder: 'x',
+      state: 'found',
+      module,
+      findings: [
+        one('a', 'cheap', module),
+        one('b', 'irreplaceable', module),
+        one('c', 'unknown', module),
+        one('d', 'moderate', module),
+        one('e', 'expensive', module)
+      ],
+      unreadable: [],
+      examined: 1
+    }]);
+    return d.findings.map((x) => x.costClass);
+  };
+
+  const rescue = rank('rescue');
+  assert(rescue[0] === 'irreplaceable',
+    `rescue asks "what would I lose", so the irreplaceable finding is FIRST (got ${rescue[0]})`);
+  assert(rescue[rescue.length - 1] === 'cheap',
+    'and the one a command regenerates is last, where it costs least to miss');
+  assert(rescue[1] === 'unknown',
+    'an UNMEASURED rebuild cost ranks second, not last - it might be irreplaceable, and burying it under things known to be cheap is the same mistake in the other direction');
+
+  const reclaim = rank('reclaim');
+  assert(reclaim[0] === 'cheap',
+    `reclaim asks "what is safe to remove", so the cheapest to rebuild is FIRST (got ${reclaim[0]})`);
+  assert(reclaim[reclaim.length - 1] === 'unknown',
+    'and unknown is last here, because an unmeasured cost is not a cheap one and must not head a list of things to delete');
+
+  assert(rescue[0] !== reclaim[0],
+    'the two modules genuinely order differently - one comparator for both is what this issue was');
+
+  // The real shape: 4,040 cheap findings must not bury one irreplaceable in
+  // the module built to show it.
+  const many = [];
+  for (let i = 0; i < 300; i += 1) many.push(one(`dup${i}`, 'cheap', 'rescue'));
+  many.push(one('credential', 'irreplaceable', 'rescue'));
+  const buried = f.decide([{ finder: 'x', state: 'found', module: 'rescue', findings: many, unreadable: [], examined: 1 }]);
+  const pos = buried.findings.findIndex((x) => x.id === 'credential');
+  assert(pos === 0,
+    `one irreplaceable finding among 300 cheap ones ranks first in rescue (it ranked at position ${pos + 1}) - with a 100-row cap, anything past 100 is not on the screen at all`);
+}
+
+// ---- the caption cannot disagree with the sort ----------------------------
+{
+  console.log('');
+  console.log('The caption is generated from the comparator (xr7j)');
+  console.log('--------------------------------------------------');
+
+  assert(/cannot rebuild are at the top/.test(f.costOrderCaption('rescue')),
+    'the rescue caption says the irreplaceable ones are at the top, which is what the rescue comparator does');
+  assert(/regenerates are at the top/.test(f.costOrderCaption('reclaim')),
+    'and the reclaim caption says the opposite, because the reclaim comparator does the opposite');
+  assert(f.costOrderCaption('rescue') !== f.costOrderCaption('reclaim'),
+    'so the two are not the same sentence - one literal served both, and it was true of neither module as sorted');
+
+  // The assertion that fails if someone reverses a comparator and forgets the
+  // words, which is exactly how this defect was born.
+  for (const mod of f.MODULE_KEYS) {
+    const lossFirst = f.costOrderFor(mod)[0] === 'irreplaceable';
+    const saysLossFirst = /cannot rebuild are at the top/.test(f.costOrderCaption(mod));
+    assert(lossFirst === saysLossFirst,
+      `${mod}: the caption and the comparator agree about which end is which`);
+  }
+
+  assert(f.costOrderFor('nonsense-module')[0] === 'cheap',
+    'an unregistered module falls back to the reclaim order rather than throwing');
+  assert(f.moduleKey('nonsense-module') === 'other',
+    "and is filed under 'other' rather than dropped");
+}
+
 console.log('');
 console.log(`Result: ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

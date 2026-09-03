@@ -906,8 +906,11 @@ app.whenReady().then(async () => {
 
   // The recording rule: only a TERMINAL decision is kept.
   const src = require('node:fs').readFileSync(path.join(__dirname, '..', 'renderer', 'hygiene.js'), 'utf8');
-  const setIdx = src.indexOf('window.VanishHygieneLastRun =');
-  const verdictIdx = src.indexOf('hygieneDecision = window.VanishFindings.decide(hygieneResults);\n\n  // 847');
+  // Line-ending agnostic: renderer/hygiene.js is CRLF on disk, and an
+  // indexOf against an LF-only string is a check that silently stops matching.
+  const srcLf = src.replace(/\r/g, '');
+  const setIdx = srcLf.indexOf('window.VanishHygieneLastRun =');
+  const verdictIdx = srcLf.indexOf('hygieneDecision = window.VanishFindings.decide(hygieneResults);\n\n  // 847');
   assert(setIdx > 0 && verdictIdx > 0 && setIdx > verdictIdx,
     'the card is only ever fed from the point where a verdict becomes legitimate, never from a partial one');
   assert((src.match(/window\.VanishHygieneLastRun =/g) || []).length === 1,
@@ -1021,6 +1024,54 @@ app.whenReady().then(async () => {
     assert(runCount >= 6,
       `found ${runCount} sections in the array (a low number means this scan stopped matching, not that sections were deleted)`);
   }
+
+    // ---- xr7j: what the operator actually reads over the cap -----------------
+  //
+  // The seam suite proves the comparator and the generated sentence. This
+  // proves they reach the SCREEN together, in the module where being wrong
+  // mattered: rescue, past HYGIENE_RENDER_CAP, with one irreplaceable finding
+  // among many cheap ones. That is the real shape - duplicate-content is
+  // registered -module 'rescue' and returned 4,040 cheap findings on the
+  // development machine, against a 100-row cap, alongside local-only-credentials.
+  console.log('');
+  console.log('The render cap, in the rescue module (xr7j)');
+  console.log('------------------------------------------');
+
+  const cappedRescue = await evalInPage(`
+    const mk = (id, cost, bytes) => ({
+      id, title: id, path: 'C:/x/' + id, bytes, costClass: cost, module: 'rescue',
+      evidence: 'fixture', rebuildCost: cost
+    });
+    const list = [mk('a-credential-on-no-remote', 'irreplaceable', 512)];
+    for (let i = 0; i < 140; i += 1) list.push(mk('duplicate-scrap-' + i, 'cheap', 514));
+
+    const decision = window.VanishFindings.decide([{
+      finder: 'fixture', state: 'found', module: 'rescue',
+      findings: list, unreadable: [], examined: 41
+    }]);
+    renderHygieneModules(decision, false);
+
+    const block = document.getElementById('hygiene-mod-rescue');
+    const cap = block ? block.querySelector('.hygiene-render-cap') : null;
+    const rows = block ? block.querySelectorAll('.hygiene-finding') : [];
+    return {
+      caption: cap ? cap.textContent.replace(/[^!-~]+/g, ' ').trim() : '(no cap notice)',
+      rowCount: rows.length,
+      firstRow: rows.length ? rows[0].textContent.replace(/[^!-~]+/g, ' ').trim() : '(none)',
+      total: decision.findings.length
+    };
+  `);
+
+  assert(cappedRescue.rowCount === 100,
+    `the cap renders 100 of ${cappedRescue.total} (got ${cappedRescue.rowCount})`);
+  assert(/a-credential-on-no-remote/.test(cappedRescue.firstRow),
+    `the ONE irreplaceable finding is the first row, not buried under 140 cheap ones (first row was "${cappedRescue.firstRow.slice(0, 60)}")`);
+  assert(/cannot rebuild are at the top/.test(cappedRescue.caption),
+    `and the cap notice says so, matching the sort that actually ran (got "${cappedRescue.caption.slice(0, 120)}")`);
+  assert(!/regenerates are at the top/.test(cappedRescue.caption),
+    'and does not carry the reclaim sentence, which is what it used to say here');
+  assert(new RegExp(String(cappedRescue.total)).test(cappedRescue.caption),
+    'while still naming the real total, so a capped list never reads as a complete one');
 
   console.log('');
   console.log(`Result: ${pass} passed, ${fail} failed`);
