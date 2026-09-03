@@ -129,6 +129,62 @@ function Format-InstallDate {
     }
 }
 
+function Get-InstallFolderCreated {
+    <#
+    .SYNOPSIS
+        The creation date of an entry's InstallLocation, or $null.
+
+    .DESCRIPTION
+        mp31. 26.7% of this machine's 150 desktop entries record no install
+        date, and 13 of those 40 carry an InstallLocation that exists. The
+        Store path has taken folder creation time as an approximate install
+        date since c0y; desktop entries never did, for no better reason than
+        that nobody wired it up.
+
+        It is an INFERENCE and it travels with 'folder-created' so the renderer
+        marks it approximate, exactly as it does for a Store app. A repair or a
+        major update can move the folder, so this is where the program lives
+        rather than when it arrived.
+
+        WHAT IS REFUSED, and why each one:
+
+        * Anything not rooted at a drive letter. Two things at once, and this
+          is the line that does the work. A relative or malformed
+          InstallLocation resolves against the ENGINE's working directory,
+          which would date an unrelated folder and state it as the program's.
+          And because it runs BEFORE Directory.Exists, it is also what keeps a
+          network path from being touched at all - measured 2026-09-04, a
+          Directory.Exists against a share that is not there blocks for
+          1,258 ms, inside a list that has to load in seconds.
+        * A UNC path, explicitly. Redundant against the rule above and kept
+          anyway, so the intent survives someone relaxing that regex. Stated
+          as redundant rather than presented as the protection: mutation
+          testing removed this line and nothing changed, which is the honest
+          description of it.
+        * A path that does not exist. An uninstalled program often leaves its
+          registry entry behind, and dating that from a missing folder is the
+          fabrication this whole provenance model exists to prevent.
+
+        Costed before shipping: probing all 40 dateless entries took 22 ms and
+        reading the 13 real creation times took 3 ms, warm. That is why this is
+        synchronous here while the size half of mp31 is not.
+    #>
+    param([string]$installLocation)
+
+    if ([string]::IsNullOrWhiteSpace($installLocation)) { return $null }
+    $p = $installLocation.Trim().Trim('"').TrimEnd('\')
+    if ($p.Length -lt 3) { return $null }
+    if ($p.StartsWith('\\')) { return $null }
+    if ($p -notmatch '^[A-Za-z]:[\\/]') { return $null }
+
+    try {
+        if (-not [System.IO.Directory]::Exists($p)) { return $null }
+        return ([System.IO.Directory]::GetCreationTime($p)).ToString('yyyy-MM-dd')
+    } catch {
+        return $null
+    }
+}
+
 # ==========================================
 # 1. INSTALLED DESKTOP APPLICATIONS (REQ-01, 7oo.3)
 # ==========================================
@@ -300,6 +356,21 @@ function Get-UninstallRegistryEntries {
                         if ($installDate) { $installDateSource = 'key-name' }
                     }
 
+                    $installLocation = [string]$key.GetValue('InstallLocation')
+
+                    # mp31: last, because it is the weakest of the three. The
+                    # key name is at least something the installer WROTE; a
+                    # folder's creation time is something Vanish went and
+                    # looked at. Both are marked approximate, and this one is
+                    # only consulted when the other two found nothing.
+                    if (-not $installDate) {
+                        $folderDate = Get-InstallFolderCreated $installLocation
+                        if ($folderDate) {
+                            $installDate = $folderDate
+                            $installDateSource = 'folder-created'
+                        }
+                    }
+
                     $sizeBytes = 0
                     $estimated = $key.GetValue('EstimatedSize')
                     if ($estimated) { $sizeBytes = [double]$estimated * 1024 }
@@ -316,7 +387,7 @@ function Get-UninstallRegistryEntries {
                         installDate     = $installDate
                         installDateSource = $installDateSource
                         uninstallString = [string]$key.GetValue('UninstallString')
-                        installLocation = [string]$key.GetValue('InstallLocation')
+                        installLocation = $installLocation
                         icon            = [string]$key.GetValue('DisplayIcon')
                         systemComponent = ($null -ne $key.GetValue('SystemComponent') -and [int]$key.GetValue('SystemComponent') -eq 1)
                         noRemove        = ($null -ne $key.GetValue('NoRemove') -and [int]$key.GetValue('NoRemove') -eq 1)
@@ -8102,6 +8173,22 @@ if ($Action) {
                 dataDirTrusted = [bool](Test-VaultDataDirTrusted -vaultRoot ([string]$Params.vaultRoot))
                 resolved   = (Resolve-DestinationTarget ([System.IO.Path]::GetFullPath([string]$Params.path)))
             } | ConvertTo-Json -Depth 4 -Compress
+        }
+        "install-date-probe" {
+            # mp31 verification hook, same shape as protected-destination-probe:
+            # ask the real Get-InstallFolderCreated about a path without
+            # enumerating the registry. Read-only, side-effect free, Audit Mode.
+            #
+            # A probe rather than a replica of the rule in the test, because a
+            # JS or PowerShell mirror of a product function drifts from it and
+            # then reports confidently about code that no longer exists - the
+            # defect this repo rediscovered while investigating the vault path
+            # guards on 2026-09-04.
+            @{
+                success = $true
+                path    = [string]$Params.path
+                date    = (Get-InstallFolderCreated ([string]$Params.path))
+            } | ConvertTo-Json -Depth 3 -Compress
         }
         "indicator-probe" {
             # Rule 7 verification hook, same shape as cleanerml-probe and

@@ -15,15 +15,22 @@ test that has never failed proves nothing. The first run found three assertions
 that could not fail at all -- one of them the accumulator behind the product's
 headline sentence (`totalBytes` -> "You can reclaim X GB").
 
-## What 29/29 does NOT mean
+## What 38/38 does NOT mean
 
-It does not mean the suite is complete. It means these 29 specific defects are
+It does not mean the suite is complete. It means these 38 specific defects are
 caught. Read the number as a floor on assertion quality in the areas probed,
 never as coverage.
 
-Not probed at all yet: most of `scanner.ps1`'s 8,400 lines -- registry
+Not probed at all yet: most of `scanner.ps1`'s 8,500 lines -- registry
 enumeration, the reclaim finders' size arithmetic, process and network
 attribution, the uninstall and force-uninstall flows, most of the renderer.
+
+A THIRD ANCHOR TRAP, found 2026-09-04. `main.js` gained a second path-shape
+check (`parseLocalDirectory`, mp31) that copied a line verbatim from
+`parseDisplayIcon`. The s4cx mutant's anchor then matched TWICE and the harness
+reported ANCHOR MISS - correctly, and loudly, which is why it is a trap and not
+a defect. Anchor on enough context to stay unique, and re-run the whole set
+after adding code near an existing anchor rather than only the new mutants.
 
 ## A survivor is not automatically a gap
 
@@ -38,8 +45,10 @@ survivors in the first scanner/vault pass, **one** was a real gap. The rest:
 | Rule 3 tier gate on quarantine | **Unreachable in an elevated run.** The assertion exists in `vault-verify.ps1` but sits behind `if (-not $isAdmin)`. This is `pnor`, demonstrated rather than argued: disabling the guard that prevents destructive operations in Audit Mode was noticed by nothing, because the test that notices cannot run elevated. |
 | non-UUID entry id | **Harness error.** The assertion is in `security-verify.ps1`, and the mutant named `vault-verify.ps1`. |
 | never-touch never refuses | **Harness error.** The assertion is `finder-contract-verify.ps1:192`. |
+| UNC install location dated anyway (mp31) | **Equivalent.** `Get-InstallFolderCreated` refuses a UNC path explicitly AND refuses anything not rooted at a drive letter, and the second rule runs first - before any filesystem call. Removing the UNC line changes neither the answer nor the cost. The line is kept as intent and the doc comment now says it is redundant instead of presenting it as the protection. |
+| junction skipped in the size walk (mp31) | **Mis-specified mutant, corrected rather than dropped.** Deleting the skip could not fail: Node reports a junction as isSymbolicLink() and NOT isDirectory(), so the entry fell to the statSync branch and added nothing measurable. The defect worth guarding is the walk DESCENDING into it, so the mutant now pushes it onto the stack instead of merely un-skipping it. |
 
-Those four are deliberately **not** in `mutants.json`. Equivalent mutants can
+The equivalent ones are deliberately **not** in `mutants.json`. Equivalent mutants can
 never be killed, and keeping them would make the kill rate permanently
 misleading in the other direction.
 

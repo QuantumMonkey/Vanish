@@ -835,7 +835,11 @@ const INSTALL_DATE_SOURCES = {
   },
   'folder-created': {
     inferred: true,
-    note: 'Approximate. A Store app records no install date, so this is when its folder was created. That is usually the install, but a repair or an update can move it.',
+    // mp31: this source used to belong to Store apps alone and the note said
+    // so. Desktop entries reach it now too - 13 of this machine's 40 dateless
+    // ones - so the wording has to be true of both without going vague about
+    // where the number came from.
+    note: 'Approximate. This program records no install date, so this is when its install folder was created. That is usually the install, but a repair or a major update can move the folder.',
   },
 };
 
@@ -1096,6 +1100,97 @@ async function loadAppIcon(el) {
   el.classList.add('has-icon');
 }
 
+// mp31, the size half, built on s4cx's observer because the trade is identical.
+//
+// 39 of this machine's 150 entries report no size: Size comes from the
+// registry's EstimatedSize, which is a value the installer chose to write or
+// not. 27 of the 39 carry an install folder that exists and can be measured.
+//
+// WHY THE SAME OBSERVER SHAPE. Measuring all 27 costs 4.1 seconds here, and
+// this is the list view. Only the rows a person actually looks at get measured,
+// so what it costs is bounded by what they scroll past rather than by what the
+// machine has installed. mp31's constraint in its own words: it "has to be
+// lazy and cancellable, must never block first paint, and an unmeasured size
+// must keep saying Unknown rather than showing a spinner forever."
+//
+// A MEASURED SIZE SAYS SO. Not because it is worse than the recorded one - it
+// is better, EstimatedSize is frequently stale or absent - but because a column
+// that silently mixes what the installer claimed with what Vanish walked is
+// the same defect c0y fixed for dates, and the user sorting by it deserves to
+// know which kind of number they are looking at.
+const SIZE_MEASURED_NOTE =
+  'Measured by Vanish by adding up the install folder, because this program recorded no size of its own. It covers what is in that folder, which is usually but not always all of it.';
+
+let appSizeObserver = null;
+
+function ensureAppSizeObserver() {
+  if (appSizeObserver || typeof IntersectionObserver !== 'function') return appSizeObserver;
+  appSizeObserver = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        const el = entry.target;
+        appSizeObserver.unobserve(el);
+        loadAppSize(el);
+      }
+    },
+    { root: null, rootMargin: '200px 0px' }
+  );
+  return appSizeObserver;
+}
+
+async function loadAppSize(el) {
+  if (!el || el.dataset.sizeLoaded === '1') return;
+  el.dataset.sizeLoaded = '1';
+  const source = el.dataset.sizeSource;
+  const appId = el.dataset.sizeAppId;
+  if (!source || !window.api || typeof window.api.measureInstallSize !== 'function') return;
+
+  let res = null;
+  try {
+    res = await window.api.measureInstallSize(source);
+  } catch {
+    return; // silent: the cell keeps saying Unknown
+  }
+  // complete:false is the budget being spent, a subtree that could not be read,
+  // or a folder that is gone. Each one means the total would be wrong, and a
+  // wrong total rendered as a size is worse than Unknown.
+  if (!res || res.complete !== true || typeof res.bytes !== 'number' || res.bytes <= 0) return;
+
+  // The model, not just the cell: a sort or a filter re-renders the table, and
+  // a measurement that lived only in the DOM would be thrown away and asked
+  // for again on every one.
+  const app = allApps.find((a) => a && a.id === appId);
+  if (app) {
+    app.sizeBytes = res.bytes;
+    app.sizeSource = 'measured';
+  }
+
+  // A re-render may have swapped this element out from under the request.
+  if (!el.isConnected || el.dataset.sizeSource !== source) return;
+  el.textContent = formatBytes(res.bytes, 1);
+  el.title = SIZE_MEASURED_NOTE;
+  const mark = document.createElement('span');
+  mark.className = 'inferred-mark';
+  mark.setAttribute('aria-label', 'measured by Vanish');
+  mark.textContent = '*';
+  el.appendChild(mark);
+}
+
+function observeAppSizes() {
+  const obs = ensureAppSizeObserver();
+  const cells = document.querySelectorAll('.app-size-cell[data-size-source]:not([data-size-loaded])');
+  if (!obs) {
+    let budget = 20;
+    for (const c of cells) {
+      if (budget-- <= 0) break;
+      loadAppSize(c);
+    }
+    return;
+  }
+  for (const c of cells) obs.observe(c);
+}
+
 // Called after each renderTable pass. Cheap: it walks only the placeholders
 // that carry a source and have not been answered yet.
 function observeAppIcons() {
@@ -1176,6 +1271,14 @@ function renderTable(apps) {
     const initial = app.name.trim().charAt(0).toUpperCase();
 
     const sizeStr = app.sizeBytes ? formatBytes(app.sizeBytes, 1) : 'Unknown';
+    // mp31: a cell may be measurable (no size, but an install folder to walk),
+    // already measured (from an earlier pass this session), or neither. Only
+    // the first carries a source for the observer to act on.
+    const measuredSize = app.sizeSource === 'measured' && app.sizeBytes;
+    const measurable = !app.sizeBytes && app.installLocation;
+    const sizeAttrs = measurable
+      ? ` data-size-source="${esc(app.installLocation)}" data-size-app-id="${esc(app.id)}"`
+      : (measuredSize ? ` title="${esc(SIZE_MEASURED_NOTE)}"` : '');
     const dateStr = app.installDate ? app.installDate : 'Unknown';
     const dateProv = installDateProvenance(app);
     const checked = bulkSelectedAppIds.has(app.id);
@@ -1195,7 +1298,7 @@ function renderTable(apps) {
         <span class="badge-type ${esc(app.type.toLowerCase())}">${esc(appTypeLabel(app))}</span>
       </td>
       <td style="color: var(--text-gray); font-size: 13px;"${dateProv.inferred ? ` title="${esc(dateProv.note)}"` : ''}>${esc(dateStr)}${dateProv.inferred ? '<span class="inferred-mark" aria-label="approximate">~</span>' : ''}</td>
-      <td style="color: var(--text-gray); font-size: 13px; font-weight: 500;">${esc(sizeStr)}</td>
+      <td class="app-size-cell" style="color: var(--text-gray); font-size: 13px; font-weight: 500;"${sizeAttrs}>${esc(sizeStr)}${measuredSize ? '<span class="inferred-mark" aria-label="measured by Vanish">*</span>' : ''}</td>
     `;
 
     row.addEventListener('click', (e) => {
@@ -1234,6 +1337,8 @@ function renderTable(apps) {
   // s4cx: after the rows exist, not during. Only the ones that scroll into
   // view actually ask for an icon.
   observeAppIcons();
+  // mp31: same discipline, same reason.
+  observeAppSizes();
 }
 
 // Select App handler
@@ -1259,7 +1364,15 @@ function selectApp(app, rowElement) {
     : 'Unknown';
   elements.detDate.title = app.installDate ? detProv.note : '';
   elements.detDate.classList.toggle('inferred-value', detProv.inferred);
-  elements.detSize.textContent = app.sizeBytes ? formatBytes(app.sizeBytes, 1) : 'Unknown';
+  // mp31: same treatment as the date above, for the same reason. The pane has
+  // room for words, so a measured size says it was measured instead of leaving
+  // the user to decode a mark.
+  const sizeMeasured = app.sizeSource === 'measured' && app.sizeBytes;
+  elements.detSize.textContent = app.sizeBytes
+    ? (sizeMeasured ? `${formatBytes(app.sizeBytes, 1)} (measured)` : formatBytes(app.sizeBytes, 1))
+    : 'Unknown';
+  elements.detSize.title = sizeMeasured ? SIZE_MEASURED_NOTE : '';
+  elements.detSize.classList.toggle('inferred-value', Boolean(sizeMeasured));
   elements.detPath.textContent = app.installLocation || 'Unknown';
   elements.detReg.textContent = app.registryPath || 'Unknown';
   elements.detType.textContent =

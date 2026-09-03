@@ -84,6 +84,9 @@ contextBridge.exposeInMainWorld('api', {
   // shape the renderer must keep working when extraction produces nothing.
   // A suite that wants the swap can override this per test.
   getAppIcon: stub('getAppIcon', { success: true, dataUrl: null }),
+  // mp31: the default is the refusal, so a suite that does not opt in never
+  // sees a size appear out of nowhere. Queue a completed answer to drive it.
+  measureInstallSize: stub('measureInstallSize', { success: true, bytes: null, complete: false }),
   createRestorePoint: stub('createRestorePoint', { success: true }),
   scanLeftovers: stub('scanLeftovers', { files: [], registry: [] }),
   purgeRemnants: stub('purgeRemnants', { success: true, quarantinedCount: 0, files: [], registry: [] }),

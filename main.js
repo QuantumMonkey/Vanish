@@ -615,6 +615,118 @@ ipcMain.handle('get-app-icon', async (event, { source } = {}) => {
   return { success: true, dataUrl };
 });
 
+// mp31, the size half. 39 of this machine's 150 desktop entries report no size,
+// because Size comes from the registry's EstimatedSize alone - a value the
+// installer chose to write or not. 27 of those 39 carry an InstallLocation that
+// exists, and measuring it is the only way to answer for them.
+//
+// IN THE MAIN PROCESS, NOT THE ENGINE. A PowerShell round trip costs about
+// 470 ms of spawn and parse before it reads a single byte, and this is asked
+// once per row. Measured on the 27 folders here, the walks themselves are 0-34
+// ms for 25 of them, 2,843 ms for Office, 4,100 ms in total - so the spawn
+// would have been the dominant cost by an order of magnitude.
+//
+// BUDGETED, because Office exists. A folder that cannot be measured inside the
+// budget reports complete:false and the row keeps saying Unknown. mp31's own
+// wording: "an unmeasured size must keep saying Unknown rather than showing a
+// spinner forever", and a 10-second list is a worse product than a list with 27
+// Unknowns in it.
+const sizeCache = new Map();
+const SIZE_CACHE_MAX = 400;
+// Overridable so the suite can drive the budget rather than assert around it.
+// A budget that has never been observed to bite is a budget nobody has tested,
+// and this one is the whole reason the feature is safe to ship.
+const SIZE_BUDGET_MS = Number(process.env.VANISH_SIZE_BUDGET_MS) > 0
+  ? Number(process.env.VANISH_SIZE_BUDGET_MS)
+  : 1500;
+const SIZE_MAX_FILES = Number(process.env.VANISH_SIZE_MAX_FILES) > 0
+  ? Number(process.env.VANISH_SIZE_MAX_FILES)
+  : 200000;
+
+// The same shape rule scanner.ps1's Get-InstallFolderCreated applies, and for
+// the same two reasons: a relative path would resolve against whatever this
+// process's cwd happens to be, and a UNC path would put a directory walk on the
+// network, which INV-4 forbids. Written without a backslash literal for the
+// reason parseDisplayIcon records above it.
+function parseLocalDirectory(raw) {
+  if (typeof raw !== 'string') return null;
+  let s = raw.trim().replace(/^"(.*)"$/, '$1').trim();
+  if (!s) return null;
+  const SEP = String.fromCharCode(92);
+  while (s.length > 3 && (s.endsWith(SEP) || s.endsWith('/'))) s = s.slice(0, -1);
+  if (s.length < 3) return null;
+  if (!/^[A-Za-z]:$/.test(s.slice(0, 2))) return null;
+  if (s[2] !== SEP && s[2] !== '/') return null;
+  return s;
+}
+
+function measureDirectoryBounded(dir, budgetMs, maxFiles) {
+  const started = Date.now();
+  let total = 0;
+  let files = 0;
+  const stack = [dir];
+  while (stack.length) {
+    // Checked per DIRECTORY rather than per file: Date.now() in the inner loop
+    // is itself measurable at this file count, and a single directory's
+    // entries are bounded by what one readdir returns.
+    if (Date.now() - started > budgetMs) return { bytes: total, complete: false };
+    if (files > maxFiles) return { bytes: total, complete: false };
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      // A subtree we cannot read makes the TOTAL wrong, and a wrong total
+      // presented as a measurement is the defect mp31 warns about. Say
+      // incomplete and let the row stay Unknown.
+      return { bytes: total, complete: false };
+    }
+    for (const e of entries) {
+      // 127o: a junction is a second name for a directory. Following one
+      // double-counts at best and loops at worst.
+      if (e.isSymbolicLink()) continue;
+      const full = path.join(current, e.name);
+      if (e.isDirectory()) {
+        stack.push(full);
+      } else {
+        files += 1;
+        try {
+          total += fs.statSync(full).size;
+        } catch {
+          return { bytes: total, complete: false };
+        }
+      }
+    }
+  }
+  return { bytes: total, complete: true };
+}
+
+ipcMain.handle('measure-install-size', async (event, { source } = {}) => {
+  const parsed = parseLocalDirectory(source);
+  if (!parsed) return { success: true, bytes: null, complete: false };
+
+  if (sizeCache.has(parsed)) return Object.assign({ success: true }, sizeCache.get(parsed));
+
+  let result = { bytes: null, complete: false };
+  try {
+    if (fs.existsSync(parsed) && fs.statSync(parsed).isDirectory()) {
+      const measured = measureDirectoryBounded(parsed, SIZE_BUDGET_MS, SIZE_MAX_FILES);
+      result = measured.complete
+        ? { bytes: measured.bytes, complete: true }
+        : { bytes: null, complete: false };
+    }
+  } catch {
+    result = { bytes: null, complete: false };
+  }
+
+  // The incomplete answer is cached too. A folder that blew the budget will
+  // blow it again, and re-asking on every sort and filter would turn one slow
+  // row into a table that is slow forever.
+  if (sizeCache.size >= SIZE_CACHE_MAX) sizeCache.clear();
+  sizeCache.set(parsed, result);
+  return Object.assign({ success: true }, result);
+});
+
 ipcMain.handle('get-windows-features', async () => {
   try {
     return await runPowerShell('list-windows-features');

@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('api', {
   // Read-only and failure-silent - the renderer keeps its letter tile when this
   // returns null, because an icon is decoration and its absence means nothing.
   getAppIcon: (source) => ipcRenderer.invoke('get-app-icon', { source }),
+  // mp31: one install folder at a time, asked for lazily by the row whose Size
+  // column reads Unknown. Read-only and budgeted; an answer that could not be
+  // completed comes back complete:false and the row keeps saying Unknown,
+  // because a partial total presented as a size is worse than no size.
+  measureInstallSize: (source) => ipcRenderer.invoke('measure-install-size', { source }),
 
   // Safe Actions
   createRestorePoint: () => ipcRenderer.invoke('create-restore-point'),

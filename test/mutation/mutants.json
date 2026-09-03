@@ -59,8 +59,8 @@
   "label": "icons: every Windows path rejected again (the s4cx defect)",
   "file": "main.js",
   "suite": "npx electron test/icon-extract-verify.js",
-  "find": "  if (s[2] !== SEP && s[2] !== '/') return null;",
-  "replace": "  if (s[2] !== '/') return null;"
+  "find": "  if (s[2] !== SEP && s[2] !== '/') return null;\n  return s;\n}\n\nipcMain.handle('get-app-icon'",
+  "replace": "  if (s[2] !== '/') return null;\n  return s;\n}\n\nipcMain.handle('get-app-icon'"
  },
  {
   "label": "contract: could-not-look collapses into nothing (THE aeu defect)",
@@ -201,5 +201,68 @@
   "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-credentials-verify.ps1",
   "find": "                if ($null -eq $repoRootHere -and $cur.Depth -ge $repoSearchDepth) { continue }",
   "replace": "                if ($cur.Depth -ge $repoSearchDepth) { continue }"
+ },
+ {
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/install-date-source-verify.ps1",
+  "label": "install date: a folder that does not exist still yields a date",
+  "find": "        if (-not [System.IO.Directory]::Exists($p)) { return $null }",
+  "replace": "        if ($false) { return $null }"
+ },
+ {
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/install-date-source-verify.ps1",
+  "label": "install date: folder-created is claimed but the recovery never runs (mp31 regresses)",
+  "find": "                        $folderDate = Get-InstallFolderCreated $installLocation",
+  "replace": "                        $folderDate = $null"
+ },
+ {
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/install-date-source-verify.ps1",
+  "label": "install date: a recorded date is overwritten by the folder date",
+  "find": "                    if (-not $installDate) {\n                        $folderDate = Get-InstallFolderCreated $installLocation",
+  "replace": "                    if ($true) {\n                        $folderDate = Get-InstallFolderCreated $installLocation"
+ },
+ {
+  "file": "main.js",
+  "suite": "npx electron test/install-size-verify.js",
+  "label": "size: a partial walk is reported as a real total (the budget stops mattering)",
+  "find": "      result = measured.complete\n        ? { bytes: measured.bytes, complete: true }\n        : { bytes: null, complete: false };",
+  "replace": "      result = { bytes: measured.bytes, complete: true };"
+ },
+ {
+  "file": "main.js",
+  "suite": "npx electron test/install-size-verify.js",
+  "label": "size: junctions are followed again, so an aliased folder is counted twice",
+  "find": "      if (e.isSymbolicLink()) continue;",
+  "replace": "      if (e.isSymbolicLink()) { stack.push(path.join(current, e.name)); continue; }"
+ },
+ {
+  "file": "main.js",
+  "suite": "npx electron test/install-size-verify.js",
+  "label": "size: an unreadable subtree is silently left out of the total",
+  "find": "      return { bytes: total, complete: false };\n    }\n    for (const e of entries) {",
+  "replace": "      continue;\n    }\n    for (const e of entries) {"
+ },
+ {
+  "file": "renderer/core.js",
+  "suite": "npx electron test/install-size-render-verify.js",
+  "label": "size: an incomplete measurement is rendered anyway",
+  "find": "  if (!res || res.complete !== true || typeof res.bytes !== 'number' || res.bytes <= 0) return;",
+  "replace": "  if (!res || typeof res.bytes !== 'number') return;"
+ },
+ {
+  "file": "renderer/core.js",
+  "suite": "npx electron test/install-size-render-verify.js",
+  "label": "size: a measured size stops saying it was measured",
+  "find": "    app.sizeSource = 'measured';",
+  "replace": "    app.sizeSource = 'recorded';"
+ },
+ {
+  "file": "renderer/core.js",
+  "suite": "npx electron test/install-size-render-verify.js",
+  "label": "size: every row is asked to be measured, including ones that already have a size",
+  "find": "    const measurable = !app.sizeBytes && app.installLocation;",
+  "replace": "    const measurable = app.installLocation;"
  }
 ]
