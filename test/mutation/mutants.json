@@ -110,5 +110,82 @@
   "suite": "node test/platforms-verify.js",
   "find": "  if (!uninstallString) return null;",
   "replace": "  if (!uninstallString) return null; if (true) { const p = PLATFORMS[0]; return { id: p.id, name: p.name, instructions: p.instructions }; }"
+ },
+ {
+  "label": "vault: an entry id that is not a UUID is accepted",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/security-verify.ps1",
+  "find": "    return ($entryId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')",
+  "replace": "    return $true"
+ },
+ {
+  "label": "vault: a tampered payload restores anyway (the cihg defect)",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-verify.ps1",
+  "find": "            } elseif ($actual.hash -ne $f.contentHash) {",
+  "replace": "            } elseif ($false) {"
+ },
+ {
+  "label": "vault: verified reported true without checking anything",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-verify.ps1",
+  "find": "        $res.verified = $false",
+  "replace": "        $res.verified = $true"
+ },
+ {
+  "label": "vault: directory trees stop being hashed at all",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-verify.ps1",
+  "find": "            $result.algo = 'SHA256-TREE'",
+  "replace": "            $result.algo = $null"
+ },
+ {
+  "label": "vault: the installed-app exception stops requiring a locked data dir",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-destination-verify.ps1",
+  "find": "    return (Test-VaultDataDirTrusted -vaultRoot $vaultRoot)\n}\n\nfunction Test-RestorableProtectedPath {",
+  "replace": "    return $true\n}\n\nfunction Test-RestorableProtectedPath {"
+ },
+ {
+  "label": "vault: INV-1 symmetry broken - quarantine takes what restore cannot return",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/vault-destination-verify.ps1",
+  "find": "        if ((Test-ProtectedDestination $src) -and",
+  "replace": "        if ($false -and"
+ },
+ {
+  "label": "scanner: the Start Menu autostart surface is writable again",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/security-verify.ps1",
+  "find": "        if ($candidate -match '(^|\\\\)Start Menu(\\\\|$)') { return $true }",
+  "replace": "        if ($false) { return $true }"
+ },
+ {
+  "label": "scanner: a direct child of the drive root is allowed (DLL planting)",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/security-verify.ps1",
+  "find": "        if ($parent.TrimEnd('\\').Equals($root.TrimEnd('\\'), [System.StringComparison]::OrdinalIgnoreCase)) { return $true }",
+  "replace": "        if ($false) { return $true }"
+ },
+ {
+  "label": "scanner: a junction-resolved target is no longer checked (SEC-2 bypass)",
+  "file": "scanner.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/security-verify.ps1",
+  "find": "    foreach ($candidate in @($full, $resolved)) {\n        $root = [System.IO.Path]::GetPathRoot($candidate)",
+  "replace": "    foreach ($candidate in @($full)) {\n        $root = [System.IO.Path]::GetPathRoot($candidate)"
+ },
+ {
+  "label": "never-touch: nothing is ever refused, so mitigations become deletable",
+  "file": "finders/_never-touch.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/finder-contract-verify.ps1",
+  "find": "    if ([string]::IsNullOrWhiteSpace($path)) { return $null }",
+  "replace": "    return $null\n    if ([string]::IsNullOrWhiteSpace($path)) { return $null }"
+ },
+ {
+  "label": "walk: reparse points followed again, so a junction is walked twice",
+  "file": "finders/_contract.ps1",
+  "suite": "powershell -NoProfile -ExecutionPolicy Bypass -File test/shared-walk-verify.ps1",
+  "find": "            if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {",
+  "replace": "            if ($false) {"
  }
 ]

@@ -250,6 +250,51 @@ try {
     if ([IO.Directory]::Exists($jWork)) { [IO.Directory]::Delete($jWork, $true) }
 }
 
+# The SAME bypass, against the OTHER rule that resolves junctions.
+#
+# FOUND BY MUTATION TESTING 2026-09-04, and it is the only genuine coverage gap
+# the whole scanner/vault mutation pass produced. The junction test above
+# proves the Start Menu rule resolves its target. Nothing proved the DRIVE-ROOT
+# rule does, and it has its own separate loop over @($full, $resolved).
+#
+# Removing $resolved from that loop was caught by nothing:
+#
+#   probe   <temp>\rootlink\planted.dll   (junction -> C:\)
+#   resolved                C:\planted.dll
+#   unmutated  protected = True
+#   MUTATED    protected = False
+#
+# C:\planted.dll is the bare-path and DLL-search-order planting shape the rule
+# exists to refuse, so a junction at any writable location would have walked
+# straight through it. SEC-2's own comment says a textual check is worthless
+# without resolution; this asserts the resolution actually happens here too.
+Write-Host ""
+Write-Host "SEC-2: the drive-root rule resolves junctions as well" -ForegroundColor Cyan
+$jRoot = Join-Path $env:TEMP "vanish-sec2-rootjunction-verify"
+try {
+    if (Test-Path $jRoot) { cmd /c rmdir /S /Q "$jRoot" 2>&1 | Out-Null }
+    $null = New-Item -ItemType Directory -Path $jRoot -Force
+    $rootLink = Join-Path $jRoot "rootlink"
+    cmd /c mklink /J "$rootLink" "$($env:SystemDrive)\" 2>&1 | Out-Null
+
+    if (-not (Test-Path $rootLink)) {
+        Write-Host "  SKIP  drive-root junction test: mklink refused to create the junction" -ForegroundColor DarkYellow
+    } else {
+        $planted = Join-Path $rootLink "planted.dll"
+        $verdict = Test-Destination $planted
+        Assert-True ($verdict.protected -eq $true) `
+            "refused: a junction whose TARGET makes the path a direct child of the drive root"
+        Assert-True ($verdict.resolved -match '^[A-Za-z]:\\[^\\]+$') `
+            "and the junction is resolved to that root-level target rather than taken literally (got '$($verdict.resolved)')"
+    }
+} catch {
+    Write-Host ("  SKIP  drive-root junction test could not run: " + $_.Exception.Message) -ForegroundColor DarkYellow
+} finally {
+    $rootLink = Join-Path $jRoot "rootlink"
+    if (Test-Path $rootLink) { cmd /c rmdir "$rootLink" 2>&1 | Out-Null }
+    if (Test-Path $jRoot) { Remove-Item -LiteralPath $jRoot -Recurse -Force -ErrorAction SilentlyContinue }
+}
+
 # The follow-up gap, found on a fresh re-review of this same fix: resolving
 # only ONE hop leaves a chain (A -> B -> blocked) comparing against B, which is
 # not itself blocked, while Windows follows the whole chain transparently at
