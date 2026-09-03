@@ -162,7 +162,12 @@ function Test-ReadIsBlocked {
 
 function Get-DedupFinderResult {
     param([string]$fixtureRoot)
-    $resp = Invoke-Engine "hygiene-scan" @{ module = 'rescue'; finders = @('duplicate-content'); roots = @($fixtureRoot) }
+    # module: 9caq moved duplicate-content from 'rescue' to 'reclaim' -- the
+    # rescue lede is "Nothing here is waste", which a duplicate contradicts.
+    # minReclaimBytes 0: these fixtures are a few hundred bytes each, so with
+    # the shipped 16 KB fold they would all collapse into the summary row and
+    # every assertion below would be about the wrong thing.
+    $resp = Invoke-Engine "hygiene-scan" @{ module = 'reclaim'; finders = @('duplicate-content'); roots = @($fixtureRoot); minReclaimBytes = 0 }
     return @($resp.results | Where-Object { $_.finder -eq 'duplicate-content' })[0]
 }
 
@@ -466,6 +471,79 @@ try {
 finally {
     Remove-TestTree $work
 }
+
+
+    # ---- 9caq: small groups are folded into one row, never dropped ---------
+    #
+    # MEASURED on the operator's machine 2026-09-03: this check returned 4,040
+    # findings, 97.5% of everything the whole hygiene panel reported. The
+    # distribution decided the fix rather than taste:
+    #
+    #   total reclaimable       1,268.7 MB across 4,040 groups
+    #   top 10 groups             825.1 MB   65.0% of all reclaimable
+    #   groups under 16 KB          8.16 MB   0.64%, and 77% of the rows
+    #
+    # The thing these assertions protect is not the threshold. It is that the
+    # ARITHMETIC STILL RECONCILES: listed + folded must equal every group that
+    # was actually found, in both count and bytes. A fold that quietly dropped
+    # rows would make the panel's own totals a lie, which is worse than the
+    # wall of rows it replaced.
+    Write-Host ""
+    Write-Host "9caq small-group folding" -ForegroundColor Cyan
+
+    $fold = Join-Path $work "fold"
+    $null = New-Item -ItemType Directory -Path $fold -Force
+
+    # One BIG pair, well over any sane threshold.
+    $bigA = Join-Path $fold "big-a.bin"
+    $bigB = Join-Path $fold "big-b.bin"
+    Set-Content -LiteralPath $bigA -Value ("Z" * 40000) -Encoding ASCII -NoNewline
+    Set-Content -LiteralPath $bigB -Value ("Z" * 40000) -Encoding ASCII -NoNewline
+
+    # Three SMALL pairs, each far under it.
+    foreach ($n in 1..3) {
+        $sa = Join-Path $fold "small$n-a.dat"
+        $sb = Join-Path $fold "small$n-b.dat"
+        $content = ("$n" * 300)
+        Set-Content -LiteralPath $sa -Value $content -Encoding ASCII -NoNewline
+        Set-Content -LiteralPath $sb -Value $content -Encoding ASCII -NoNewline
+    }
+
+    # With folding OFF, every group is listed: the premise for what follows.
+    $offResp = Invoke-Engine "hygiene-scan" @{ module = 'reclaim'; finders = @('duplicate-content'); roots = @($fold); minReclaimBytes = 0 }
+    $off = @($offResp.results)[0]
+    $offGroups = @($off.findings)
+    Assert-True ($offGroups.Count -eq 4) "PREMISE: with folding off the fixture yields 4 groups (1 big, 3 small)"
+    Assert-True (@($offGroups | Where-Object { $_.detail.summary }).Count -eq 0) "and no summary row exists when nothing was folded"
+
+    # With a threshold between the two sizes, the three small ones collapse.
+    $onResp = Invoke-Engine "hygiene-scan" @{ module = 'reclaim'; finders = @('duplicate-content'); roots = @($fold); minReclaimBytes = 10000 }
+    $on = @($onResp.results)[0]
+    $onGroups = @($on.findings)
+    $summary  = @($onGroups | Where-Object { $_.detail.summary })
+    $listed   = @($onGroups | Where-Object { -not $_.detail.summary })
+
+    Assert-True ($summary.Count -eq 1)  "above the threshold the small groups collapse into exactly one summary row"
+    Assert-True ($listed.Count -eq 1)   "and the big group is still listed individually"
+    Assert-True ($summary[0].detail.groupCount -eq 3) "the summary says how many it stands for (3)"
+
+    # THE ASSERTION THIS BLOCK EXISTS FOR: nothing went missing.
+    $accountedGroups = $listed.Count + [int]$summary[0].detail.groupCount
+    Assert-True ($accountedGroups -eq $offGroups.Count) `
+        "THE ARITHMETIC RECONCILES: listed + folded equals every group found with folding off ($accountedGroups vs $($offGroups.Count))"
+
+    $offBytes = 0L; foreach ($g in $offGroups) { $offBytes += [long]$g.detail.reclaimable }
+    $onBytes  = 0L; foreach ($g in $onGroups)  { $onBytes  += [long]$g.detail.reclaimable }
+    Assert-True ($onBytes -eq $offBytes) `
+        "and so do the BYTES - folding moves them into the summary, it does not lose them ($onBytes vs $offBytes)"
+
+    Assert-True ($summary[0].detail.thresholdBytes -eq 10000) "the summary records the threshold that put those groups there"
+    Assert-True ($summary[0].evidence -match 'found and counted, not skipped') "and says outright that they were counted rather than skipped"
+    Assert-True ($summary[0].costClass -eq 'cheap') "the summary is costClass cheap, like every duplicate - an identical copy exists"
+
+    # The module move.
+    Assert-True ($on.module -eq 'reclaim') `
+        "duplicate-content reports itself under 'reclaim', not 'rescue' - a duplicate is not what a delete would cost you, which is what rescue's lede promises"
 
 Write-Host ""
 Write-Host "Result: $script:pass passed, $script:fail failed" -ForegroundColor $(if ($script:fail -gt 0) { "Red" } else { "Green" })

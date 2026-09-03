@@ -335,7 +335,14 @@ function script:Invoke-D30FileWalk {
     return $examined
 }
 
-Register-Finder -name 'duplicate-content' -title 'Files duplicated by content across trees' -module 'rescue' -auditOnly $true -handler {
+# 9caq: MOVED from 'rescue' to 'reclaim' 2026-09-03. The rescue module's
+# lede is "Nothing here is waste; it is what a delete would cost you" - which a
+# duplicate directly contradicts, because an identical copy exists and removing
+# the extras costs nothing. Reclaim's lede is "Regenerable bytes, ranked by
+# what it costs to get them back rather than by how many there are", which is
+# exactly what these are. It was also 97.5% of everything the panel reported,
+# sitting in the one module whose job is to show what a delete would destroy.
+Register-Finder -name 'duplicate-content' -title 'Files duplicated by content across trees' -module 'reclaim' -auditOnly $true -handler {
     param($p)
 
     $roots = @(Get-FieldValue -record $p -name 'roots' -default @() | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -392,6 +399,44 @@ Register-Finder -name 'duplicate-content' -title 'Files duplicated by content ac
         }
     }
 
+    # 9caq: SMALL GROUPS ARE FOLDED INTO ONE ROW, NOT DROPPED.
+    #
+    # Measured on the operator's machine, 2026-09-03: this check returned 4,040
+    # findings, 97.5% of everything the whole hygiene panel reported. The
+    # distribution is what decided the fix:
+    #
+    #   total reclaimable            1,268.7 MB across 4,040 groups
+    #   top 10 groups                  825.1 MB   65.0% of all reclaimable
+    #   top 100 groups               1,162.7 MB   91.6%
+    #   groups under 16 KB             8.16 MB    0.64%, and 77% of the rows
+    #
+    # So three quarters of the rows carried well under one percent of the value.
+    # A threshold sweep put the inflection at 16 KB: 924 rows listed instead of
+    # 4,040, and 99.36% of the reclaimable bytes still individually listed.
+    #
+    # GROUPING BY DIRECTORY WAS THE ORIGINAL PROPOSAL AND THE DATA KILLED IT: the
+    # 4,040 groups live in 811 directories, which is still a wall, and the biggest
+    # directories are IDE extension folders that a tool manages rather than the
+    # operator.
+    #
+    # THE SMALL ONES ARE NOT HIDDEN. They are summarised into a single finding that
+    # names how many there are, what they hold in total, and the threshold that
+    # put them there. finders/_never-touch.ps1's rule is the one being followed:
+    # refuse by name with a reason, never by silent omission - and the same applies
+    # to noise. Dropping 3,116 findings silently would make the panel's own totals
+    # a lie; summarising them keeps the number available and the list readable.
+    $script:DupMinReclaimBytes = 16KB
+
+    # Settable, the same way maxDirs was made settable for 087y: a suite whose
+    # fixtures are a few hundred bytes would otherwise have every one of its
+    # findings folded, and would then be asserting against the summary row
+    # instead of the behaviour it was written for. Passing 0 turns folding off
+    # entirely and restores the pre-9caq shape.
+    $minReclaim = [long](Get-FieldValue -record $p -name 'minReclaimBytes' -default $script:DupMinReclaimBytes)
+    if ($minReclaim -lt 0) { $minReclaim = 0 }
+    $foldedCount = 0
+    $foldedBytes = 0L
+
     # ---- pass 3: a hash shared by 2+ files is a real content duplicate ----
     foreach ($hash in $byHash.Keys) {
         $members = @($byHash[$hash])
@@ -446,6 +491,15 @@ Register-Finder -name 'duplicate-content' -title 'Files duplicated by content ac
             $evidence += " $neverTouchCopyCount of those are inside a never-touch tree and are not proposed for removal."
         }
 
+        # 9caq: below the threshold this group is COUNTED, not listed. Still
+        # counted, which is the whole difference between summarising and
+        # discarding - the summary row below reports both numbers.
+        if ($minReclaim -gt 0 -and $reclaimable -lt $minReclaim) {
+            $foldedCount++
+            $foldedBytes += $reclaimable
+            continue
+        }
+
         $findings.Add((New-Finding `
             -id "duplicate-content|$hash" `
             -title "$countText of one file are byte-identical ($sizeText)" `
@@ -467,6 +521,35 @@ Register-Finder -name 'duplicate-content' -title 'Files duplicated by content ac
                     neverTouchReason = $(if ($survivorGuard) { $survivorGuard.reason } else { '' })
                 }
                 copies = $copies
+            }))
+    }
+
+    # 9caq: the folded groups, as ONE row that names them rather than as
+    # nothing. This is the same rule _never-touch.ps1 states for paths it
+    # refuses -- by name with a reason, never by silent omission -- applied to
+    # findings that are real but not worth an operator's attention one at a
+    # time. Without this row the check's own total would quietly disagree with
+    # the number of duplicate groups on the disk, which is the kind of
+    # arithmetic this project keeps finding and fixing.
+    if ($foldedCount -gt 0) {
+        $foldedText = Format-ByteSize -bytes $foldedBytes
+        $floorText  = Format-ByteSize -bytes $minReclaim
+        $findings.Add((New-Finding `
+            -id 'duplicate-content|small-groups' `
+            -title "$foldedCount further duplicate groups, each under $floorText" `
+            -path '' `
+            -bytes $foldedBytes `
+            -evidence ("These were found and counted, not skipped: $foldedCount groups of byte-identical files whose copies total $foldedText between them. " +
+                       "Each one individually would reclaim less than $floorText, so they are summarised here rather than listed - a list of several thousand rows worth a few megabytes in total is a wall, not an answer. " +
+                       "Raise the threshold in duplicate-content.finder.ps1 to see them individually.") `
+            -rebuildCost 'None -- every one of these has an identical copy elsewhere; nothing is lost by removing the extras.' `
+            -costClass 'cheap' `
+            -action 'audit' `
+            -detail @{
+                summary         = $true
+                groupCount      = $foldedCount
+                reclaimable     = $foldedBytes
+                thresholdBytes  = $minReclaim
             }))
     }
 
