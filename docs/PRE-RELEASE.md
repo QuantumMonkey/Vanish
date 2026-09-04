@@ -7,7 +7,16 @@ oversight.
 ## What Vanish is -- amended 2026-08-28
 
 Operator, 2026-08-28: *"vanish is no longer a simple uninstaller, it is a
-premium CCleaner for developers and digital hygienists."*
+premium [system cleaner] for developers and digital hygienists."*
+
+The bracket is a redaction, made 2026-09-04 on the operator's instruction, and
+the line it replaces was also the README's first line and the package
+description. Both now describe the category in Vanish's own words. The
+distinction being drawn: another product's name used as the category you claim
+to BE is an identity claim on somebody else's mark, while the same name used as
+the bar you have to clear -- as the next paragraph does -- is a comparison, and
+stays. It has to stay, because the standard this file enforces requires naming
+what already solves the problem before anything earns a bd issue.
 
 That is a positioning decision and it changes what earns a bd issue. The
 standard below does not move an inch -- if anything it bites harder, because

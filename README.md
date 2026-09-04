@@ -1,6 +1,6 @@
 # Vanish
 
-**A premium CCleaner for developers and digital hygienists -- on-device, approval-gated, and reversible by default.**
+**A system cleaner and uninstaller built for developers and digital hygienists -- on-device, approval-gated, and reversible by default.**
 
 Vanish opens on a **Health Advisor** dashboard: what this machine is, where the disk went, what starts with Windows, what holds a network connection, what is listening, what is installed twice. From there it maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts the leftovers uninstallers abandon, and **quarantines everything it removes so it can be put back**. Everything runs locally. Nothing leaves your machine.
 
@@ -160,6 +160,16 @@ The first reverses the moment there is a certificate. The clean-VM one is now
 met for Windows 11. Single-user acceptance reverses the moment someone else
 uses it -- reopen `442` in the issue tracker if you are that someone.
 
+### Not a waived gate, but a one-way door
+
+**Running as administrator once locks the settings.** Vanish locks its own
+settings folder to administrators the first time it runs elevated, because the
+elevated half of the app reads its scan depth and auto-purge policy from there.
+After that, a normal (non-administrator) session can read those settings but
+not change them. The app says so on the Settings screen and locks the controls
+rather than letting them move -- but it is a real one-way door, and worth
+knowing before the first elevated run.
+
 
 ## Quickstart
 
@@ -226,8 +236,3 @@ removes it again; everything else is read-only.
 ## License
 
 [MIT](LICENSE)
-
----
-
-*This is the same pattern I use for GTM systems -- an agent that watches, diagnoses, and proposes fixes before you notice the problem. I'm building the GTM version next.*
-| **Running as administrator once locks the settings** | Vanish locks its own settings folder to administrators the first time it runs elevated, because the elevated half of the app reads its scan depth and auto-purge policy from there. After that, a normal (non-administrator) session can read those settings but not change them. The app says so on the Settings screen and locks the controls rather than letting them move -- but it is a real one-way door, and worth knowing before the first elevated run. |

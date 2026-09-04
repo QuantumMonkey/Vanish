@@ -1,7 +1,7 @@
 {
   "name": "vanish-uninstaller",
   "version": "0.9.4",
-  "description": "A premium CCleaner for developers and digital hygienists. On-device Windows machine hygiene - approval-gated uninstalls, leftover scanning, quarantine with a real restore path, and a health dashboard that tells you what a delete would destroy. No telemetry, no cloud.",
+  "description": "A system cleaner and uninstaller built for developers and digital hygienists. On-device Windows machine hygiene - approval-gated uninstalls, leftover scanning, quarantine with a real restore path, and a health dashboard that tells you what a delete would destroy. No telemetry, no cloud.",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
