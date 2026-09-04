@@ -101,8 +101,21 @@ on a small window - measured at the time as leaving the workspace 190 px at
 800x600. What no clamp did was stop the row GROWING: at 1440x900 every one sat
 at its maximum, so four summary cards took 110 px off a list that could show
 seven rows. Only the ceilings moved; the floors and the `vh` scaling are
-untouched, because the small-window problem they were written for has not
-changed.
+untouched.
+
+**Correction, same day.** The sentence that stood here said the floors were
+left alone "because the small-window problem they were written for has not
+changed". That was reasoning from the CSS rather than a measurement, and
+measuring it afterwards showed the small-window case is *inverted*: the stat
+row is **139 px at 800x600 against 94 px at 1440x900**, because at 800 wide the
+four `1fr` cards are 117 px each and their labels wrap to two and three lines.
+The `vh` clamps govern padding and icon size; what actually sets the height on
+a narrow window is text wrapping, which is a function of width and is not
+clamped at all. So the row takes *more* room exactly where there is least.
+
+What the row change did here was help without fixing: 800x600 now shows four
+rows in 250 px of workspace, against the 190 px recorded when those clamps were
+written. Filed as `vanish-uninstaller-2xnj`, with the per-card measurements.
 
 Also fixed, from the same report: `Windows Apps` wrapped onto two lines inside
 its own segment of the All / Desktop / Windows Apps control, stretching all

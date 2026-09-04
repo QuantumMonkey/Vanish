@@ -472,8 +472,15 @@ body::before {
    a small window. What they did not do is stop it GROWING on a large one - at
    1440x900 every clamp sat at its maximum, so the four summary cards were
    taking 110px off a 156-row list that could only show seven. The ceilings came
-   down; the floors and the vh scaling are untouched, because the small-window
-   problem they were written for has not changed. */
+   down; the floors and the vh scaling are untouched.
+
+   AND THE SMALL-WINDOW CLAIM ABOVE IS WRONG, measured the same day. This row is
+   139px at 800x600 and 94px at 1440x900 - it takes MORE room on the window that
+   can least afford it, leaving four rows of list. The clamps govern padding and
+   icon size; what sets the height on a narrow window is the labels WRAPPING,
+   because repeat(4, 1fr) gives each card 117px at 800 wide and nothing clamps
+   width. Fixing it is a width problem (reflow or collapse the grid), not
+   another clamp. bd vanish-uninstaller-2xnj. */
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
