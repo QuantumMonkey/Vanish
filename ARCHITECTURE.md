@@ -76,6 +76,7 @@ is why the suite can drive it directly:
 | [lib/findings.js](lib/findings.js) | THE SEAM. Typed finder results in, exactly one named UI state out (dual-mode: also loaded by the page) | `findings-verify.js`, `wizard-state-verify.js`, `hygiene-panel-verify.js` |
 | [lib/hygiene-report.js](lib/hygiene-report.js) | Formats decided findings as a report, rescue before reclaim | `hygiene-report-verify.js` |
 | [lib/process-attribution.js](lib/process-attribution.js) | Which installed program a running process belongs to | `process-attribution-verify.js` |
+| [lib/lock-failure.js](lib/lock-failure.js) | Whether a removal failure reads as a lock, and which failed paths get remembered (h55). The renderer keeps a copy it cannot avoid -- it cannot require a lib module across the context bridge -- and a test asserts the two expressions stay identical | `locked-paths-verify.js` |
 
 `finders/` is a third category, and deliberately not part of `scanner.ps1`.
 Each check is its own file registering itself with `finders/_loader.ps1`, so

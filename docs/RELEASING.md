@@ -98,7 +98,36 @@ where they always belonged.
 
 ---
 
-## Code Signing (Hard Gate -- Promptgate Rule 14)
+## Code Signing -- OVERRULED BY THE OPERATOR, 2026-09-04
+
+**This section used to read "Hard Gate -- Promptgate Rule 14: no unsigned binary
+is distributed externally under any circumstances."** The operator lifted it,
+in these words:
+
+> *"i dont need a code signing, its a take it or leave it publication."*
+
+That is a decision, not an oversight, and it is recorded here as well as in
+[PRE-RELEASE.md](PRE-RELEASE.md) because a rule this categorical would otherwise
+be re-litigated by the next person who read only this file. The rest of the
+section is kept intact below: the cost it describes is real and unchanged, it
+is simply now a cost being accepted rather than a gate being met.
+
+**WHAT IT ACTUALLY COSTS, so "take it or leave it" is an informed position.** An
+unsigned executable that asks for administrator trips SmartScreen's "Windows
+protected your PC" on every machine except the one that built it. The user has
+to click "More info" and then "Run anyway" -- the same two clicks malware asks
+for. For a product whose entire pitch is that it tells you the truth about what
+it is doing, that is the single worst first impression available, and it lands
+before any of the honesty in this codebase is visible.
+
+**WHAT WOULD REVERSE IT:** money and nothing else. If Vanish ever has users who
+did not build it, or the operator decides the first-run experience matters more
+than the certificate costs, buy one and restore the gate. Nothing in the code
+changes either way.
+
+The original section follows.
+
+### Original section, kept for its reasoning
 
 Unsigned builds are for local development only. No unsigned binary is distributed
 externally under any circumstances, including pre-release and beta builds.

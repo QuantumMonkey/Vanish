@@ -50,7 +50,7 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Three-depth leftover scanning with publisher-folder protection (shared publisher folders are never proposed for whole-folder deletion) | [scanner.ps1](scanner.ps1) `Scan-Leftovers` |
 | Quarantine vault -- every removal is reversible until you say otherwise | [lib/vault.js](lib/vault.js), [lib/store.js](lib/store.js), Quarantine Manager tab |
 | Audit Mode / Full Mode elevation tiers -- the app is read-only until elevated, with a persistent banner and every destructive control inert and explained | [main.js](main.js) `fullModeOnly()` |
-| Task Manager & file-lock unlocker -- see what has a file open and close it (or suspend the tree) before retrying | [scanner.ps1](scanner.ps1) `Get-ProcessList`, `Unlock-Path` |
+| Task Manager & file-lock unlocker -- see what has a file open and close it (or suspend the tree) before retrying, and pick from the paths Vanish itself could not remove rather than hunting one down | [scanner.ps1](scanner.ps1) `Get-ProcessList`, `Unlock-Path`, [lib/lock-failure.js](lib/lock-failure.js) |
 | Bulk uninstall queue -- restore point, silent-switch resolution, and an untrusted-uninstaller acknowledgement gate, per app | [lib/queue.js](lib/queue.js) |
 | System Clean -- orphaned context menus, services, dead PATH entries, broken file associations, other-profile remnants; driver packages are audited but not yet removable | [scanner.ps1](scanner.ps1) `Invoke-CleanerScan` |
 | Left-over Store app data -- `%LOCALAPPDATA%\Packages` folders whose package is no longer installed anywhere on the machine, with Windows' own families listed but never removable and anything touched in the last week held back | [scanner.ps1](scanner.ps1) `Find-UwpLeftovers` |

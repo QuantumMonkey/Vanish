@@ -10,6 +10,144 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ## [Unreleased]
 
+### Added -- the Unknown columns fill themselves in, and say which ones were measured
+
+A quarter of the program list read **Unknown** under Date and under Size, on a
+machine with 150 programs installed. Both columns are honest -- the installer
+either recorded that number or it did not -- but a table where a quarter of two
+columns says nothing looks broken even while it is telling the truth.
+
+**Dates.** A program that recorded no install date now takes the creation date
+of its install folder, marked approximate, the same treatment Store apps have
+had since the provenance model was built. 40 Unknown became 27. It is
+synchronous because it is nearly free: probing all 40 dateless entries takes
+22 ms and reading the real creation times takes 3 ms.
+
+It refuses three things rather than guess: a folder that no longer exists (a
+leftover registry entry is not dated from a folder that is gone), a relative
+path (it would resolve against the engine's working directory and date an
+unrelated folder), and a network path.
+
+**Sizes.** A program that recorded no size now has its install folder measured,
+but only when a row is actually looked at -- the same lazy pattern the program
+icons use. Measured against the real list: 103 Unknown before, 56 after,
+Office at 3.7 GB among them, and the rest still pending because nobody scrolled
+to them, which is the laziness working rather than a gap.
+
+Budgeted, and the budget is the point. A folder that cannot be measured
+completely returns **no number at all** rather than a partial one, and the row
+keeps saying Unknown. The same applies to a subtree that cannot be read and to
+a junction, which is skipped so nothing is counted twice. A partial total
+rendered as a size would be confident, sortable and wrong.
+
+**A measured size says it was measured**, in the table and in words in the
+details pane. Not because it is worse than the installer's own figure -- it is
+better, EstimatedSize is frequently stale or absent -- but because a sortable
+column that silently mixes what the installer claimed with what Vanish walked
+is the same defect the date column already fixed.
+
+### Added -- the Unlocker offers what Vanish could not remove
+
+Picking from a list instead of hunting down a path. The list is paths **Vanish
+itself** tried to remove and could not, with the reason Windows gave at the
+time, what was being removed, and when.
+
+That set exists nowhere else, which is why it is worth having. Resource
+Monitor's Associated Handles and Process Explorer's Find Handle both answer
+"what is holding this path right now"; neither has any idea which paths a
+removal attempt tripped over last Tuesday.
+
+It is not a new list to maintain, and nothing new is stored: the paths go into
+the operation log the app already keeps, which already recorded this exact
+event and already rotates itself. A record that said "3 failed" now says which
+three and why. One row per path, newest first, capped; a path that no longer
+exists is dropped when the list is read and the number dropped is stated rather
+than swallowed; and "is anything still holding it" is asked at the moment you
+click, because that is the question the list cannot answer.
+
+### Added -- System Informer, if you already have it
+
+Task Manager says so when System Informer is running or installed, and says
+what it is better at: handles, open files, tokens, kernel-level detail. Vanish
+reads process information the way Task Manager does and loads no kernel driver,
+so there are questions about a process it cannot answer, and it now says which.
+
+When the tool is absent the app says nothing at all. No download, no nag, no
+"recommended tools" list, and it never calls another program safe or trusted --
+Vanish does not make claims about software, including about its own startup
+entries.
+
+### Changed -- eleven rows instead of seven
+
+The All Programs list showed **seven rows** of a 156-program list in a 900-pixel
+window. Now it shows eleven, with nothing removed: same icon, same publisher
+line, same badges, same columns.
+
+The icon was sizing the row. 70 pixels was 14 of padding around a 40-pixel icon
+tile, while the two lines of text beside it needed about 30. And the four
+summary cards above the table had been written to shrink on a small window but
+never to stop growing on a large one, so on a big screen they took 110 pixels
+off the list.
+
+`Windows Apps` also wrapped onto two lines inside its own segment of the
+All / Desktop / Windows Apps control, stretching all three. A segmented
+control's labels are strings we choose; there is no case where wrapping one is
+right.
+
+### Changed -- a check that spent 78% of its time proving a cache was empty
+
+`local-only-credentials` walks for credential files that exist in one place
+only. On the development machine it spent 13.3 seconds and its entire
+15,000-directory budget inside one package-cache folder, returned nothing from
+it, and then reported itself incomplete in a way no number of re-runs could
+ever clear.
+
+Measured first: 97% of that folder is outside any repository, and a credential
+outside a repository is explicitly not this check's claim to make. Every
+repository on the machine sits within four directories of a search root, and
+the caches fan out at five. So outside a repository the walk now stops at four.
+
+16.9 seconds became 7.3, 18,658 directories became 4,570, no root hits the cap
+any more -- and it finds **one more credential** than before, inside the very
+repository that made that folder a search root and that the capped walk was
+running out of budget before reaching.
+
+### Fixed -- the vault hash was never slow
+
+A note recorded that hashing a 2,000-file tree took 270 ms on its own and 6,300
+ms inside the engine, and named three suspects. All three were wrong: the two
+numbers were a warm read compared against a cold one. The cost is the first
+time each file is opened -- 2,616 ms of a 2,734 ms pass is inside the open
+call, it tracks file count rather than bytes, and it is charged by the
+machine's on-access scanner rather than by anything Vanish does.
+
+Nothing changed in the code. What changed is that a number carried as an
+unexplained mystery is now a measurement, and the cap it justifies rests on the
+right reason.
+
+### Changed -- decisions recorded rather than left open
+
+- **Automatic process-stop: refused.** Vanish already stops a process when you
+  pick one. It will not pick. Every destructive action in this app goes through
+  a vault that can put it back, and a killed process's unsaved work cannot be
+  put back by anything -- it would be the only destructive action in the
+  product with no undo path, chosen by software, on a heuristic.
+- **Resource-hog scoring: refused.** The defensible version already ships: it
+  states the facts -- this is using 3.2 GB, it belongs to X, it starts
+  automatically, it is reachable on port N -- and the reader identifies the hog.
+- **Component store cleanup via DISM: cut permanently.** Windows ships it three
+  ways and ran it unattended on the development machine two days before the
+  measurement, taking 12 of the 14 packages the issue was filed on. See
+  `docs/PRE-RELEASE.md` for the full reasoning.
+- **The bandwidth panel: closed.** Its read-only half was cut long ago and its
+  toggle shipped as the network hold.
+- **The two Health Advisor panels that were called strictly-worse mirrors of
+  Windows Settings: both kept**, with reasons that are now asserted by a test
+  rather than written in a comment. Storage counts almost-full drives into the
+  page's verdict, so it must stay; Windows Updates contributes nothing to it,
+  so it must not.
+
+
 ### Added -- a rule that stops the same defect being found a fifth time
 
 Four separate releases fixed the same underlying mistake in four different
@@ -1789,8 +1927,8 @@ shown as small. A false zero is a number you would act on.
 
 ### Added -- multi-select and bulk "Add N to queue" in All Programs (`5rz`)
 
-* Building a bulk queue used to be N × (click a row → wait for the details
-  sidebar → click Add), for a feature whose name is "Bulk uninstall queue".
+* Building a bulk queue used to be N x (click a row -> wait for the details
+  sidebar -> click Add), for a feature whose name is "Bulk uninstall queue".
   All Programs now has a checkbox column, shift-click range selection, a
   select-all header box, and a persistent **Add N to queue** action stating
   on the button itself how many programs it will act on.
@@ -1930,7 +2068,7 @@ was honesty: several screens stated more certainty than the data supported.
 * **The bulk queue stops fighting its own user** (`2pc`). It re-expanded on
   every add and toasted each time, so collapsing it was undone by the next
   thing you did. It now announces itself once per batch, and collapsed
-  shrinks from 400×419 to 391×57 -- about 87% less screen area.
+  shrinks from 400x419 to 391x57 -- about 87% less screen area.
 
 ### Added -- Network Activity download/upload tiles
 
@@ -2303,7 +2441,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   the defects below before any of them were fixed. `main.js` gained
   `VANISH_HEADLESS_HARNESS=1` so no diagnostic can spawn a window mistakable for
   the app.
-* **Context-menu scan: 300s+ → 0.7s** (`7oo.5`). `Open-RegistryView` called
+* **Context-menu scan: 300s+ -> 0.7s** (`7oo.5`). `Open-RegistryView` called
   `OpenBaseKey` on every value lookup; for `ClassesRoot`, which Windows
   synthesises by merging two hives, that is the expensive half of a read. Base
   keys are now cached per hive+view.
@@ -2443,7 +2581,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
 
 ### Changed
 * `README.md` rewritten as the public-facing document: honest capability table
-  (every claim mapped to a file/function), the scan→propose→approve loop,
+  (every claim mapped to a file/function), the scan->propose->approve loop,
   scan-mode comparison, explicit "what Vanish does NOT do" section (including
   the not-yet-implemented quarantine vault), quickstart, and doc index.
 * `package.json` metadata aligned with repo reality: version corrected from
@@ -2504,7 +2642,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   checkbox is a deliberately zero-size input behind a visible toggle slider
   (standard CSS pattern) -- fixed the assertion to hit-test the slider a real
   user clicks, and separately proved the click reaches the underlying input.
-  212 → 277 assertions. bd `vanish-uninstaller-7y0`.
+  212 -> 277 assertions. bd `vanish-uninstaller-7y0`.
 ### Security
 * **Fixed: no build resolved a verified dependency set.** `package-lock.json` was
   gitignored and `electron` was range-pinned (`^42.5.0`), so nothing in the repo
@@ -2517,7 +2655,7 @@ measured on a real machine, and `test/real-data-verify.js` re-measures it.
   erroring out. Found by a `/cso` audit (bd `vanish-uninstaller-703`).
 * **Fixed: the destination-guard junction resolver only followed one hop (HIGH, found on re-review of the SEC-2 fix itself).**
   `Resolve-DestinationTarget` resolved a single reparse point and returned --
-  correct for a lone junction, but a chain (`A → B → the real blocked
+  correct for a lone junction, but a chain (`A -> B -> the real blocked
   location`) resolved only to `B`. If `B` didn't itself match anything on the
   blocklist, the destination was allowed even though Windows follows the whole
   chain transparently at write time, landing the file at the real target

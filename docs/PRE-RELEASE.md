@@ -111,6 +111,7 @@ re-litigates them from scratch.
 | A read-only bandwidth panel | Task Manager and Resource Monitor both show per-process network, and our own Network Activity panel (`bfh.1`) already does attribution. Only the **hold** survives. |
 | A treemap / "what is big" view | WinDirStat, WizTree, TreeSize and Windows' own Storage page all answer this. See `bu2` -- we build the half they all stop short of. |
 | Hand-written cleaner definitions | BleachBit maintains hundreds in CleanerML and has for years. See `7sl` -- we bring the vault, not a second catalogue. |
+| `cj9` Component store (WinSxS) via DISM | Killed 2026-09-04 on measurements, not argument. Windows ships this three ways -- `DISM /Cleanup-Image /StartComponentCleanup`, Disk Cleanup's "Windows Update Cleanup" (`scavengeui.dll`, `Autorun=3`), and Storage Sense, which fires the `\Microsoft\Windows\Servicing\StartComponentCleanup` task unattended. It did exactly that on this machine on 2026-09-02 at 18:58:38, result 0, which is why the 14 reclaimable packages this issue was filed on **measured 2 two days later with nobody touching it**: the feature cleaned up after itself while the issue sat open. And INV-1 cannot be honoured, for a stronger version of `0ng`'s reason -- `pnputil` destroys one FileRepository copy, but component cleanup deletes *hardlinked* payload (`fsutil hardlink list` on `System32\kernel32.dll` returns both the System32 and the WinSxS name; that fan-out is DISM's own "Shared with Windows: 8.21 GB") and commits a servicing transaction in the TrustedInstaller-owned COMPONENTS hive, so the authoritative state is not files at all. Our own code already says this: `Test-ProtectedDestination` blocks `%SystemRoot%\WinSxS`, quarantine asks the same predicate, and `security-verify.ps1` pins the refusal -- building it means deleting a shipping security assertion. The read-only half is already ours: `ag0` shells `dism /Online /Get-Packages` today. |
 
 ## Previously waived -- now moved into 0.9
 
@@ -123,6 +124,39 @@ means finished, so they are gates again rather than accepted costs. `1w0` and
 | `0xt` clean Win10/Win11 VM matrix | Closed | Win10-specific and clean-machine breakage (missing runtimes, different UAC defaults, no dev tooling present) ships undetected. Sandbox plus daily operator use is the acceptance bar. |
 | `1w0` code signing + Store | Deferred | An unsigned exe trips SmartScreen's "Windows protected your PC" on any machine but this one. Matters the moment there is a second user. |
 | `442` one external user | Deferred | The operator is the user for 1.0. |
+
+---
+
+## The three release gates, resolved -- amended 2026-09-04
+
+The "Ship list, in order" block below gated the release on three things and
+said none of the eighteen open bd issues moved any of them. The operator
+settled all three in one message on 2026-09-04. Recorded here verbatim, because
+this file is the scope authority and a decision that lives only in a chat log
+is a decision the next session re-litigates:
+
+> *"i dont need a code signing, its a take it or leave it publication. force
+> uninstall was already tested by me. demo recording happens absolutely at the
+> end, post dev."*
+
+| Gate | Was | Now |
+|---|---|---|
+| **1. Unsigned binary** (`1w0`) | "should be a gate, not a deferral" | **Dropped.** Not a gate and not a deferral -- a decision. An unsigned exe that asks for administrator still trips SmartScreen's "Windows protected your PC" on every machine but this one, and that cost is now accepted knowingly rather than carried as unfinished work. |
+| **2. `1qp` Force Uninstall on a real machine** | open | **Met.** The operator ran the destructive path and accepted it. |
+| **3. Single-user acceptance + demo recording** | a gate | **Not a dev gate.** The operator is the user, and the recording is explicitly post-development. It cannot gate the code, because it is a recording OF the finished code. |
+
+**So the release is no longer gated on anything outside the code.** What
+remains is the bd board, and the sentence that used to sit under the ship list
+-- "the coding backlog and the release gate are different lists" -- stops being
+true here: as of this amendment they are the same list.
+
+### What that changes about the standard, which is nothing
+
+Dropping the signing gate is not permission to ship something rougher. It
+removes an obstacle the operator judged not worth its cost for a non-commercial
+publication; it does not touch Rule 10, INV-1, the finder contract, or any
+other line in this file. A take-it-or-leave-it publication is still a
+publication, and the thing being taken or left is the same product.
 
 ---
 
@@ -216,9 +250,11 @@ Full Mode and need an elevated shell" -- is answered. They were run. They pass.
 - [x] `dmu` three startup actions elevated (remove / manual / disable)
 - [x] `e7q` Store-leftover sweep purges and restores a real folder
 - [x] `bfh.2` network hold applies and fully reverts
-- [ ] `1qp` Force Uninstall acceptance -- the only one still open, and it
-      wants a clean VM rather than the sandbox that was blocking the others.
-      It belongs with the Rule 10 pass below, not here.
+- [x] `1qp` Force Uninstall acceptance -- **done 2026-09-04**, by the operator,
+      stated directly: *"force uninstall was already tested by me."* It never
+      was a code gate; the suite has been green since it shipped. It was the
+      Rule 10 point that a passing suite is not evidence a destructive path
+      works on a real machine, and a human ran the destructive path.
 
 **What an elevated run does NOT establish** -- found the same day, bd `pnor`.
 An Administrator token reads straight through a Deny ACE, so nine suites
