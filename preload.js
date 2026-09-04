@@ -58,6 +58,10 @@ contextBridge.exposeInMainWorld('api', {
   getGpuVendors: () => ipcRenderer.invoke('get-gpu-vendors'),
   killProcess: (params) => ipcRenderer.invoke('kill-process', params),
   listLockers: (params) => ipcRenderer.invoke('list-lockers', params),
+  // h55: what Vanish itself could not remove because something held it. Read
+  // out of the operation log the app already keeps - not a new list, and not a
+  // scan of the machine.
+  getLockedPaths: () => ipcRenderer.invoke('get-locked-paths'),
   unlockPath: (params) => ipcRenderer.invoke('unlock-path', params),
   browseForPath: (options) => ipcRenderer.invoke('browse-for-path', options || {}),
   // 0bi: which installed program each running process belongs to.

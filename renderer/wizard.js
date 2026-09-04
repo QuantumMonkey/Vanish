@@ -566,6 +566,13 @@ function isAclFailure(error) {
   return /denied|access|unauthoriz|protected|permission/i.test(String(error || ''));
 }
 
+// h55 moved the authoritative copy of this rule to lib/lock-failure.js, where
+// the main process uses it to decide what goes into the operation log. This
+// one stays because the renderer cannot require a lib module across the context
+// bridge, and it is deliberately IDENTICAL rather than improved - two copies
+// that differ is the mirror-drift defect this repository keeps rediscovering,
+// and a test asserts the two expressions still match character for character
+// so the next person to improve one is told about the other.
 function isLockFailure(error) {
   return /lock|in use|being used|another process/i.test(String(error || ''));
 }

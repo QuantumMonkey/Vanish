@@ -327,5 +327,47 @@
   "label": "y1j: the note is shown even when the tool is absent",
   "find": "    el.style.display = 'none';\n    el.innerHTML = '';\n    return;",
   "replace": "    el.style.display = '';\n    el.innerHTML = 'System Informer is not installed.';\n    return;"
+ },
+ {
+  "file": "lib/lock-failure.js",
+  "suite": "node test/locked-paths-verify.js",
+  "label": "h55: a permissions failure is recorded as a lock, so the wrong button is offered",
+  "find": "const LOCK_PATTERN = /lock|in use|being used|another process/i;",
+  "replace": "const LOCK_PATTERN = /./i;"
+ },
+ {
+  "file": "lib/lock-failure.js",
+  "suite": "node test/locked-paths-verify.js",
+  "label": "h55: registry failures are recorded, and list-lockers cannot be asked about a key",
+  "find": "  const files = Array.isArray(entry && entry.files) ? entry.files : [];",
+  "replace": "  const files = [].concat(Array.isArray(entry && entry.files) ? entry.files : [], Array.isArray(entry && entry.registry) ? entry.registry.map((r) => Object.assign({}, r, { originalPath: r.keyPath })) : []);"
+ },
+ {
+  "file": "lib/store.js",
+  "suite": "node test/locked-paths-verify.js",
+  "label": "h55: the same path is listed once per failure instead of once per path",
+  "find": "      if (seen.has(key)) continue;\n      seen.add(key);",
+  "replace": "      if (false) continue;"
+ },
+ {
+  "file": "lib/store.js",
+  "suite": "node test/locked-paths-verify.js",
+  "label": "h55: oldest first, so the newest problem is buried",
+  "find": "  for (let i = recs.length - 1; i >= 0; i -= 1) {",
+  "replace": "  for (let i = 0; i < recs.length; i += 1) {"
+ },
+ {
+  "file": "main.js",
+  "suite": "npx electron test/locked-paths-ipc-verify.js",
+  "label": "h55: a path that no longer exists is still offered, so the list rots",
+  "find": "        return fs.existsSync(r.path);",
+  "replace": "        return true;"
+ },
+ {
+  "file": "renderer/quarantine-tasks.js",
+  "suite": "npx electron test/locked-paths-ipc-verify.js",
+  "label": "h55: the quick-pick box is shown even when there is nothing to pick",
+  "find": "  if (items.length === 0) return;",
+  "replace": "  if (false) return;"
  }
 ]

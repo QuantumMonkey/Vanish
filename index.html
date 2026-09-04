@@ -1369,6 +1369,16 @@
         <button class="btn-sec btn-compact" id="btn-browse-unlock-target"><i class="fa-solid fa-folder-open"></i> Browse</button>
         <button class="btn-sec btn-compact" id="btn-find-lockers">Find what is using it</button>
       </div>
+
+      <!-- h55: pick from what Vanish already failed to remove, instead of
+           hunting down a path. Read out of the operation log the app already
+           keeps; nothing here scans the machine, and nothing here is a list the
+           operator has to maintain - a path that no longer exists is dropped on
+           read, and one that turns out to have no holders says so when opened.
+           Hidden entirely when there is nothing to show, because an empty
+           "recent problems" box is an invitation to wonder what went wrong. -->
+      <div id="unlock-known" class="unlock-known" style="display: none;"></div>
+
       <div id="unlock-results" class="unlock-results"></div>
       <div class="small-modal-actions">
         <button class="btn-sec" id="btn-unlock-graceful" data-destructive="true" style="display: none;">

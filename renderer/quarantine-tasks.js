@@ -1109,6 +1109,7 @@ function setupUnlocker() {
     document.getElementById('btn-unlock-graceful').style.display = 'none';
     overlay.classList.add('active');
     document.getElementById('unlock-path-input').focus();
+    renderKnownLockedPaths();
   });
 
   document.getElementById('unlock-close-x').addEventListener('click', () => overlay.classList.remove('active'));
@@ -1130,6 +1131,86 @@ function openUnlockerFor(path) {
   document.getElementById('unlock-path-input').value = path;
   overlay.classList.add('active');
   findLockers();
+}
+
+// ---------------------------------------------------------------------------
+// h55: pick from what Vanish already failed to remove.
+// ---------------------------------------------------------------------------
+//
+// The Browse button solved "I have to type a path". It did not solve the other
+// half of the ask: pick from a list of things already known to be locked,
+// rather than hunting one down.
+//
+// WHERE THE LIST COMES FROM, and why this one is worth building when a
+// system-wide "what is locked right now" scan is not: these are paths VANISH
+// ITSELF tried to remove and could not, with the reason Windows gave at the
+// time. Resource Monitor's Associated Handles and Process Explorer's Find
+// Handle both answer "what holds this path now" and the operator already has
+// both - neither has any idea which paths a removal attempt tripped over last
+// Tuesday. That set exists nowhere else, which is the test this project
+// applies before building anything.
+//
+// IT IS NOT A LIST TO MAINTAIN. It is read out of the operation log the app
+// already writes; the main process drops anything that no longer exists before
+// it gets here; a path that turns out to have no holders is told so by
+// findLockers, which is the answer the user actually wanted; and the oplog's
+// own rotation is the long-run bound. There is nothing to clear because there
+// is nothing being kept.
+async function renderKnownLockedPaths() {
+  const box = document.getElementById('unlock-known');
+  if (!box || !window.api || typeof window.api.getLockedPaths !== 'function') return;
+
+  box.style.display = 'none';
+  box.innerHTML = '';
+
+  let res = null;
+  try {
+    res = await window.api.getLockedPaths();
+  } catch {
+    return; // silent: the Unlocker still works by typing or browsing
+  }
+  const items = (res && res.success && Array.isArray(res.items)) ? res.items : [];
+  if (items.length === 0) return;
+
+  const rows = items
+    .map((it, i) => {
+      // The same four facts the failure screen showed at the time - which
+      // path, what tried to remove it, when, and why - because that is what
+      // makes the entry legible a week later. A row with only a path is a
+      // riddle.
+      const when = it.at ? new Date(it.at).toLocaleString() : 'at an unrecorded time';
+      const who = it.sourceApp ? `while removing ${esc(it.sourceApp)}` : 'during a removal';
+      return `
+        <button class="unlock-known-row" data-known-index="${esc(i)}" title="${esc(it.path)}">
+          <span class="unlock-known-path">${esc(it.path)}</span>
+          <span class="unlock-known-meta">${who} &ndash; ${esc(when)}</span>
+          <span class="unlock-known-reason">${esc(it.reason || 'No reason was recorded')}</span>
+        </button>`;
+    })
+    .join('');
+
+  const dropped = (res && Number.isFinite(res.dropped) && res.dropped > 0)
+    ? `<div class="unlock-known-note">${esc(String(res.dropped))} more ${res.dropped === 1 ? 'path is' : 'paths are'} no longer on this PC and ${res.dropped === 1 ? 'was' : 'were'} left out.</div>`
+    : '';
+
+  box.innerHTML =
+    '<div class="unlock-known-head">Vanish could not remove these, and something was holding them:</div>' +
+    rows +
+    dropped;
+  box.style.display = '';
+
+  box.querySelectorAll('.unlock-known-row').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.getAttribute('data-known-index'), 10);
+      const item = items[idx];
+      if (!item) return;
+      document.getElementById('unlock-path-input').value = item.path;
+      // Ask straight away. The point of picking from this list is not to save
+      // typing, it is to get to the answer - and "is anything still holding
+      // it?" is a question this list cannot answer and findLockers can.
+      findLockers();
+    });
+  });
 }
 
 async function findLockers() {

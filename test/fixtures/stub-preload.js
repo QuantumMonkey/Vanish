@@ -87,6 +87,9 @@ contextBridge.exposeInMainWorld('api', {
   // mp31: the default is the refusal, so a suite that does not opt in never
   // sees a size appear out of nowhere. Queue a completed answer to drive it.
   measureInstallSize: stub('measureInstallSize', { success: true, bytes: null, complete: false }),
+  // h55: the default is the empty answer, so a suite that does not opt in never
+  // sees a quick-pick list appear out of nowhere.
+  getLockedPaths: stub('getLockedPaths', { success: true, items: [], dropped: 0 }),
   createRestorePoint: stub('createRestorePoint', { success: true }),
   scanLeftovers: stub('scanLeftovers', { files: [], registry: [] }),
   purgeRemnants: stub('purgeRemnants', { success: true, quarantinedCount: 0, files: [], registry: [] }),

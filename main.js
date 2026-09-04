@@ -1528,6 +1528,37 @@ ipcMain.handle('browse-for-path', async (event, options) => {
   return { canceled: false, path: result.filePaths[0] };
 });
 
+// h55: paths Vanish itself failed to remove because something was holding
+// them, so the Unlocker can be opened by picking rather than by hunting.
+//
+// PRUNED HERE, ON READ, rather than maintained. A path that no longer exists
+// was removed some other way and is not a problem any more; keeping it would
+// turn a list of live problems into a list the operator has to tidy. That is
+// the difference between this and every "recent items" list that rots.
+//
+// The existence check is deliberately the only pruning done here. "Nothing is
+// holding it any more" is a much more expensive question and it is asked at
+// the moment the user opens the item, by list-lockers, which is the answer
+// they actually came for.
+ipcMain.handle('get-locked-paths', async () => {
+  try {
+    const rows = store.lockedPaths(50);
+    const live = rows.filter((r) => {
+      try {
+        return fs.existsSync(r.path);
+      } catch {
+        // Unreadable is not the same as gone. Keep it and let list-lockers say
+        // what it finds, rather than deciding on the user's behalf that a path
+        // we could not stat has stopped mattering.
+        return true;
+      }
+    });
+    return { success: true, items: live, dropped: rows.length - live.length };
+  } catch (error) {
+    return { success: false, error: error.message, items: [], dropped: 0 };
+  }
+});
+
 // Read-only enumeration; closing holders is the Full Mode step below.
 ipcMain.handle('list-lockers', async (event, params) => {
   try {
