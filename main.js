@@ -2306,7 +2306,42 @@ ipcMain.on('window-close', () => {
   if (mainWindow) mainWindow.close();
 });
 
-// Open link in external browser
-ipcMain.on('open-external-link', (event, url) => {
-  shell.openExternal(url);
+// t4m9: the renderer cannot name a destination, only choose one.
+//
+// This channel used to take a URL and hand it straight to shell.openExternal
+// with no check of scheme, host or path. On Windows that is ShellExecuteW in
+// the MAIN process, which in Full Mode is elevated - so one call from a
+// compromised renderer launched a process at High integrity, past every
+// fullModeOnly gate, past the whole SEC-1 trust pipeline (user-writable check,
+// HKCU check, LOLBin block, the acknowledged:true requirement) and past the
+// oplog, which an ipcMain.on channel never reaches at all. Every URI scheme
+// registered on the machine was in range; the ms-msdt:/Follina shape is
+// exactly this.
+//
+// NOT FIXED BY VALIDATING THE URL. A scheme allowlist is a rule that has to
+// stay correct forever against every handler Windows and third-party
+// installers register, and it invites the next caller to pass something
+// "obviously safe". The app has exactly ONE caller of this channel
+// (renderer/updates.js) passing exactly ONE constant, so the argument is not
+// needed: the renderer picks a KEY, and the destinations live here, in the
+// process that is trusted with them. There is no string a renderer can send
+// that reaches shell.openExternal, which makes the defect unrepresentable
+// rather than guarded - the same principle the finder contract uses one layer
+// down.
+//
+// Null-prototype on purpose: a plain object literal would answer to
+// '__proto__' and 'constructor' as if they were entries.
+const KNOWN_LINKS = Object.assign(Object.create(null), {
+  'windows-update-history': 'ms-settings:windowsupdate-history'
+});
+
+ipcMain.on('open-known-link', (event, key) => {
+  const target = typeof key === 'string' ? KNOWN_LINKS[key] : undefined;
+  if (typeof target !== 'string') {
+    // Nothing to tell the user: a renderer asking for a link that does not
+    // exist is a bug in this repository, not something they did.
+    console.error(`open-known-link: refused unknown key ${JSON.stringify(key)}`);
+    return;
+  }
+  shell.openExternal(target);
 });

@@ -144,5 +144,7 @@ contextBridge.exposeInMainWorld('api', {
   closeWindow: () => ipcRenderer.send('window-close'),
 
   // Utilities
-  openExternalLink: (url) => ipcRenderer.send('open-external-link', url)
+  // t4m9: a KEY, not a URL. The destinations live in main.js; nothing the
+  // renderer can say reaches shell.openExternal as a string.
+  openKnownLink: (key) => ipcRenderer.send('open-known-link', key)
 });

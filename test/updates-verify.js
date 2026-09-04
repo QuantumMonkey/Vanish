@@ -218,6 +218,78 @@ app.whenReady().then(async () => {
     `every shown update with a KB number offers the handoff (${painted.handoffButtons} of ${shownWithKb}; ${withKb} in total)`
   );
 
+  // ---- t4m9: the one channel in this app that can start a process ---------
+  //
+  // This screen owns the only caller of it. open-external-link used to take a
+  // URL and hand it to shell.openExternal, which on Windows is ShellExecuteW
+  // in the MAIN process - elevated in Full Mode, so the launched process
+  // inherits High integrity, past every fullModeOnly gate and the whole SEC-1
+  // trust pipeline, and past the oplog, which an ipcMain.on channel never
+  // reaches.
+  //
+  // It takes a KEY now. These assertions are about there being no string that
+  // reaches shell.openExternal, rather than about a scheme allowlist being
+  // correct - an allowlist has to stay right forever against every handler
+  // installed on the machine, and this has to stay right against a table with
+  // one row in it.
+  console.log('');
+  console.log('The external-link channel resolves a key, and cannot be told a URL');
+
+  const { shell } = require('electron');
+  const opened = [];
+  const realOpenExternal = shell.openExternal;
+  shell.openExternal = (u) => { opened.push(u); return Promise.resolve(); };
+  const fakeEvent = { sender: null };
+
+  try {
+    ipcMain.emit('open-known-link', fakeEvent, 'windows-update-history');
+    assert(opened.length === 1 && opened[0] === 'ms-settings:windowsupdate-history',
+      'the one key this app uses resolves to the Settings page', JSON.stringify(opened));
+
+    // Everything a compromised renderer would actually try.
+    const refused = [
+      'file:///C:/Windows/System32/cmd.exe',
+      'ms-msdt:/id PCWDiagnostic',
+      'https://example.invalid/',
+      'ms-settings:windowsupdate-history',   // the literal destination, by value
+      'C:\\Windows\\System32\\cmd.exe',
+      '__proto__',
+      'constructor',
+      'toString',
+      '',
+      null,
+      undefined,
+      42,
+      { toString: () => 'ms-settings:windowsupdate-history' }
+    ];
+    const before = opened.length;
+    for (const bad of refused) ipcMain.emit('open-known-link', fakeEvent, bad);
+    assert(opened.length === before,
+      `none of the ${refused.length} hostile or malformed inputs opened anything (${opened.length - before} did)`,
+      JSON.stringify(opened.slice(before)));
+
+    // Named separately because it is the one a plain object literal would have
+    // let through: KNOWN_LINKS['__proto__'] answers on any normal object.
+    assert(!opened.slice(before).length,
+      'including __proto__ and constructor, which a plain object literal would have answered to');
+
+    // And the old channel is gone rather than left registered beside the new
+    // one - a deleted caller does not delete a listener.
+    const stale = ipcMain.listenerCount('open-external-link');
+    assert(stale === 0, `the URL-taking channel is unregistered, not merely unused (${stale} listener(s))`);
+  } finally {
+    shell.openExternal = realOpenExternal;
+  }
+
+  const mainSrcForLinks = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const openCalls = (mainSrcForLinks.match(/shell\.openExternal\(/g) || []).length;
+  assert(openCalls === 1,
+    `shell.openExternal is called from exactly one place in the main process (${openCalls})`);
+
+  const preloadSrc = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  assert(!/open-external-link/.test(preloadSrc),
+    'and the bridge no longer exposes anything that carries a URL across it');
+
   const updatesSrc = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'updates.js'), 'utf8');
   assert(
     /wusa\.exe \/uninstall/.test(updatesSrc),

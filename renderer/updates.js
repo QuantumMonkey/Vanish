@@ -156,8 +156,9 @@ async function explainUpdateRemoval(kb) {
   });
 
   if (!ok) return;
-  if (window.api && window.api.openExternalLink) {
-    window.api.openExternalLink('ms-settings:windowsupdate-history');
+  // t4m9: a key the main process resolves, not a URL it obeys.
+  if (window.api && window.api.openKnownLink) {
+    window.api.openKnownLink('windows-update-history');
   } else {
     toast('Open Settings > Windows Update > Update history to remove it.', 'info', 6000);
   }

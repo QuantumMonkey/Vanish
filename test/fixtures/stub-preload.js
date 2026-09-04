@@ -377,7 +377,7 @@ contextBridge.exposeInMainWorld('api', {
   minimizeWindow: () => {},
   maximizeWindow: () => {},
   closeWindow: () => {},
-  openExternalLink: () => {}
+  openKnownLink: stub("openKnownLink", undefined)
 });
 
 // Test-only control surface. Never shipped: this preload is the fixture.
