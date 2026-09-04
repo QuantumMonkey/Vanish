@@ -30,9 +30,12 @@ unrelated folder), and a network path.
 
 **Sizes.** A program that recorded no size now has its install folder measured,
 but only when a row is actually looked at -- the same lazy pattern the program
-icons use. Measured against the real list: 103 Unknown before, 56 after,
-Office at 3.7 GB among them, and the rest still pending because nobody scrolled
-to them, which is the laziness working rather than a gap.
+icons use. Measured against the whole list as it is actually displayed, which
+is 156 rows rather than the 150 desktop entries the date figures above count,
+because Store apps appear here too and most of the recovered rows are Store
+apps: **103 Unknown before, 56 after**, Office at 3.7 GB among them. The
+remaining 41 are still pending because nobody scrolled to them, which is the
+laziness working rather than a gap.
 
 Budgeted, and the budget is the point. A folder that cannot be measured
 completely returns **no number at all** rather than a partial one, and the row
