@@ -15,9 +15,9 @@ test that has never failed proves nothing. The first run found three assertions
 that could not fail at all -- one of them the accumulator behind the product's
 headline sentence (`totalBytes` -> "You can reclaim X GB").
 
-## What 41/41 does NOT mean
+## What 47/47 does NOT mean
 
-It does not mean the suite is complete. It means these 41 specific defects are
+It does not mean the suite is complete. It means these 47 specific defects are
 caught. Read the number as a floor on assertion quality in the areas probed,
 never as coverage.
 
@@ -31,6 +31,30 @@ check (`parseLocalDirectory`, mp31) that copied a line verbatim from
 reported ANCHOR MISS - correctly, and loudly, which is why it is a trap and not
 a defect. Anchor on enough context to stay unique, and re-run the whole set
 after adding code near an existing anchor rather than only the new mutants.
+
+## A killed run used to leave the mutant behind
+
+On 2026-09-04 a run was killed by its wrapper timeout with a mutant planted.
+The `finally` never ran - a hard kill does not unwind - and what it left in the
+working tree was the SEC-2 mutant: `Test-ProtectedDestination` no longer
+resolving junctions, which is the privilege-escalation guard the session before
+had just added a test for. `git status` caught it a minute later, but "caught
+because someone remembered to look" is not a control.
+
+The restore is journalled now. Before a file is mutated its original bytes go
+to `.in-flight.bak` with an `.in-flight.json` naming the target; both are
+removed only after the file is put back, and any run repairs a leftover before
+doing anything else and says REPAIRED loudly when it does. SIGINT, SIGTERM and
+an uncaught throw restore immediately as well - the journal is for the kill
+that gives no chance to.
+
+The repair was verified by reproducing the failure rather than by reasoning
+about it: plant that same mutant, write the journal, do not restore, then run
+the harness with an empty mutant list and check the file comes back
+byte-identical.
+
+Still worth a `git status` after any interrupted run. The journal covers the
+case it knows about; it cannot cover a disk that filled up mid-write.
 
 ## A survivor is not automatically a gap
 

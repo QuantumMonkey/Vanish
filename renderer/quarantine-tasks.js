@@ -827,6 +827,74 @@ function renderProcessTable() {
       renderProcessDetails(processes.find((p) => p.pid === selectedPid));
     });
   });
+
+  renderSystemInformerNote();
+}
+
+// ---------------------------------------------------------------------------
+// y1j: hand deep process work to System Informer, if the user already has it.
+// ---------------------------------------------------------------------------
+//
+// Operator decision 2026-08-14, option (a). System Informer is MIT and
+// bundling it would be LEGAL - it is refused on COST. Its deeper capabilities
+// need KSystemInformer, a signed kernel driver: driver signing, Microsoft
+// attestation, conflicts with security products, a much heavier install, for
+// an app whose pitch is that it is honest and light.
+//
+// THE SCOPE IS DELIBERATELY SMALL, and the boundary is what this note must
+// never cross: state that the tool is present and what it is better at.
+// Nothing else. No bundled download, no nag when it is absent, no "recommended
+// tools" list, and never a claim that another program is safe - that is a
+// claim about software, which this app does not make about its own startup
+// entries either.
+//
+// DETECTION USES ONLY WHAT IS ALREADY IN MEMORY. System Informer ships
+// portable as often as installed, so an uninstall-entry lookup alone
+// under-detects; the running process closes most of that gap and costs
+// nothing, because this table already has the list. The issue is explicit that
+// we do NOT go hunting the filesystem for it, and nothing here does.
+const SYSTEM_INFORMER_EXE = 'systeminformer.exe';
+
+function detectSystemInformer() {
+  // Running first: it is the stronger signal (the tool is open right now) and
+  // it is the one that catches a portable copy, which is the common case.
+  const running = (typeof processes !== 'undefined' ? processes : []).find(
+    (p) => p && typeof p.name === 'string' && p.name.toLowerCase() === SYSTEM_INFORMER_EXE
+  );
+  if (running) return { how: 'it is running right now' };
+
+  // allApps may be empty if Task Manager was opened before the program list
+  // finished loading. That is a smaller claim, not a wrong one: the note simply
+  // does not appear yet, which is the correct behaviour for "we have not
+  // established it".
+  const installed = (typeof allApps !== 'undefined' ? allApps : []).find(
+    (a) => a && typeof a.name === 'string' && a.name.toLowerCase().includes('system informer')
+  );
+  if (installed) return { how: 'it has an uninstall entry on this PC' };
+
+  return null;
+}
+
+function renderSystemInformerNote() {
+  const el = document.getElementById('system-informer-note');
+  if (!el) return;
+
+  const found = detectSystemInformer();
+  if (!found) {
+    // Absent means silent. Not a placeholder, not a greyed-out row.
+    el.style.display = 'none';
+    el.innerHTML = '';
+    return;
+  }
+
+  el.style.display = '';
+  el.innerHTML =
+    '<strong>System Informer is on this PC</strong> &ndash; ' +
+    esc(found.how) +
+    '. For handles, open files, tokens and kernel-level detail it does what this table deliberately ' +
+    'does not: Vanish reads process information the same way Task Manager does and loads no kernel ' +
+    'driver, so there are questions about a process it cannot answer. Detected from what is already ' +
+    'in memory here, not by searching your disk.';
 }
 
 // 5b0: this table shipped with no row-count caption at all, which matters more

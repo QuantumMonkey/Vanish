@@ -691,6 +691,16 @@
 
         <div class="gpu-adapter-summary" id="gpu-adapter-summary"></div>
 
+        <!-- y1j: if System Informer is already on this PC, say so and say what
+             it is better at. Hidden entirely when it is not - no bundled
+             download, no nag, no "recommended tools" list, and never a claim
+             that another tool is safe. Operator decision 2026-08-14: System
+             Informer is MIT and bundling would be legal; it is refused on COST,
+             because its deep capabilities need a signed kernel driver
+             (attestation, conflicts with security products, a much heavier
+             install) for an app whose pitch is that it is honest and light. -->
+        <div class="panel-inline-note" id="system-informer-note" style="display: none;"></div>
+
         <!-- 3nd: the GPU column's two surprises, stated where someone using
              the app can actually read them instead of only in code comments:
              it samples on its own slower clock than the rest of the table,

@@ -62,6 +62,64 @@ never by the process refresh loop. The pre-warm mitigation described in
 
 ---
 
+## Run 007 - 2026-09-04 - All Programs density (949)
+
+| Condition | Value |
+|---|---|
+| CPU | AMD Ryzen 9 5900HX (8 cores / 16 threads) |
+| RAM | 15 GB |
+| Storage | NVMe SSD |
+| Windows | Windows 11 Pro, build 26200 |
+| Window | 1440 x 900, the size the report was made against |
+| Installed programs listed | 156 |
+| Elevation | Audit Mode (layout is tier-independent) |
+
+The one item in `949` that had a number attached rather than an opinion: seven
+rows visible for a 152-item list.
+
+```
+                       before    after
+row height              70 px    48 px
+rows visible                7       11
+list container top     318 px   273 px
+list container height  550 px   595 px
+```
+
+**Nothing was removed.** Same icon, same publisher line, same badges, same
+columns. Two measurements decided the change:
+
+**The icon was sizing the row, not the text.** 70 px was 14 px of padding above
+and below a 40 px icon TILE, while the two lines of text beside it needed about
+30. The tile came down to 30 px and the padding to 8, which puts the text pair
+back in charge of the row height - so the explicit `line-height` on
+`.app-title-name` and `.app-publisher-name` is now load-bearing rather than
+cosmetic.
+
+**The summary cards had a floor and no ceiling.** `.dashboard-stats` and
+`.stat-card` were already sized in `vh` clamps, written so the row gives ground
+on a small window - measured at the time as leaving the workspace 190 px at
+800x600. What no clamp did was stop the row GROWING: at 1440x900 every one sat
+at its maximum, so four summary cards took 110 px off a list that could show
+seven rows. Only the ceilings moved; the floors and the `vh` scaling are
+untouched, because the small-window problem they were written for has not
+changed.
+
+Also fixed, from the same report: `Windows Apps` wrapped onto two lines inside
+its own segment of the All / Desktop / Windows Apps control, stretching all
+three segments to 50 px. `white-space: nowrap` - a segmented control's labels
+are fixed strings we choose, and there is no case where wrapping one is right.
+
+### Held under test rather than described
+
+`test/list-density-verify.js` asserts a row is at most 56 px and at least ten
+rows are visible at 1440x900, with loose bounds on purpose: font rasterisation
+differs between machines, and an exact pixel assertion would be a flaky test
+wearing a design badge. It also asserts every row is the SAME height, so a long
+program name or publisher cannot quietly reintroduce the problem one row at a
+time. Three mutants cover it - the padding, the tile size and the nowrap.
+
+---
+
 ## Run 006 - 2026-09-04 - local-only-credentials after nq21
 
 | Condition | Value |

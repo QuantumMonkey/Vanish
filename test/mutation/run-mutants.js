@@ -18,12 +18,61 @@
 //
 // ALWAYS RESTORES, including on crash. Product code is mutated in place and a
 // harness that leaves a mutation behind is worse than no harness at all.
+//
+// A `finally` IS NOT ENOUGH, AND THIS HAPPENED. On 2026-09-04 a run was killed
+// by its wrapper's timeout while a mutant was planted, and `finally` never got
+// to run - a hard kill does not unwind. What it left in the working tree was
+// the SEC-2 mutant: `Test-ProtectedDestination` no longer resolving junctions,
+// which is the exact privilege-escalation guard the previous session had added
+// a test for. It was caught by `git status` a minute later, but "caught by
+// someone remembering to look" is not a control.
+//
+// So the restore is JOURNALLED. Before a file is mutated its original bytes go
+// to .in-flight.bak with a .in-flight.json naming the target, and both are
+// removed only after the file is put back. Any run - this one or the next -
+// repairs a leftover before doing anything else, and says so loudly. The
+// journal files are gitignored; the repair works from the backup rather than
+// from git, so it is correct even on a tree with real uncommitted work in it.
 
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
 const MUTANTS = require('./mutants.json');
+
+const JOURNAL = path.join(__dirname, '.in-flight.json');
+const BACKUP = path.join(__dirname, '.in-flight.bak');
+
+function clearJournal() {
+  for (const f of [JOURNAL, BACKUP]) {
+    try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch { /* best effort */ }
+  }
+}
+
+function repairLeftover() {
+  if (!fs.existsSync(JOURNAL) || !fs.existsSync(BACKUP)) {
+    // A half-written journal is itself suspicious, so say so rather than
+    // quietly tidying up.
+    if (fs.existsSync(JOURNAL) || fs.existsSync(BACKUP)) {
+      console.log('WARNING  a partial mutation journal was found and could not be used to repair.');
+      console.log('         Check `git status` before trusting this run.');
+      clearJournal();
+    }
+    return;
+  }
+  let entry = null;
+  try { entry = JSON.parse(fs.readFileSync(JOURNAL, 'utf8')); } catch { entry = null; }
+  if (!entry || !entry.file) {
+    console.log('WARNING  the mutation journal is unreadable. Check `git status` before trusting this run.');
+    clearJournal();
+    return;
+  }
+  fs.writeFileSync(entry.file, fs.readFileSync(BACKUP));
+  clearJournal();
+  console.log('REPAIRED  a previous run was killed with a mutant still planted in ' + entry.file);
+  console.log('          ("' + (entry.label || 'unlabelled') + '") - the original bytes have been put back.');
+  console.log('');
+}
 
 // Paths in mutants.json are repo-relative and every suite command assumes the
 // repo root as cwd, so the harness moves there rather than making each entry
@@ -54,6 +103,28 @@ function runSuite(cmd) {
   }
 }
 
+repairLeftover();
+
+// The same repair on the ways out that DO unwind. A hard kill still needs the
+// journal, but a Ctrl-C or an uncaught throw can put the file back right now.
+let currentOriginal = null;
+let currentFile = null;
+function restoreNow() {
+  if (currentFile !== null && currentOriginal !== null) {
+    try { fs.writeFileSync(currentFile, currentOriginal, 'utf8'); } catch { /* journal covers it */ }
+    currentFile = null;
+    currentOriginal = null;
+  }
+  clearJournal();
+}
+process.on('SIGINT', () => { restoreNow(); process.exit(130); });
+process.on('SIGTERM', () => { restoreNow(); process.exit(143); });
+process.on('uncaughtException', (e) => {
+  restoreNow();
+  console.error(e && e.stack ? e.stack : e);
+  process.exit(1);
+});
+
 const results = [];
 for (const mut of MUTANTS) {
   const original = fs.readFileSync(mut.file, 'utf8');
@@ -68,11 +139,21 @@ for (const mut of MUTANTS) {
 
   let r;
   try {
+    // Journal BEFORE the write, so a kill between the two lines leaves a
+    // backup that matches the file still on disk rather than one that does not.
+    fs.writeFileSync(BACKUP, original, 'utf8');
+    fs.writeFileSync(JOURNAL, JSON.stringify({ file: mut.file, label: mut.label }), 'utf8');
+    currentFile = mut.file;
+    currentOriginal = original;
+
     const mutated = normalised.split(mut.find).join(mut.replace);
     fs.writeFileSync(mut.file, isCrlf ? mutated.split(LF).join(CRLF) : mutated, 'utf8');
     r = runSuite(mut.suite);
   } finally {
     fs.writeFileSync(mut.file, original, 'utf8');
+    currentFile = null;
+    currentOriginal = null;
+    clearJournal();
   }
 
   const verdict = !r.ran ? 'SUITE-BROKE' : r.failed > 0 ? 'KILLED' : 'SURVIVED';

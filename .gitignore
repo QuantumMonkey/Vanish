@@ -47,3 +47,9 @@ graphify-out/
 test_export.json
 dist/
 release/
+
+# Mutation harness crash journal (test/mutation/run-mutants.js). Transient by
+# design: it exists only while a mutant is planted, and the next run uses it to
+# put the file back if a previous one was killed mid-flight.
+test/mutation/.in-flight.json
+test/mutation/.in-flight.bak

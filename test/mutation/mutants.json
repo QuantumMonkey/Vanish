@@ -285,5 +285,47 @@
   "label": "470o: Storage stops counting almost-full drives, so the verdict loses its only disk input",
   "find": "        const full = (diag.disks || []).filter((d) => (d.pctUsed ?? 0) >= 90);",
   "replace": "        const full = [];"
+ },
+ {
+  "file": "index.css",
+  "suite": "npx electron test/list-density-verify.js",
+  "label": "949: the row padding goes back to 14px, so the list shows seven rows again",
+  "find": ".app-row td {\n  padding: 8px 16px;",
+  "replace": ".app-row td {\n  padding: 14px 16px;"
+ },
+ {
+  "file": "index.css",
+  "suite": "npx electron test/list-density-verify.js",
+  "label": "949: the icon tile grows back to 40px and starts sizing the row again",
+  "find": ".app-icon-placeholder {\n  width: 30px;\n  height: 30px;",
+  "replace": ".app-icon-placeholder {\n  width: 40px;\n  height: 40px;"
+ },
+ {
+  "file": "index.css",
+  "suite": "npx electron test/list-density-verify.js",
+  "label": "949: segment labels can wrap inside their own control again",
+  "find": "  white-space: nowrap;\n  border: none;\n  background: transparent;\n  color: var(--text-gray);",
+  "replace": "  border: none;\n  background: transparent;\n  color: var(--text-gray);"
+ },
+ {
+  "file": "renderer/quarantine-tasks.js",
+  "suite": "npx electron test/system-informer-verify.js",
+  "label": "y1j: the exact process-name match becomes a substring, so lookalikes trigger the note",
+  "find": "    (p) => p && typeof p.name === 'string' && p.name.toLowerCase() === SYSTEM_INFORMER_EXE",
+  "replace": "    (p) => p && typeof p.name === 'string' && p.name.toLowerCase().includes(SYSTEM_INFORMER_EXE)"
+ },
+ {
+  "file": "renderer/quarantine-tasks.js",
+  "suite": "npx electron test/system-informer-verify.js",
+  "label": "y1j: the note stops being re-evaluated, so it survives the tool closing",
+  "find": "  renderSystemInformerNote();\n}",
+  "replace": "}"
+ },
+ {
+  "file": "renderer/quarantine-tasks.js",
+  "suite": "npx electron test/system-informer-verify.js",
+  "label": "y1j: the note is shown even when the tool is absent",
+  "find": "    el.style.display = 'none';\n    el.innerHTML = '';\n    return;",
+  "replace": "    el.style.display = '';\n    el.innerHTML = 'System Informer is not installed.';\n    return;"
  }
 ]

@@ -439,6 +439,11 @@ body::before {
 
 .toggle-btn {
   padding: 8px 16px;
+  /* 949: "Windows Apps" wrapped onto two lines INSIDE its own segment, which
+     stretched all three segments to 50px and made the control look broken. A
+     segmented control's labels are fixed strings chosen by us; there is no
+     case where wrapping one is the right answer. */
+  white-space: nowrap;
   border: none;
   background: transparent;
   color: var(--text-gray);
@@ -463,11 +468,17 @@ body::before {
    at the 800x600 minimum it left 190px, and the details panel's info list
    collapsed to nothing. Sizing this row in vh instead of px means it gives
    ground as the window shrinks rather than starving what matters. */
+/* 949: the vh clamps below already stopped this row STARVING the workspace on
+   a small window. What they did not do is stop it GROWING on a large one - at
+   1440x900 every clamp sat at its maximum, so the four summary cards were
+   taking 110px off a 156-row list that could only show seven. The ceilings came
+   down; the floors and the vh scaling are untouched, because the small-window
+   problem they were written for has not changed. */
 .dashboard-stats {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: clamp(10px, 1.6vh, 20px);
-  padding: clamp(10px, 2.2vh, 24px) 32px;
+  gap: clamp(10px, 1.6vh, 14px);
+  padding: clamp(10px, 2.2vh, 14px) 32px;
 }
 
 .stat-card {
@@ -475,10 +486,10 @@ body::before {
   backdrop-filter: blur(10px);
   border: 1px solid var(--border-glass);
   border-radius: 16px;
-  padding: clamp(10px, 1.8vh, 20px);
+  padding: clamp(10px, 1.8vh, 12px);
   display: flex;
   align-items: center;
-  gap: clamp(10px, 1.6vh, 20px);
+  gap: clamp(10px, 1.6vh, 14px);
   transition: var(--transition-smooth);
 }
 
@@ -489,13 +500,13 @@ body::before {
 }
 
 .stat-icon {
-  width: clamp(34px, 6vh, 52px);
-  height: clamp(34px, 6vh, 52px);
+  width: clamp(34px, 6vh, 38px);
+  height: clamp(34px, 6vh, 38px);
   border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: clamp(16px, 2.8vh, 24px);
+  font-size: clamp(16px, 2.8vh, 18px);
   flex-shrink: 0;
 }
 
@@ -527,7 +538,7 @@ body::before {
 .stat-value {
   font-family: var(--font-title);
   font-weight: 800;
-  font-size: clamp(17px, 2.8vh, 24px);
+  font-size: clamp(17px, 2.8vh, 20px);
   line-height: 1.2;
 }
 
@@ -692,8 +703,18 @@ body::before {
   box-shadow: inset 0 0 0 1px rgba(59, 130, 246, 0.4);
 }
 
+/* 949 density. MEASURED before and after, 1440x900, the real 156-row list:
+   70px rows meant SEVEN visible at once, so the list showed 4.5% of itself and
+   every question about it was answered by scrolling. A program list is a place
+   you scan, and seven rows is not a list, it is a viewport onto one.
+
+   The 70 came from 14px padding top and bottom around a 40px icon tile. The
+   icon is the thing sizing the row - the two lines of text only need about 30 -
+   so the tile came down to 30px and the padding to 8, which is 48px a row and
+   ELEVEN visible. Nothing was removed: same icon, same publisher line, same
+   badges. See the run block in docs/BENCHMARKS.md for the numbers. */
 .app-row td {
-  padding: 14px 16px;
+  padding: 8px 16px;
   border-top: 1px solid var(--border-glass);
   border-bottom: 1px solid var(--border-glass);
 }
@@ -713,13 +734,13 @@ body::before {
 .app-info-cell {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
 }
 
 .app-icon-placeholder {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.05);
   display: flex;
   align-items: center;
@@ -727,20 +748,26 @@ body::before {
   font-family: var(--font-title);
   font-weight: 700;
   color: var(--color-primary);
-  font-size: 16px;
+  font-size: 13px;
   border: 1px solid var(--border-glass);
 }
 
+/* Line heights are explicit rather than inherited, because this is the pair
+   that now decides the row height instead of the icon (949). An inherited
+   line-height would make the row's size depend on a body rule several hundred
+   lines away, which is how a density fix quietly comes undone. */
 .app-title-name {
   font-family: var(--font-title);
   font-weight: 600;
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.25;
 }
 
 .app-publisher-name {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-gray);
-  margin-top: 2px;
+  margin-top: 1px;
+  line-height: 1.2;
 }
 
 .badge-type {
