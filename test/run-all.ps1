@@ -86,6 +86,8 @@ $suites = @(
     @{ Name = "System Clean scans (4)";        Kind = "ps";       Path = "test\phase4-verify.ps1" },
     @{ Name = "System Clean purges (4)";       Kind = "electron"; Path = "test/phase4-ipc-verify.js" },
     @{ Name = "CleanerML reader (7sl)";        Kind = "ps";       Path = "test\cleanerml-verify.ps1" },
+    @{ Name = "Clean blind spots (qkgu)";      Kind = "ps";       Path = "test\cleaner-blindspot-verify.ps1" },
+    @{ Name = "Clean blind spots UI (qkgu)";   Kind = "electron"; Path = "test/cleaner-blindspot-ui-verify.js" },
     @{ Name = "Install snapshot (zrw)";        Kind = "node";     Path = "test/snapshot-verify.js" },
     @{ Name = "Size attribution (bu2)";        Kind = "node";     Path = "test/attribution-verify.js" },
     @{ Name = "Process attribution (0bi)";    Kind = "node";     Path = "test/process-attribution-verify.js" },

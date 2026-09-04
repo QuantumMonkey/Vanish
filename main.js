@@ -1616,13 +1616,21 @@ ipcMain.handle('get-system-diagnostics', async () => {
   }
 });
 
+// qkgu: these two used to CATCH and return a manufactured negative -
+// { items: [], total: 0, orphans: 0, error } and { groups: [], hasRedundancy:
+// false, error }. Both are well-shaped successes, and returning one means the
+// promise RESOLVES, which is the problem: renderer/audit.js already has the
+// right three-state handling for these sections, and it hangs off
+// .catch(err => section.fail(...)). A resolution never reaches it. So draw()
+// ran on the fabricated zeros, auditReportWork(0) counted the section as
+// checked-and-clean, and the Health Advisor's verdict included a check that
+// never happened.
+//
+// The fix is to delete the fabrication, not to add a guard downstream. The
+// section runner, auditReportBlind and the "could not read" row were all
+// already written and correct; they were simply never reached.
 ipcMain.handle('get-startup-items', async () => {
-  try {
-    return await runPowerShell('get-startup-items');
-  } catch (error) {
-    console.error('Error getting startup items:', error);
-    return { items: [], total: 0, orphans: 0, error: error.message };
-  }
+  return runPowerShell('get-startup-items');
 });
 
 // bfh.2: holding background transfers.
@@ -1796,13 +1804,11 @@ ipcMain.handle('run-hygiene-scan', async (event, params) => {
   }
 });
 
+// The worse of the two, because `hasRedundancy: false` is not an empty
+// container - it is an assertion of a negative fact, made by a catch block
+// that knows nothing about the machine.
 ipcMain.handle('get-software-redundancy', async () => {
-  try {
-    return await runPowerShell('get-software-redundancy');
-  } catch (error) {
-    console.error('Error getting software redundancy:', error);
-    return { groups: [], hasRedundancy: false, error: error.message };
-  }
+  return runPowerShell('get-software-redundancy');
 });
 
 // REQ-20: detecting broken entries is read-only and works in Audit Mode.

@@ -10,6 +10,64 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ## [Unreleased]
 
+### Fixed -- System Clean said your machine was clean when it had not been allowed to look
+
+An ACL on a single registry key made a System Clean sweep report **a green tick
+and "Nothing left behind here."** So did a `pnputil` that never ran, a firewall
+module that was not installed, and a user profile whose hive would not mount.
+
+The cause was two five-line functions. `OpenSubKey` **returns null** when a key
+is not there and **throws** when the key is there and you are not allowed to
+read it -- opposite facts -- and every registry helper in the engine ended in
+`catch { return @() }`, which turned both into an empty list. That empty list
+went to a dispatcher where all ten branches wrote `success = $true` as a
+literal, and then to a panel whose only test was `findings.length === 0`.
+
+This is the defect class `finders/_contract.ps1` exists to make
+unrepresentable: a two-state answer covering a three-state world, where the
+third state -- *could not look* -- collapses into *nothing*, and *nothing* is
+what authorises a delete. The seven system cleaners predate that contract and
+never got its third state. They have it now:
+
+- A denied read is recorded with its path and its reason; a key that is simply
+  absent is not, because that is an answer rather than a failure.
+- The panel draws the green tick **only** for a sweep that read everything.
+  Otherwise it says the sweep did not finish and **names the locations it could
+  not read** -- a path is actionable, "4 errors" is not.
+- A list that has findings *and* blind spots says so above the quarantine
+  button. "We found 3" silently meaning "3 of an unknown number" is the same
+  defect wearing a success badge, and it matters most where there is a button.
+- The collapsed section badge reads `?` rather than `0`, and `1+` rather than
+  `1`. That badge is all you see before deciding not to open the section.
+
+Two more places the same shape was found and fixed:
+
+**The Health Advisor counted checks that never ran.** `get-startup-items` and
+`get-software-redundancy` caught engine failures and returned
+`{ items: [], total: 0, orphans: 0 }` and `{ groups: [], hasRedundancy: false }`.
+Both are well-shaped successes, so the promise *resolved*, so the panel's
+already-correct "could not read" path -- which hangs off a rejection -- was
+never reached, and the verdict at the top of the screen counted a check that had
+not happened. The fabrication is deleted. Nothing was added: the right handling
+was already written and simply out of reach.
+
+**A folder nobody could measure was labelled "empty".** `Get-FolderSize`
+returned `0` for a path that was gone, a walk that was refused, and a folder
+that really was empty; `Format-ByteSize` renders `0` as the word *empty*. On
+this machine `C:\System Volume Information` -- denied to administrators by
+design -- read as **empty** inside the evidence sentence beside a removal offer.
+It now returns no number and reads "size unknown". That needed `-ErrorVariable`
+rather than a `try`/`catch`, because `-ErrorAction SilentlyContinue` was
+swallowing the per-file denials so nothing ever threw.
+
+Covered by two new suites, 70 assertions, on surfaces that had none: the engine
+half uses `HKLM\SECURITY` -- present and denied on every Windows installation --
+so the difference between *denied* and *absent* is proved against a real
+refusal rather than a mock. Both suites also assert the other direction: a
+genuinely clean sweep still gets its green tick. A change that turned every
+quiet result into a warning would be worse than the defect, because it would
+teach you to ignore the warning.
+
 ### Added -- the Unknown columns fill themselves in, and say which ones were measured
 
 A quarter of the program list read **Unknown** under Date and under Size, on a

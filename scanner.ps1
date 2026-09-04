@@ -85,25 +85,53 @@ function Write-ScanProgress {
 # app-list caller was removed for being slow), so nothing on screen was wrong -
 # but the next caller would have inherited a helper that silently always agrees
 # the folder is empty.
+# qkgu: $null means "could not measure". 0 means "measured, and empty".
+#
+# This returned 0 for all three of: the path is gone, the walk threw, and the
+# folder is genuinely empty. Format-ByteSize turns 0 into the literal word
+# "empty", so a folder nobody could read was labelled EMPTY inside the evidence
+# sentence next to a removal offer. Measure-Paths, forty lines of this same
+# file away, already says the rule out loud - "a wrong number is worse than no
+# number", unmeasured things come back null with a reason - and this function
+# is its poor cousin.
+#
+# -ErrorVariable is the part that matters. -ErrorAction SilentlyContinue was
+# swallowing per-file denials, so a folder whose every file is unreadable
+# summed to nothing and came back as a confident zero, with no exception thrown
+# anywhere.
 function Get-FolderSize {
     param([string]$path)
-    if (-not (Test-Path -LiteralPath $path)) { return 0 }
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
     try {
+        $walkErrors = @()
         # -Force matters here: app data folders keep real payload in hidden
         # subtrees (AC\, Settings\), and leaving those out under-reports.
-        $size = (Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue |
+        $size = (Get-ChildItem -LiteralPath $path -Recurse -File -Force -ErrorAction SilentlyContinue -ErrorVariable +walkErrors |
                  Measure-Object -Property Length -Sum).Sum
+        # Errors AND nothing summed is the case where "empty" is a lie and we
+        # cannot tell which. Errors WITH a sum is a partial measurement, and it
+        # still answers the question the label is asked ("is there anything in
+        # here") - reporting every AppData folder as unmeasurable because one
+        # file was locked would train the operator to ignore the word.
+        if ($walkErrors.Count -gt 0 -and -not $size) { return $null }
         if ($size) { return [long]$size }
         return 0
     } catch {
-        return 0
+        return $null
     }
 }
 
 # Bytes as a person reads them. The engine formats this rather than the
 # renderer because it travels inside an evidence sentence.
+#
+# NOT [long]$bytes any more, and that is the whole reason this signature
+# changed: [long]$null coerces to 0 SILENTLY, so a typed parameter would have
+# turned every unmeasured folder straight back into the word "empty" and the
+# fix above would have been invisible.
 function Format-ByteSize {
-    param([long]$bytes)
+    param($bytes)
+    if ($null -eq $bytes)    { return "size unknown" }
+    $bytes = [long]$bytes
     if ($bytes -le 0)        { return "empty" }
     if ($bytes -lt 1KB)      { return "$bytes bytes" }
     if ($bytes -lt 1MB)      { return "$([math]::Round($bytes / 1KB, 0)) KB" }
@@ -5732,6 +5760,86 @@ function Set-MsiServerState {
 # PHASE 4 - SYSTEM INTEGRATION & ENVIRONMENT CLEAN (Stage 9)
 # ==========================================
 
+# --- qkgu: WHERE A DENIED READ USED TO BECOME A CLEAN BILL OF HEALTH -----
+#
+# The registry helpers below all ended in `catch { return @() }`. That catch
+# is where the evidence died. OpenSubKey has two distinct failure modes and
+# they mean opposite things:
+#
+#   returns $null   the key is NOT THERE           -> nothing to report, fine
+#   THROWS          the key IS there and we are    -> we did not look, and we
+#                   not allowed to read it            have no idea what is in it
+#
+# Collapsing the second into the first gave the seven system cleaners an empty
+# findings list, which Invoke-CleanerScan stamped `success = $true`, which the
+# System Clean panel rendered as a green tick and "Nothing left behind here."
+# On a machine where an ACL stopped the sweep from reading a single key. That
+# is the exact defect class finders/_contract.ps1 was built to make
+# unrepresentable - a two-state answer covering a three-state world - and the
+# cleaners predate it, so they never got the third state.
+#
+# The channel is script-scoped rather than an extra return value because these
+# three helpers are called from nine finder functions and hundreds of call
+# sites, and threading an out-parameter through all of them is the kind of
+# wide mechanical diff that hides a mistake. Instead: $null means "nobody is
+# collecting" and the helpers cost nothing, so this changes NOTHING for any
+# caller except the one that opts in. Invoke-CleanerScan is currently the only
+# one.
+#
+# NOT calling New-Unreadable from finders/_contract.ps1, deliberately, even
+# though the record shape is identical and copied from it. That file is
+# dot-sourced under a Test-Path guard so a trimmed install without finders/
+# still answers every pre-existing action (see the loader comment near the end
+# of this file). Making System Clean depend on it would quietly convert that
+# documented degradation into a crash. The shape is three plain fields; the
+# coupling would buy nothing.
+$script:BlindSpots = $null
+$script:BlindSpotSeen = $null
+$script:BlindSpotDropped = 0
+
+# The cap is enforced HERE, in the loop that grows the list, rather than
+# asserted in a comment above it. 200 distinct denied locations is already far
+# past what any UI will show, and a scan that hits an ACL'd subtree can
+# generate them faster than they can mean anything.
+$script:BlindSpotMax = 200
+
+function Start-BlindSpotCapture {
+    $script:BlindSpots = [System.Collections.Generic.List[object]]::new()
+    $script:BlindSpotSeen = [System.Collections.Generic.HashSet[string]]::new()
+    $script:BlindSpotDropped = 0
+}
+
+# Returns the list AND stops collecting, so a caller cannot read it twice and
+# get two different answers, and a scan that forgets to stop cannot leak its
+# blind spots into the next one.
+function Stop-BlindSpotCapture {
+    $out = @()
+    if ($null -ne $script:BlindSpots) { $out = @($script:BlindSpots) }
+    $dropped = $script:BlindSpotDropped
+    $script:BlindSpots = $null
+    $script:BlindSpotSeen = $null
+    $script:BlindSpotDropped = 0
+    return @{ items = $out; dropped = $dropped }
+}
+
+function Add-BlindSpot {
+    param([string]$path, [string]$reason, [string]$detail = '')
+    if ($null -eq $script:BlindSpots) { return }
+
+    # One denied key gets hit by two views x six roots x every value lookup
+    # underneath it. Without this the list is thousands of copies of one fact.
+    $fingerprint = "$path|$reason"
+    if (-not $script:BlindSpotSeen.Add($fingerprint)) { return }
+
+    if ($script:BlindSpots.Count -ge $script:BlindSpotMax) {
+        # Counted, not silently swallowed. "and 40 more" is a different
+        # sentence from showing 200 and implying that was all of them.
+        $script:BlindSpotDropped++
+        return
+    }
+    $script:BlindSpots.Add(@{ path = $path; reason = $reason; detail = $detail })
+}
+
 # --- TASK-13: explicit registry views (REQ-18) ---------------------------
 # A 64-bit host process silently reads the 64-bit view; anything a 32-bit
 # installer wrote lands in Wow6432Node and is invisible to the default
@@ -5766,6 +5874,10 @@ function Get-CachedRegistryBaseKey {
             [Microsoft.Win32.RegistryHive]::$hive,
             [Microsoft.Win32.RegistryView]::$view)
     } catch {
+        # A whole hive we could not open. Every finding that would have come
+        # from it is now invisible, and the cache means we only get one chance
+        # to say so.
+        Add-BlindSpot -path "$hive ($view)" -reason 'hive-unreadable' -detail $_.Exception.Message
         $base = $null
     }
     $script:RegistryBaseKeys[$cacheKey] = $base
@@ -5788,9 +5900,24 @@ function Open-RegistryView {
                 [Microsoft.Win32.RegistryView]::$view)
         }
         $base = Get-CachedRegistryBaseKey -hive $hive -view $view
-        if (-not $base) { return $null }
+        if (-not $base) {
+            # Also recorded inside the cache miss above, but the cache stores
+            # the failure and never retries - so a hive that failed to open
+            # before this scan started would otherwise be silently absent for
+            # the whole run. A base key is never legitimately $null; unlike a
+            # subkey there is no "not there" case for a hive.
+            Add-BlindSpot -path "$hive ($view)" -reason 'hive-unreadable' -detail 'the hive could not be opened earlier in this process'
+            return $null
+        }
+        # $null from OpenSubKey means the key is genuinely absent. That is an
+        # answer, not a failure, and it is deliberately NOT recorded - a scan
+        # that reported every non-existent key as a blind spot would drown the
+        # real ones.
         return $base.OpenSubKey($subKey)
     } catch {
+        # A throw means the key exists and we were refused. Opposite meaning,
+        # same return value, which is why it has to be said out loud here.
+        Add-BlindSpot -path (Get-ViewRegPath -hive $hive -subKey $subKey -view $view) -reason 'key-denied' -detail $_.Exception.Message
         return $null
     }
 }
@@ -5798,15 +5925,31 @@ function Open-RegistryView {
 function Get-RegistrySubKeyNamesInView {
     param([string]$hive, [string]$subKey, [string]$view = 'Registry64')
     $key = Open-RegistryView -hive $hive -subKey $subKey -view $view
+    # Already recorded by Open-RegistryView if it was a refusal; silent if the
+    # key simply is not there.
     if (-not $key) { return @() }
-    try { return @($key.GetSubKeyNames()) } catch { return @() } finally { $key.Close() }
+    try { return @($key.GetSubKeyNames()) }
+    catch {
+        # Opened, then refused on enumeration - a real case, because read
+        # permission on a key and enumerate permission on its children are
+        # separate rights.
+        Add-BlindSpot -path (Get-ViewRegPath -hive $hive -subKey $subKey -view $view) -reason 'subkeys-denied' -detail $_.Exception.Message
+        return @()
+    }
+    finally { $key.Close() }
 }
 
 function Get-RegistryValueInView {
     param([string]$hive, [string]$subKey, [string]$name = "", [string]$view = 'Registry64')
     $key = Open-RegistryView -hive $hive -subKey $subKey -view $view
     if (-not $key) { return $null }
-    try { return $key.GetValue($name) } catch { return $null } finally { $key.Close() }
+    try { return $key.GetValue($name) }
+    catch {
+        $label = if ([string]::IsNullOrEmpty($name)) { '(default)' } else { $name }
+        Add-BlindSpot -path "$(Get-ViewRegPath -hive $hive -subKey $subKey -view $view)::$label" -reason 'value-denied' -detail $_.Exception.Message
+        return $null
+    }
+    finally { $key.Close() }
 }
 
 # Build the reg.exe-style path that the vault pipeline quarantines.
@@ -6090,6 +6233,18 @@ function Find-OrphanDriverPackages {
     try {
         $output = & pnputil.exe /enum-drivers 2>&1
     } catch {
+        # qkgu: this used to return the empty list and the caller called that
+        # success. pnputil is the ONLY source this cleaner has - if it did not
+        # run, the answer is not "no orphaned drivers", it is "we have no idea".
+        Add-BlindSpot -path 'pnputil.exe /enum-drivers' -reason 'tool-failed' -detail $_.Exception.Message
+        return $findings
+    }
+    # It can also fail without throwing: pnputil needs elevation to enumerate,
+    # and an unelevated run exits non-zero having printed a refusal. $findings
+    # is empty either way, so the exit code is the only thing that separates
+    # "nothing orphaned" from "not allowed to ask".
+    if ($LASTEXITCODE -ne 0) {
+        Add-BlindSpot -path 'pnputil.exe /enum-drivers' -reason 'tool-failed' -detail "pnputil exited $LASTEXITCODE. $(@($output) -join ' ')".Trim()
         return $findings
     }
 
@@ -6233,8 +6388,19 @@ function Find-OtherProfileRemnants {
     $mounted = [System.Collections.Generic.List[string]]::new()
     $loadedSids = @((Get-ChildItem 'Registry::HKEY_USERS' -ErrorAction SilentlyContinue).PSChildName)
 
+    # qkgu: three silent skips lived in this loop, and the first is the worst.
+    # If ProfileList itself cannot be read the body never runs, and the
+    # function returns success with zero findings - telling the user that
+    # another account holds no trace of the program they searched for, from a
+    # scan that loaded no hive at all.
+    $profileKeys = @(Get-ChildItem $profileListKey -ErrorAction SilentlyContinue -ErrorVariable +profileListErrors)
+    if ($profileKeys.Count -eq 0) {
+        Add-BlindSpot -path $profileListKey -reason 'profile-list-unreadable' `
+            -detail 'Windows lists every user profile here; with none readable, no other account was examined.'
+    }
+
     try {
-        foreach ($profileKey in (Get-ChildItem $profileListKey -ErrorAction SilentlyContinue)) {
+        foreach ($profileKey in $profileKeys) {
             $sid = $profileKey.PSChildName
             if ($sid -eq $currentSid) { continue }
             if ($sid -notmatch '^S-1-5-21-') { continue }        # skip service accounts
@@ -6249,13 +6415,25 @@ function Find-OtherProfileRemnants {
 
             $mountPoint = "VanishProfile_$($sid.Substring($sid.LastIndexOf('-') + 1))"
             $loadResult = & reg.exe load "HKU\$mountPoint" "$hiveFile" 2>&1
-            if ($LASTEXITCODE -ne 0) { continue }
+            if ($LASTEXITCODE -ne 0) {
+                # A hive that will not mount is usually one the user is still
+                # logged into, or one left dirty by a crash. Either way that
+                # profile went unexamined, and the answer for it is "unknown".
+                Add-BlindSpot -path $hiveFile -reason 'hive-would-not-mount' -detail "reg.exe load exited $LASTEXITCODE. $(@($loadResult) -join ' ')".Trim()
+                continue
+            }
             $mounted.Add($mountPoint)
 
             $userName = Split-Path $profilePath -Leaf
             $softwareRoot = "Registry::HKEY_USERS\$mountPoint\Software"
 
-            foreach ($vendorKey in (Get-ChildItem $softwareRoot -ErrorAction SilentlyContinue)) {
+            $vendorKeys = @(Get-ChildItem $softwareRoot -ErrorAction SilentlyContinue)
+            if ($vendorKeys.Count -eq 0) {
+                Add-BlindSpot -path "$profilePath (Software)" -reason 'profile-hive-unreadable' `
+                    -detail 'The hive mounted but its Software key listed nothing, so this profile was not actually searched.'
+            }
+
+            foreach ($vendorKey in $vendorKeys) {
                 $name = $vendorKey.PSChildName
                 if ($keyword -and ($name -notlike "*$keyword*")) { continue }
                 if (-not $keyword) { continue }   # without a keyword this would list every vendor
@@ -6438,6 +6616,10 @@ function Find-UwpLeftovers {
         $family    = $folder.Name
         $shortName = $family.Split('_')[0]
         $sizeBytes = Get-FolderSize $folder.FullName
+        # qkgu: a folder we could not measure is a folder we could not read,
+        # and this sweep runs inside a blind-spot capture, so say so instead of
+        # letting "size unknown" be the only trace.
+        if ($null -eq $sizeBytes) { Add-BlindSpot -path $folder.FullName -reason 'size-unmeasurable' }
         $sizeLabel = Format-ByteSize $sizeBytes
         $ageDays   = [int]((Get-Date) - $folder.LastWriteTime).TotalDays
         $protected = Test-UwpProtectedFamily $family
@@ -6654,12 +6836,24 @@ function Find-OrphanInstallerCache {
 function Find-OrphanFirewallRules {
     $findings = [System.Collections.Generic.List[object]]::new()
 
-    if (-not (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) { return $findings }
+    # qkgu: three early returns, all of them previously indistinguishable from
+    # "this machine has no orphaned firewall rules". The cmdlet missing is a
+    # real case - Server Core and trimmed images ship without the NetSecurity
+    # module - and it means we did not look, not that there is nothing there.
+    if (-not (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue)) {
+        Add-BlindSpot -path 'Get-NetFirewallRule' -reason 'cmdlet-unavailable' -detail 'The NetSecurity module is not present on this system.'
+        return $findings
+    }
 
     $filters = @()
     try {
         $filters = @(Get-NetFirewallApplicationFilter -ErrorAction SilentlyContinue)
-    } catch { return $findings }
+    } catch {
+        Add-BlindSpot -path 'Get-NetFirewallApplicationFilter' -reason 'query-failed' -detail $_.Exception.Message
+        return $findings
+    }
+    # Zero filters is NOT recorded: a machine can legitimately have no
+    # application-scoped firewall rules, and that is an answer.
     if ($filters.Count -eq 0) { return $findings }
 
     foreach ($filter in $filters) {
@@ -6751,12 +6945,18 @@ function Find-DeadSharedDlls {
 function Find-GhostDevices {
     $findings = [System.Collections.Generic.List[object]]::new()
 
-    if (-not (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue)) { return $findings }
+    if (-not (Get-Command Get-PnpDevice -ErrorAction SilentlyContinue)) {
+        Add-BlindSpot -path 'Get-PnpDevice' -reason 'cmdlet-unavailable' -detail 'The PnpDevice module is not present on this system.'
+        return $findings
+    }
 
     $devices = @()
     try {
         $devices = @(Get-PnpDevice -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Unknown' })
-    } catch { return $findings }
+    } catch {
+        Add-BlindSpot -path 'Get-PnpDevice' -reason 'query-failed' -detail $_.Exception.Message
+        return $findings
+    }
 
     foreach ($d in $devices) {
         $class = [string]$d.Class
@@ -7772,7 +7972,15 @@ function Find-CleanerMlFindings {
             foreach ($path in $paths) {
                 try {
                     $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
-                    if ($item.PSIsContainer) { $sizeBytes += (Get-FolderSize $item.FullName) }
+                    if ($item.PSIsContainer) {
+                        $folderBytes = Get-FolderSize $item.FullName
+                        # qkgu: `$sizeBytes += $null` adds zero without saying
+                        # so, which is how an unmeasurable folder would have
+                        # gone straight back to counting as empty at the one
+                        # call site that sums rather than labels.
+                        if ($null -eq $folderBytes) { Add-BlindSpot -path $item.FullName -reason 'size-unmeasurable' }
+                        else { $sizeBytes += [long]$folderBytes }
+                    }
                     else { $sizeBytes += [long]$item.Length }
                 } catch { }
             }
@@ -7813,6 +8021,13 @@ function Find-CleanerMlFindings {
     if ($unreadable.Count -gt 0) { $notes.Add("$($unreadable.Count) file(s) could not be read: $($unreadable -join '; ').") }
     if ($findings.Count -eq 0 -and $optionsRead -gt 0) { $notes.Add("Nothing matched on this machine.") }
 
+    # qkgu: a definition file we could not parse is a rule we did not run. It
+    # was already counted, in prose, inside the note - which meant the fact
+    # existed but nothing downstream could act on it, and the result still
+    # said success either way. A run where every file failed to parse read as
+    # "nothing matched on this machine".
+    foreach ($u in $unreadable) { Add-BlindSpot -path ([string]$u) -reason 'definition-unparsable' }
+
     return @{
         success  = $true
         findings = $findings
@@ -7821,10 +8036,73 @@ function Find-CleanerMlFindings {
     }
 }
 
+# qkgu: the state is COMPUTED from the evidence, in one place, and no cleaner
+# gets to assert it.
+#
+# The switch below used to be Invoke-CleanerScan itself, and every one of its
+# ten branches wrote `success = $true` as a literal. Ten places to remember to
+# merge a blind-spot list into is ten places to forget one, so the switch is
+# now a private function and this wrapper is the only thing the dispatcher
+# calls. Start the capture, run the scan, stop the capture, decide.
+#
+# The three rules are the same three as New-FinderResult in
+# finders/_contract.ps1, in the same order, on purpose - System Clean and
+# Machine Hygiene should not have two different definitions of "clean". They
+# are restated rather than shared for the trimmed-install reason given at the
+# blind-spot channel above; if they ever disagree, that file is right and this
+# is the copy to fix.
 function Invoke-CleanerScan {
     param([object]$p)
 
     $cleaner = if ($p) { [string]$p.cleaner } else { "" }
+
+    Start-BlindSpotCapture
+    $res = $null
+    try {
+        $res = Get-CleanerFindings -p $p -cleaner $cleaner
+    } catch {
+        $res = @{ success = $false; cleaner = $cleaner; error = $_.Exception.Message }
+    }
+    $blind = Stop-BlindSpotCapture
+
+    if ($null -eq $res) { $res = @{ success = $false; cleaner = $cleaner; error = 'The cleaner returned nothing.' } }
+
+    $found = @()
+    if ($res.ContainsKey('findings') -and $null -ne $res.findings) {
+        $found = @($res.findings | Where-Object { $null -ne $_ })
+    }
+    $missed = @($blind.items)
+
+    # An outright failure is its own state. It is NOT folded into
+    # 'could-not-look': "the sweep did not run" and "the sweep ran and could
+    # not read four keys" are different sentences and the second one still has
+    # usable findings in it.
+    $state = if ($res.success -ne $true) {
+        'failed'
+    } elseif ($found.Count -gt 0) {
+        'found'
+    } elseif ($missed.Count -eq 0) {
+        'nothing'
+    } else {
+        'could-not-look'
+    }
+
+    $res.state           = $state
+    $res.findings        = $found
+    $res.findingCount    = $found.Count
+    $res.unreadable      = $missed
+    $res.unreadableCount = $missed.Count
+    $res.unreadableDropped = $blind.dropped
+    # False whenever anything was unreadable, INCLUDING alongside findings. A
+    # partial 'found' is still partial, and "we found 3" silently meaning "3
+    # of an unknown number" is the same defect wearing a success badge.
+    $res.complete        = ($missed.Count -eq 0 -and $res.success -eq $true)
+    if (-not $res.ContainsKey('cleaner')) { $res.cleaner = $cleaner }
+    return $res
+}
+
+function Get-CleanerFindings {
+    param([object]$p, [string]$cleaner)
 
     try {
         switch ($cleaner) {

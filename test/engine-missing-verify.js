@@ -177,10 +177,28 @@ app.whenReady().then(async () => {
     );
 
     // Other panels take the same path, not just the one that was reported.
+    //
+    // qkgu changed the CONTRACT of two of these without changing this
+    // guarantee. get-startup-items used to catch and resolve with
+    // { items: [], total: 0, orphans: 0, error } - a well-shaped success, which
+    // is why the Health Advisor's "could not read" path was never reached and
+    // its verdict counted a check that never ran. It rejects now. What must
+    // still hold is the thing this loop is actually here for: whatever crosses
+    // the boundary carries no raw shell text, whether it crosses as a value or
+    // as a rejection. So take the message from either shape and test the same
+    // string.
     for (const channel of ['get-startup-items', 'get-listeners', 'find-broken-entries']) {
-      const r = await invoke(channel, {});
-      const l = rawTextIn(JSON.stringify(r));
+      let crossed;
+      try {
+        crossed = JSON.stringify(await invoke(channel, {}));
+      } catch (err) {
+        crossed = String((err && err.message) || err);
+      }
+      const l = rawTextIn(crossed);
       assert(l.length === 0, `${channel} leaks no raw shell text either`, l.join(', '));
+      assert(/restart/i.test(crossed),
+        `${channel} still tells the user what to DO, however it reports`,
+        crossed.slice(0, 120));
     }
   } finally {
     restoreEngine();

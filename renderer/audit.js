@@ -1711,8 +1711,16 @@ async function toggleRedundancyWaiver(category) {
   // load (system diagnostics, startup items, AND the network read with its
   // built-in ~1s sample sleep) to redraw one section's badges would be pure
   // waiting. Re-fetch just the redundancy groups and redraw only that list.
-  const redundancy = await window.api.getSoftwareRedundancy();
-  renderRedundancyGroups(redundancy);
+  // qkgu: get-software-redundancy now rejects when the engine fails, instead
+  // of resolving with { groups: [], hasRedundancy: false } - so this call site
+  // has to say so rather than let an unhandled rejection leave the list
+  // showing whatever it showed before the waiver was toggled.
+  try {
+    const redundancy = await window.api.getSoftwareRedundancy();
+    renderRedundancyGroups(redundancy);
+  } catch (err) {
+    auditSectionFailed('audit-redundancy-list', 'group installed programs', err.message);
+  }
 }
 
 // ddx: what can be reached from outside.

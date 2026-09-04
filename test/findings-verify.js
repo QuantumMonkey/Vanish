@@ -276,6 +276,59 @@ console.log('D-1 regression: the uninstall wizard leftover screen, at the place 
 
   const empty = f.fromLeftovers(null);
   assert(empty.canAdvance === false, 'and a null payload advances nothing rather than throwing');
+
+  // ---- qkgu: the same adapter for System Clean's seven cleaners ----------
+  //
+  // They predate the contract, so every branch of Invoke-CleanerScan wrote
+  // success = $true as a literal and the panel's only test was
+  // findings.length === 0 -> a green tick. The four cases below are the four
+  // the panel now has to tell apart, and the first two are the pair that used
+  // to be indistinguishable.
+  const cClean = f.fromCleanerScan({ success: true, findings: [], unreadable: [] }, 'services', 'Left-over services');
+  const cBlind = f.fromCleanerScan(
+    { success: true, findings: [], unreadable: [{ path: 'HKLM\\SECURITY', reason: 'key-denied' }] },
+    'services', 'Left-over services'
+  );
+  assert(cClean.state === f.UI_NOTHING_FOUND, 'a sweep that read everything and found nothing is nothing-found');
+  assert(cBlind.state === f.UI_INCOMPLETE, 'a sweep that was refused is incomplete');
+  assert(cClean.findingCount === cBlind.findingCount,
+    'and they have the SAME finding count - which is the entire reason the old code could not tell them apart');
+  assert(cClean.state !== cBlind.state, 'the states are what separate them now, and they differ');
+  assert(cBlind.trustworthy === false, 'the refused one is not trustworthy');
+  assert(!/^Nothing found\.?$/.test(cBlind.headline) && /not the same as clean/i.test(cBlind.headline),
+    'and its headline says so in words rather than leaving it to a colour', cBlind.headline);
+
+  const cPartial = f.fromCleanerScan(
+    {
+      success: true,
+      findings: [{ id: 'svc|a', label: 'DeadService', risk: 'Safe', kind: 'registry' }],
+      unreadable: [{ path: 'HKLM\\SECURITY', reason: 'key-denied' }]
+    },
+    'services', 'Left-over services'
+  );
+  assert(cPartial.state === f.UI_HAS_WORK, 'findings plus a refusal still has work to offer');
+  assert(cPartial.trustworthy === false,
+    'but is not trustworthy - "we found 3" silently meaning "3 of an unknown number" is the same defect wearing a success badge');
+  assert(cPartial.findings[0].title === 'DeadService',
+    'and the finding survives with its label, because a blind spot must not cost the findings we DID get');
+
+  const cFailed = f.fromCleanerScan({ success: false, error: 'engine returned nothing' }, 'services', 'x');
+  assert(cFailed.state === f.UI_INCOMPLETE, 'a failed scan is incomplete, matching fromLeftovers rather than inventing a fifth rule');
+  assert(cFailed.unreadable.some((u) => /engine returned nothing/.test(u.detail)),
+    'and the engine error travels with it');
+
+  // The engine caps its own blind-spot list at 200 and reports the remainder.
+  // That number has to reach the SCREEN, which means the field the list
+  // renders - caught by the UI suite when it arrived in `detail` instead.
+  const cCapped = f.fromCleanerScan({ success: true, findings: [], unreadable: [], unreadableDropped: 47 }, 'services', 'x');
+  assert(cCapped.state === f.UI_INCOMPLETE, 'a dropped remainder alone is still enough to make it incomplete');
+  assert(cCapped.unreadable.some((u) => /47 more location/.test(u.path)),
+    'and the count is in the field that gets rendered, not only in a detail nobody shows',
+    JSON.stringify(cCapped.unreadable));
+
+  const cNull = f.fromCleanerScan(null, 'services', 'x');
+  assert(cNull.state === f.UI_NOTHING_FOUND || cNull.state === f.UI_INCOMPLETE,
+    'and a null payload produces a state rather than throwing');
 }
 
 // ---- a cost class the vocabulary does not contain -------------------------

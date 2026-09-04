@@ -542,7 +542,22 @@ function updateCleanerBadge(cleanerId) {
     return;
   }
 
-  badge.textContent = state.findings.length;
+  // qkgu: the same rule the body follows, because the badge is what the user
+  // reads when the section is COLLAPSED - which is most of the time, and is
+  // the only thing they see before deciding not to open it. A flat "0" on a
+  // sweep that was refused is the green tick in miniature, and it gets there
+  // first.
+  const blind = state.decision && state.decision.unreadableCount > 0;
+  if (blind && state.findings.length === 0) {
+    badge.textContent = '?';
+    badge.title = state.decision.headline;
+    badge.className = 'audit-badge scanning';
+    badge.style.display = state.scanned ? 'inline-flex' : 'none';
+    return;
+  }
+
+  badge.textContent = blind ? `${state.findings.length}+` : state.findings.length;
+  badge.title = blind ? state.decision.headline : '';
   badge.style.display = state.scanned ? 'inline-flex' : 'none';
   badge.className = state.findings.length > 0 ? 'audit-badge danger' : 'audit-badge';
 }
@@ -577,6 +592,12 @@ async function scanCleaner(cleanerId, options = {}) {
   state.loading = false;
   stopScanTicker(`cleaner:${cleanerId}`);
 
+  // qkgu: the same seam the wizard's leftover screen uses, on the surface that
+  // has seven of these instead of one. The decision is not read off the
+  // payload - it is recomputed from the evidence by lib/findings.js, which is
+  // this exact file in both processes rather than a copy of its rules.
+  state.decision = window.VanishFindings.fromCleanerScan(res, cleaner.id, cleaner.title || cleaner.id);
+
   if (!res || res.success !== true) {
     state.error = (res && res.error) || 'The scan did not return a result.';
     state.findings = [];
@@ -607,6 +628,35 @@ function scanAgeLabel(state) {
     ? 'just now'
     : `${Math.floor(seconds / 60)} minute(s) ago`;
   return `<span style="font-size: 11.5px; color: var(--text-muted);">Scanned ${when}</span>`;
+}
+
+// qkgu: what could not be read, named. "4 locations could not be read" with no
+// list is a shrug; the paths are what let the operator decide whether it
+// matters -- an ACL on somebody else's profile hive is not the same news as
+// one on the services key this cleaner exists to sweep.
+//
+// Capped at ten in the LOOP, not in a comment above it, and the remainder is
+// counted out loud. The engine caps its own list at 200 and reports what it
+// dropped; this is the second, tighter cap for a panel.
+const BLIND_SPOT_ROWS = 10;
+
+function renderBlindSpots(unreadable) {
+  const list = Array.isArray(unreadable) ? unreadable.filter(Boolean) : [];
+  if (list.length === 0) return '';
+
+  const rows = [];
+  for (const u of list) {
+    if (rows.length >= BLIND_SPOT_ROWS) break;
+    const why = u.reason ? ` <span style="color: var(--text-muted);">(${esc(u.reason)})</span>` : '';
+    rows.push(`<div class="finding-evidence" style="margin-left: 0;">${esc(u.path || '')}${why}</div>`);
+  }
+  const rest = list.length - rows.length;
+
+  return `<div style="font-size: 11.5px; margin-bottom: 8px;">
+      <div style="color: var(--text-muted); margin-bottom: 4px;">Could not be read:</div>
+      ${rows.join('')}
+      ${rest > 0 ? `<div class="finding-evidence" style="margin-left: 0; color: var(--text-muted);">and ${esc(String(rest))} more</div>` : ''}
+    </div>`;
 }
 
 function renderCleanerBody(cleaner) {
@@ -667,6 +717,31 @@ function renderCleanerBody(cleaner) {
   }
 
   if (state.findings.length === 0) {
+    // qkgu: THE LINE THIS WHOLE CHANGE EXISTS FOR. An empty findings list used
+    // to be one thing - a green tick and "Nothing left behind here." It is two
+    // things, and only one of them is good news. A sweep that an ACL refused,
+    // or whose pnputil never ran, returned an empty list too, and told the
+    // user their machine was clean.
+    const blind = state.decision && state.decision.state === window.VanishFindings.UI_INCOMPLETE;
+    if (blind) {
+      body.innerHTML = `${inputRows}
+        <div class="panel-state">
+          <i class="fa-solid fa-circle-question" style="color: var(--color-warning);"></i>
+          <div>
+            <div>Nothing found in what could be read -- but this sweep did not finish.</div>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 6px;">
+              ${esc(state.decision.headline)}
+            </div>
+          </div>
+        </div>
+        ${renderBlindSpots(state.decision.unreadable)}
+        <div class="cleaner-actions">
+          <button class="btn-sec btn-compact" data-scan="${esc(cleaner.id)}"><i class="fa-solid fa-rotate-right"></i> Re-scan</button>
+          ${scanAgeLabel(state)}
+        </div>`;
+      wireCleanerBody(cleaner);
+      return;
+    }
     const cleared = state.resolvedCount > 0
       ? `All ${state.resolvedCount} item(s) found here have been moved to quarantine.`
       : esc(state.note || 'Nothing left behind here.');
@@ -685,8 +760,26 @@ function renderCleanerBody(cleaner) {
 
   const removable = state.findings.filter((f) => f.removable !== false);
 
+  // A partial 'found' is still partial. "We found 3" quietly meaning "3 of an
+  // unknown number" is the same defect as the green tick above, and it matters
+  // more here, because this is the list with a Move-to-quarantine button under
+  // it and the user is about to decide they have dealt with the problem.
+  const partial = state.decision && state.decision.unreadableCount > 0;
+
   body.innerHTML = `
     ${inputRows}
+    ${
+      partial
+        ? `<div class="panel-state" style="padding: 10px 12px; margin-bottom: 8px; text-align: left;">
+             <i class="fa-solid fa-triangle-exclamation" style="color: var(--color-warning);"></i>
+             <div style="font-size: 11.5px;">
+               This list is incomplete -- ${esc(String(state.decision.unreadableCount))} location(s) could not be read,
+               so there may be more here than is shown.
+             </div>
+           </div>
+           ${renderBlindSpots(state.decision.unreadable)}`
+        : ''
+    }
     ${
       state.note
         ? `<div style="font-size: 11.5px; color: var(--text-muted); margin-bottom: 8px;">${esc(state.note)}</div>`
