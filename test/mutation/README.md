@@ -15,9 +15,9 @@ test that has never failed proves nothing. The first run found three assertions
 that could not fail at all -- one of them the accumulator behind the product's
 headline sentence (`totalBytes` -> "You can reclaim X GB").
 
-## What 57/57 does NOT mean
+## What 60/60 does NOT mean
 
-It does not mean the suite is complete. It means these 57 specific defects are
+It does not mean the suite is complete. It means these 60 specific defects are
 caught. Read the number as a floor on assertion quality in the areas probed,
 never as coverage.
 
@@ -70,6 +70,8 @@ survivors in the first scanner/vault pass, **one** was a real gap. The rest:
 | non-UUID entry id | **Harness error.** The assertion is in `security-verify.ps1`, and the mutant named `vault-verify.ps1`. |
 | never-touch never refuses | **Harness error.** The assertion is `finder-contract-verify.ps1:192`. |
 | UNC install location dated anyway (mp31) | **Equivalent.** `Get-InstallFolderCreated` refuses a UNC path explicitly AND refuses anything not rooted at a drive letter, and the second rule runs first - before any filesystem call. Removing the UNC line changes neither the answer nor the cost. The line is kept as intent and the doc comment now says it is redundant instead of presenting it as the protection. |
+| UNC in lib/path-shape.js (lr9d) | **Equivalent, again, and this time in the shared predicate.** Deleting the explicit UNC line changes nothing: "\\" is not "X:", so the drive-letter rule already refuses it. Same redundancy as the mp31 row above, reproduced when the rule was consolidated. The line is KEPT as stated intent and its comment now says it is redundant - the defect was never the line, it was a comment implying it was the protection. |
+| main process stops annotating (lock/acl) | **Mis-aimed by me.** The suite it named calls annotateLockFailures DIRECTLY, so mutating lib/vault.js cannot reach it. Dropped rather than re-aimed: the renderer half is covered by that suite's negative control, and the vault half would need a suite that runs a real quarantine. Recorded as a known coverage edge rather than a fake mutant. |
 | junction skipped in the size walk (mp31) | **Mis-specified mutant, corrected rather than dropped.** Deleting the skip could not fail: Node reports a junction as isSymbolicLink() and NOT isDirectory(), so the entry fell to the statSync branch and added nothing measurable. The defect worth guarding is the walk DESCENDING into it, so the mutant now pushes it onto the stack instead of merely un-skipping it. |
 
 The equivalent ones are deliberately **not** in `mutants.json`. Equivalent mutants can

@@ -69,12 +69,68 @@ app.whenReady().then(async () => {
   write('2026-02-01T10:00:00Z', [{ path: gone, reason: 'in use' }], 'GoneApp');
   write('2026-02-02T10:00:00Z', [{ path: live, reason: 'being used by another process' }], 'LiveApp');
 
+  // lr9d: a UNC path is exactly what this list fills up with - a network
+  // install whose file was locked - and it is the reason the handler checks
+  // SHAPE before it touches the filesystem. fs.existsSync on a dead share costs
+  // 1,270 ms, measured, and this ran once per row up to fifty inside a
+  // synchronous main-process handler.
+  //
+  // Asserted as a DROP rather than as a duration: a timing assertion on
+  // somebody else's network is a flaky test wearing a performance badge, but
+  // "this row never reaches the list" is the same rule and is deterministic.
+  const B = String.fromCharCode(92);
+  const uncPath = B + B + 'a-share-that-is-not-here' + B + 'apps' + B + 'thing.dll';
+  write('2026-02-03T10:00:00Z', [{ path: uncPath, reason: 'in use' }], 'NetworkApp');
+  // And a relative one, which would otherwise be probed against whatever the
+  // main process's working directory happens to be.
+  write('2026-02-04T10:00:00Z', [{ path: 'Program Files' + B + 'App' + B + 'x.dll', reason: 'in use' }], 'RelativeApp');
+
   const res = await invoke('get-locked-paths');
   assert(res && res.success === true, 'the handler answers', JSON.stringify(res));
   assert(res.items.length === 1, `only the path that still exists comes back (${res.items.length})`,
     JSON.stringify(res.items.map((i) => i.path)));
   assert(res.items[0] && res.items[0].path === live, 'and it is the right one');
-  assert(res.dropped === 1, `the one that is gone is COUNTED, not silently swallowed (${res.dropped})`);
+  assert(res.dropped === 3,
+    `the gone one, the UNC one and the relative one are all COUNTED as dropped, not silently swallowed (${res.dropped})`);
+
+  const paths = res.items.map((i) => i.path);
+  assert(!paths.some((p) => p.startsWith(B + B)),
+    'no UNC path survives - it is refused by shape, before anything touches the network',
+    JSON.stringify(paths));
+  assert(!paths.some((p) => /^Program Files/.test(p)),
+    'and neither does a relative one, which would have been probed against the process working directory',
+    JSON.stringify(paths));
+
+  // THE ASSERTION THAT DISTINGUISHES SHAPE-FIRST FROM PROBE-FIRST, and it
+  // needed thinking about: the two paths above are dropped either way, because
+  // existsSync returns false for a dead share and for a relative path too. The
+  // only difference is the 1,270 ms - and a duration assertion on somebody
+  // else's network is a flaky test wearing a performance badge.
+  //
+  // A UNC path that RESOLVES separates them deterministically. Shape-first
+  // drops it; probe-first finds it and keeps it. The admin share is on every
+  // Windows machine and needs elevation to read, so this states its premise
+  // rather than passing vacuously when it cannot run.
+  const liveUnc = B + B + 'localhost' + B + 'C$' + B + 'Windows';
+  if (!fs.existsSync(liveUnc)) {
+    console.log(`  SKIP  the live-UNC case: ${liveUnc} is not reachable from this session (needs elevation)`);
+  } else {
+    const uncDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vanish-h55-unc-'));
+    store.init(uncDir);
+    fs.appendFileSync(store.oplogPath(), JSON.stringify({
+      ts: '2026-02-05T10:00:00Z', action: 'quarantine', tier: 'full',
+      items: { requested: 1, quarantined: 0, failed: 1, lockedPaths: [{ path: liveUnc, reason: 'in use' }] },
+      outcome: 'partial', meta: { sourceApp: 'NetApp' },
+    }) + '\n', 'utf8');
+
+    const uncRes = await invoke('get-locked-paths');
+    assert(uncRes.items.length === 0,
+      'a UNC path that DOES resolve is still dropped - refused by shape, never probed',
+      JSON.stringify(uncRes.items.map((i) => i.path)));
+    assert(uncRes.dropped === 1, 'and counted as dropped');
+    try { fs.rmSync(uncDir, { recursive: true, force: true }); } catch { /* best effort */ }
+    store.init(dataDir);
+  }
   assert(res.items[0] && res.items[0].sourceApp === 'LiveApp' && res.items[0].at,
     'the row keeps what tried to remove it and when', JSON.stringify(res.items[0]));
 

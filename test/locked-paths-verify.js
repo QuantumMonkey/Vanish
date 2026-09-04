@@ -45,7 +45,7 @@ console.log('=========================================');
 
 // ---------------------------------------------------------------------------
 console.log('');
-console.log('The classifier, and the copy of it the renderer still needs');
+console.log('The classifier, which now exists in exactly one place');
 
 assert(isLockFailure('The process cannot access the file because it is being used by another process.'),
   'the message Windows actually returns for a locked file is classified as a lock');
@@ -56,20 +56,23 @@ assert(!isLockFailure('Could not find file'), 'and neither is a path that was al
 assert(!isLockFailure(''), 'an empty reason is not a lock');
 assert(!isLockFailure(null), 'and neither is a missing one');
 
-// THE MIRROR. renderer/wizard.js cannot require a lib module across the context
-// bridge, so it keeps its own copy of this expression. Two copies that differ
-// is the defect this repository keeps rediscovering - a rule reimplemented
-// beside itself, drifting, with the mirror reporting confidently about
-// behaviour the original does not have. This asserts they are the same
-// expression, so improving one without the other fails here rather than in
-// front of a user.
-const wizardSrc = fs.readFileSync(path.join(__dirname, '..', 'renderer', 'wizard.js'), 'utf8');
-const libSrc = fs.readFileSync(path.join(__dirname, '..', 'lib', 'lock-failure.js'), 'utf8');
-const wizardPattern = (wizardSrc.match(/\/lock\|in use\|being used\|another process\/i/) || [])[0];
-const libPattern = (libSrc.match(/\/lock\|in use\|being used\|another process\/i/) || [])[0];
-assert(Boolean(wizardPattern) && wizardPattern === libPattern,
-  'the renderer copy and the lib copy are the same expression, character for character',
-  `wizard: ${wizardPattern} | lib: ${libPattern}`);
+// THE MIRROR IS GONE, so the guard that watched it is gone too - and it was
+// worth removing on its own merits, because it could not fail. It matched
+// BOTH files against the same hardcoded literal and asserted the results were
+// equal, which they necessarily are whenever both match. It would not have
+// noticed the renderer switching to a different expression with the old one
+// left behind in a comment.
+//
+// renderer/wizard.js no longer classifies anything. lib/vault.js calls
+// annotateLockFailures before the payload leaves the main process, and the
+// renderer reads p.lockSuspected. A value cannot drift from the rule that
+// produced it. test/path-shape-verify.js shows the other shape of this, for
+// the copy that genuinely cannot be deleted: one table of cases, both
+// implementations, asserted to agree case by case rather than character by
+// character.
+assert(!/function isLockFailure/.test(
+  fs.readFileSync(path.join(__dirname, '..', 'renderer', 'wizard.js'), 'utf8')),
+  'the renderer keeps no copy of the classifier at all');
 
 // ---------------------------------------------------------------------------
 console.log('');

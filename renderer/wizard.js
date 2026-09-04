@@ -524,8 +524,17 @@ function renderPurgeSummary(res, requestedCount) {
     failuresList.innerHTML = problems
       .map((p, index) => {
         const isFile = !!p.originalPath;
-        const denied = isAclFailure(p.error);
-        const locked = isLockFailure(p.error);
+        // Same source as the lock flag above: classified once, in the main
+        // process, and mutually exclusive with it. A locked file used to match
+        // BOTH, because Windows says "cannot access the file because it is
+        // being used" and the old test looked for "access" - so a lock was
+        // offered a destructive ACL change as its remedy.
+        const denied = p.aclSuspected === true;
+        // The main process classified this and put the answer on the row
+        // (lib/lock-failure.js). This file used to re-derive it from the error
+        // string with its own copy of the rule - two implementations of one
+        // rule, free to drift, "guarded" by a test that could not fail.
+        const locked = p.lockSuspected === true;
         return `
           <div class="summary-failure-item" data-failure-index="${esc(index)}">
             <div class="path">${esc(p.originalPath || p.keyPath)}</div>
@@ -562,9 +571,6 @@ function renderPurgeSummary(res, requestedCount) {
   }
 }
 
-function isAclFailure(error) {
-  return /denied|access|unauthoriz|protected|permission/i.test(String(error || ''));
-}
 
 // h55 moved the authoritative copy of this rule to lib/lock-failure.js, where
 // the main process uses it to decide what goes into the operation log. This
@@ -573,10 +579,7 @@ function isAclFailure(error) {
 // that differ is the mirror-drift defect this repository keeps rediscovering,
 // and a test asserts the two expressions still match character for character
 // so the next person to improve one is told about the other.
-function isLockFailure(error) {
-  return /lock|in use|being used|another process/i.test(String(error || ''));
-}
-
+fu
 // REQ-19: takeown + icacls for ONE item, then retry that one quarantine move.
 // Full Mode only, and the manifest records that ownership was changed.
 async function elevateAndRetry(index) {

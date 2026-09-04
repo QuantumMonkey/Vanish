@@ -116,6 +116,8 @@ $suites = @(
     @{ Name = "All Programs density (949)"; Kind = "electron"; Path = "test/list-density-verify.js" },
     @{ Name = "System Informer handoff (y1j)"; Kind = "electron"; Path = "test/system-informer-verify.js" },
     @{ Name = "Vault manifest integrity (z71u)"; Kind = "node"; Path = "test/manifest-integrity-verify.js" },
+    @{ Name = "Path shape, one rule (lr9d)"; Kind = "electron"; Path = "test/path-shape-verify.js" },
+    @{ Name = "Purge summary remedies"; Kind = "electron"; Path = "test/purge-summary-actions-verify.js" },
     @{ Name = "Locked paths remembered (h55)"; Kind = "node";     Path = "test/locked-paths-verify.js" },
     @{ Name = "Locked paths quick-pick (h55)"; Kind = "electron"; Path = "test/locked-paths-ipc-verify.js" },
     @{ Name = "UAC policy lock (qyt)";          Kind = "node";     Path = "test/uac-lock-verify.js" },

@@ -397,5 +397,26 @@
   "label": "z71u: the previous manifest is no longer kept, so a bad write is unrecoverable",
   "find": "      fs.copyFileSync(live, backup);",
   "replace": "      void backup;"
+ },
+ {
+  "file": "lib/lock-failure.js",
+  "suite": "npx electron test/purge-summary-actions-verify.js",
+  "label": "lock/acl: a locked file is offered a destructive ownership change again",
+  "find": "  if (isLockFailure(error)) return false;",
+  "replace": "  if (false) return false;"
+ },
+ {
+  "file": "lib/path-shape.js",
+  "suite": "npx electron test/path-shape-verify.js",
+  "label": "path: a drive-relative path is accepted, resolving against the process cwd",
+  "find": "  if (s[2] !== SEP && s[2] !== '/') return null;                  // and rooted, not drive-relative",
+  "replace": "  // rooted check removed"
+ },
+ {
+  "file": "main.js",
+  "suite": "npx electron test/locked-paths-ipc-verify.js",
+  "label": "path: get-locked-paths probes before shape-checking again",
+  "find": "      const shaped = pathShape.localRootedPath(r.path);\n      if (!shaped) return false;",
+  "replace": "      const shaped = r.path;"
  }
 ]

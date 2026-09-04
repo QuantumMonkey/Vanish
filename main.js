@@ -9,7 +9,8 @@ const vault = require('./lib/vault');
 const queue = require('./lib/queue');
 const snapshot = require('./lib/snapshot'); // zrw: install snapshot diff
 const attribution = require('./lib/attribution'); // bu2: size attribution
-const processAttribution = require('./lib/process-attribution'); // 0bi: process attribution
+const processAttribution = require('./lib/process-attribution');
+const pathShape = require('./lib/path-shape'); // lr9d: one path rule, every call site
 
 let mainWindow;
 
@@ -564,31 +565,10 @@ const ICON_CACHE_MAX = 400;
 // one, so it is parsed off and discarded rather than passed through as part of
 // a path that would then not exist.
 function parseDisplayIcon(raw) {
-  if (typeof raw !== 'string') return null;
-  let s = raw.trim();
-  if (!s) return null;
-
-  // A trailing ",<digits>" or ",-<digits>" is the resource index, never part
-  // of the filename. Anchored so a comma inside a directory name survives.
-  s = s.replace(/,\s*-?\d+\s*$/, '');
-  s = s.trim().replace(/^"(.*)"$/, '$1').trim();
-  if (!s) return null;
-
-  // Absolute local paths only. A relative path would resolve against whatever
-  // the main process's cwd happens to be, and a UNC path would put an icon
-  // fetch on the network, which INV-4 forbids outright.
-  // NO BACKSLASH LITERAL HERE, and that is deliberate. The first version of
-  // this line was /^[A-Za-z]:[\\/]/ and reached the working tree as
-  // /^[A-Za-z]:[\/]/ - a character class matching only a forward slash, so
-  // EVERY Windows path was rejected and the whole feature silently did
-  // nothing. It was caught by probing a real extraction rather than by any
-  // test, because a feature that returns null for everything still passes
-  // every assertion about returning null safely.
-  const SEP = String.fromCharCode(92);
-  if (s.length < 3) return null;
-  if (!/^[A-Za-z]:$/.test(s.slice(0, 2))) return null;
-  if (s[2] !== SEP && s[2] !== '/') return null;
-  return s;
+  // lr9d: the rule lives in lib/path-shape.js now. It was written here, in
+  // parseLocalDirectory below, and in scanner.ps1, and forgotten in
+  // get-locked-paths - where the omission cost 1,270 ms per dead UNC path.
+  return pathShape.displayIconPath(raw);
 }
 
 ipcMain.handle('get-app-icon', async (event, { source } = {}) => {
@@ -649,15 +629,7 @@ const SIZE_MAX_FILES = Number(process.env.VANISH_SIZE_MAX_FILES) > 0
 // network, which INV-4 forbids. Written without a backslash literal for the
 // reason parseDisplayIcon records above it.
 function parseLocalDirectory(raw) {
-  if (typeof raw !== 'string') return null;
-  let s = raw.trim().replace(/^"(.*)"$/, '$1').trim();
-  if (!s) return null;
-  const SEP = String.fromCharCode(92);
-  while (s.length > 3 && (s.endsWith(SEP) || s.endsWith('/'))) s = s.slice(0, -1);
-  if (s.length < 3) return null;
-  if (!/^[A-Za-z]:$/.test(s.slice(0, 2))) return null;
-  if (s[2] !== SEP && s[2] !== '/') return null;
-  return s;
+  return pathShape.localRootedPath(raw);
 }
 
 function measureDirectoryBounded(dir, budgetMs, maxFiles) {
@@ -1559,14 +1531,23 @@ ipcMain.handle('get-locked-paths', async () => {
   try {
     const rows = store.lockedPaths(50);
     const live = rows.filter((r) => {
-      try {
-        return fs.existsSync(r.path);
-      } catch {
-        // Unreadable is not the same as gone. Keep it and let list-lockers say
-        // what it finds, rather than deciding on the user's behalf that a path
-        // we could not stat has stopped mattering.
-        return true;
-      }
+      // lr9d: SHAPE FIRST, and this ordering is the whole fix. existsSync on a
+      // dead UNC path costs 1,270 ms - measured - and this ran once per
+      // remembered path, up to fifty, inside a synchronous main-process
+      // handler. A minute of frozen Unlocker, on the list most likely to
+      // contain a share that has since gone away.
+      //
+      // A path we cannot shape-check is dropped rather than probed, and that
+      // is the right outcome on its own terms: list-lockers could not answer
+      // about it either, so offering it would be offering a dead end.
+      const shaped = pathShape.localRootedPath(r.path);
+      if (!shaped) return false;
+      // Now it is a local rooted path and existsSync is cheap and honest.
+      // The catch that used to sit here claimed to keep unreadable paths -
+      // fs.existsSync never throws, it is accessSync in a try/catch returning
+      // false, so that branch could not run and the policy it described was
+      // never implemented.
+      return fs.existsSync(shaped);
     });
     return { success: true, items: live, dropped: rows.length - live.length };
   } catch (error) {
