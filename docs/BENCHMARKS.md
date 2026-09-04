@@ -139,7 +139,7 @@ in both directions.
 
 ```
                      BEFORE                              AFTER
-   2,988 ms   2999 dirs  4 cand  12 repos    1,524 ms   1336 dirs  4 cand  12 repos  C:\Users\Anand
+   2,988 ms   2999 dirs  4 cand  12 repos    1,524 ms   1336 dirs  4 cand  12 repos  %USERPROFILE%
        8 ms      8 dirs  0 cand   1 repo         9 ms      8 dirs  0 cand   1 repo   C:\tmp
      474 ms    517 dirs  0 cand   1 repo       484 ms    517 dirs  0 cand   1 repo   D:\Claude Setups
   13,306 ms  15000 dirs  0 cand   1 repo     5,137 ms   2575 dirs  1 cand   1 repo   D:\Dependencies
@@ -170,7 +170,7 @@ Full walk to depth 8 with the finder's prune list applied, every default root:
 | Root | Dirs | Inside a repo | Outside | Repos |
 |---|---|---|---|---|
 | `D:\Dependencies` | 81,318 | 2,285 | 79,033 | 1 |
-| `C:\Users\Anand` | 2,999 | 419 | 2,580 | 12 |
+| `%USERPROFILE%` | 2,999 | 419 | 2,580 | 12 |
 | the other five | 659 | 648 | 11 | 5 |
 
 97% of `D:\Dependencies` is outside any repo, and a credential outside a repo
@@ -359,7 +359,7 @@ Per root, warm:
 
 | Root | Time | Dirs | Candidates | Repos |
 |---|---|---|---|---|
-| `C:\Users\Anand` | 2,850 ms | 2,986 | 4 | 12 |
+| `%USERPROFILE%` | 2,850 ms | 2,986 | 4 | 12 |
 | `D:\Dependencies` | **12,547 ms** | **15,000 capped** | 0 | 1 |
 | `D:\Claude Setups` | 453 ms | 517 | 0 | 1 |
 | `D:\quickhelp` | 86 ms | 59 | 0 | 1 |
@@ -367,7 +367,7 @@ Per root, warm:
 | `C:\tmp` | 8 ms | 8 | 0 | 1 |
 | `D:\Vault` | 2 ms | 3 | 0 | 1 |
 
-`C:\Users\Anand` fell from 23,160 ms / 15,000 capped dirs to 2,850 ms / 2,986
+`%USERPROFILE%` fell from 23,160 ms / 15,000 capped dirs to 2,850 ms / 2,986
 dirs and went from 9 repos (every one an alias path) to 12 real ones. The
 reparse skip did that.
 
@@ -501,7 +501,7 @@ else on the disk:
 
 | Root | Time | Directories | Repos | Candidates |
 |---|---|---|---|---|
-| `C:\Users\Anand` | 24,458 ms | 15,000 **capped** | 9 | 0 |
+| `%USERPROFILE%` | 24,458 ms | 15,000 **capped** | 9 | 0 |
 | `D:\Dependencies` | 9,544 ms | 15,000 **capped** | 0 | 0 |
 | `D:\Claude Setups` | 501 ms | 517 | 1 | 0 |
 | `D:\quickhelp` | 79 ms | 57 | 1 | 0 |
@@ -526,7 +526,7 @@ reparse-point test. Same tree, one line added:
 
 | | shipped | skip reparse points |
 |---|---|---|
-| `C:\Users\Anand` | 23,160 ms, 15,000 dirs, 9 repos, **0 candidates**, capped | 2,958 ms, 2,991 dirs, 12 repos, **4 candidates** |
+| `%USERPROFILE%` | 23,160 ms, 15,000 dirs, 9 repos, **0 candidates**, capped | 2,958 ms, 2,991 dirs, 12 repos, **4 candidates** |
 
 Every one of the nine repositories the shipped walk found was an alias path.
 It missed all five real ones under `Documents\GitHub`, and it reported zero
@@ -565,7 +565,7 @@ VANISH_PROBE_CONCURRENCY=1 VANISH_PROBE_PASS="largest unit first" node test\sand
 | CPU | AMD Ryzen 9 5900HX (8 cores / 16 threads) |
 | RAM | 15 GB |
 | Storage | NVMe SSD |
-| Home directory | `C:\Users\Anand`, walk capped at 15,000 directories |
+| Home directory | `%USERPROFILE%`, walk capped at 15,000 directories |
 | Markers found in one walk | 232 `package.json`, 508 `pubspec.yaml`, 1 `gradlew`, 44 `.zip` |
 | Repositories found in one walk | 14 (the two git checks, depth 6) |
 | Windows | Windows 11 Pro, build 26200 |
