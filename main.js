@@ -1305,7 +1305,18 @@ ipcMain.handle('get-app-info', async () => {
     /* no vault yet */
   }
 
-  const manifest = store.readManifest();
+  // z71u: readManifest now THROWS when the manifest exists and cannot be read,
+  // which is correct everywhere that is about to write it back. This caller
+  // only wants a count for the About panel, and taking the whole panel down
+  // over it would hide the app's own data-directory paths at exactly the moment
+  // someone needs them to go and look. Count unknown, panel intact.
+  let manifest = { entries: [] };
+  let manifestError = null;
+  try {
+    manifest = store.readManifest();
+  } catch (err) {
+    manifestError = err.message;
+  }
   return {
     name: app.getName(),
     version: app.getVersion(),
@@ -1318,6 +1329,10 @@ ipcMain.handle('get-app-info', async () => {
     oplogBytes,
     vaultBytes,
     vaultEntryCount: manifest.entries.filter((e) => e.status === 'quarantined').length,
+    // Null unless the manifest could not be read. A caller that shows the count
+    // has to be able to tell "none" from "could not count" - the count above is
+    // 0 in both cases, which is the defect z71u was filed on, one panel over.
+    manifestError,
     versions: {
       electron: process.versions.electron,
       chrome: process.versions.chrome,

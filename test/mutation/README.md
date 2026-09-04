@@ -15,9 +15,9 @@ test that has never failed proves nothing. The first run found three assertions
 that could not fail at all -- one of them the accumulator behind the product's
 headline sentence (`totalBytes` -> "You can reclaim X GB").
 
-## What 47/47 does NOT mean
+## What 57/57 does NOT mean
 
-It does not mean the suite is complete. It means these 47 specific defects are
+It does not mean the suite is complete. It means these 57 specific defects are
 caught. Read the number as a floor on assertion quality in the areas probed,
 never as coverage.
 

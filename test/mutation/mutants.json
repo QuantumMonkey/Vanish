@@ -369,5 +369,33 @@
   "label": "h55: the quick-pick box is shown even when there is nothing to pick",
   "find": "  if (items.length === 0) return;",
   "replace": "  if (false) return;"
+ },
+ {
+  "file": "lib/store.js",
+  "suite": "node test/manifest-integrity-verify.js",
+  "label": "z71u: an unreadable manifest reads as empty again, and the next write destroys it",
+  "find": "  if (!read.ok) throw new ManifestUnreadableError(read.error ? read.error.message : 'unknown error');",
+  "replace": "  if (!read.ok) return defaultManifest();"
+ },
+ {
+  "file": "lib/store.js",
+  "suite": "node test/manifest-integrity-verify.js",
+  "label": "z71u: a corrupted entries list is silently replaced with an empty one",
+  "find": "    throw new ManifestUnreadableError('its entries list is missing or is not a list');",
+  "replace": "    m.entries = [];"
+ },
+ {
+  "file": "lib/store.js",
+  "suite": "node test/manifest-integrity-verify.js",
+  "label": "z71u: every read error counts as absent, so denied becomes first-run",
+  "find": "    if (err && err.code === 'ENOENT') return { ok: false, missing: true, error: null };",
+  "replace": "    return { ok: false, missing: true, error: null };"
+ },
+ {
+  "file": "lib/store.js",
+  "suite": "node test/manifest-integrity-verify.js",
+  "label": "z71u: the previous manifest is no longer kept, so a bad write is unrecoverable",
+  "find": "      fs.copyFileSync(live, backup);",
+  "replace": "      void backup;"
  }
 ]
