@@ -26,7 +26,23 @@ process.env.VANISH_HEADLESS_HARNESS = '1';
 // Small enough that a fixture of a few thousand files blows it, so the budget
 // is exercised rather than described. main.js reads these at load, so they are
 // set BEFORE the require below.
+//
+// 43po: TWO BOUNDS, AND ONLY ONE OF THEM IS MACHINE-INDEPENDENT.
+//
+// The time budget is a CLOCK. This suite calibrated it to one machine: 2,400
+// files against 40 ms, which overruns here and finishes INSIDE 40 ms on a fresh
+// VM with a fast disk and nothing else running. The clean-VM run of 2026-09-05
+// failed both budget assertions for exactly that reason, and a failure that
+// says "the budget did not bite" when the budget is fine is indistinguishable
+// from the budget being broken.
+//
+// The file cap is a COUNT. It trips at the same file on every machine, and the
+// regression 2brn fixed - neither bound checked in the inner loop - trips the
+// cap just as surely as the clock. So the DETERMINISTIC assertions below use
+// the cap, and the clock keeps one test that states its premise instead of
+// assuming it.
 process.env.VANISH_SIZE_BUDGET_MS = '40';
+process.env.VANISH_SIZE_MAX_FILES = '500';
 require('../main.js');
 
 let pass = 0;
@@ -116,8 +132,11 @@ app.whenReady().then(async () => {
     console.log('');
     console.log('The budget bites, and a partial total is never reported as a size');
 
+    // 43po: 2,400 files against a 500-file cap. The CAP is what makes this
+    // deterministic - it trips at the same file on every machine, where the
+    // 40 ms clock trips here and not on a faster disk.
     const big = path.join(work, 'big-app');
-    makeTree(big, 40, 60, 20000); // 2,400 files, ~48 MB, against a 40 ms budget
+    makeTree(big, 40, 60, 20000); // 2,400 files, ~48 MB, against a 500-file cap
     const b = await invoke('measure-install-size', { source: big });
     assert(b && b.complete === false,
       'a folder too large for the budget reports incomplete rather than a partial walk',
@@ -143,14 +162,24 @@ app.whenReady().then(async () => {
     // assertion is a flaky test wearing a performance badge, and "the budget
     // fired" is the same property stated deterministically. Under the old code
     // this comes back true.
+    // 43po: 2,000 files in ONE directory against a 500-file cap. The original
+    // version of this test used the 40 ms clock and had the same machine-speed
+    // brittleness it was written to expose in the neighbouring case - 4,000
+    // files at 40 us each overruns comfortably here and is marginal at 10 us on
+    // a cached fast SSD.
+    //
+    // The cap makes it deterministic AND it is the same regression: under the
+    // old code BOTH bounds were tested once per directory, so one directory
+    // holding four times the cap sailed past it. This comes back complete=true
+    // on the old code on every machine, not just a slow one.
     const flat = path.join(work, 'one-wide-dir');
     fs.mkdirSync(flat, { recursive: true });
     const blob = Buffer.alloc(64, 0x79);
-    for (let i = 0; i < 4000; i += 1) fs.writeFileSync(path.join(flat, `f${i}.bin`), blob);
+    for (let i = 0; i < 2000; i += 1) fs.writeFileSync(path.join(flat, `f${i}.bin`), blob);
 
     const w = await invoke('measure-install-size', { source: flat });
     assert(w && w.complete === false,
-      'a single directory wide enough to blow the budget reports incomplete - the check is inside the loop that does the work, not once per directory',
+      'a single directory holding more than the file cap reports incomplete - the check is inside the loop that does the work, not once per directory',
       JSON.stringify(w));
     assert(w && w.bytes === null,
       'and still returns no number, so nothing renders a partial total',

@@ -141,6 +141,7 @@ $suites = @(
     @{ Name = "Install date provenance (c0y)"; Kind = "electron"; Path = "test/install-date-provenance-verify.js" },
     @{ Name = "Install date sources (mp31)";   Kind = "ps";       Path = "test\install-date-source-verify.ps1" },
     @{ Name = "Install folder sizing (mp31)";  Kind = "electron"; Path = "test/install-size-verify.js" },
+    @{ Name = "Install size clock (43po)";   Kind = "electron"; Path = "test/install-size-clock-verify.js" },
     @{ Name = "Install size in the table (mp31)"; Kind = "electron"; Path = "test/install-size-render-verify.js" },
     @{ Name = "Landing panels kept (470o)";    Kind = "electron"; Path = "test/landing-panels-verify.js" },
     @{ Name = "All Programs density (949)"; Kind = "electron"; Path = "test/list-density-verify.js" },

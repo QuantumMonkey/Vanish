@@ -30,6 +30,17 @@ function assert(condition, label, detail = '') {
   if (condition) { console.log(`  PASS  ${label}`); pass += 1; }
   else { console.log(`  FAIL  ${label}`); if (detail) console.log(`        ${detail}`); fail += 1; }
 }
+// y5sx: a premise this machine cannot meet is a SKIP, not a failure.
+//
+// run-all.ps1 counts and NAMES skips separately (hy56), so a skipped assertion
+// is visible and honest. A failed one is indistinguishable from a broken
+// product - and on the clean-VM run of 2026-09-05 this suite contributed two of
+// six red lines for no reason other than the VM's screen being smaller than the
+// window it asked for.
+//
+// That matters more than its size: the clean-VM pass is a release gate, and a
+// gate that is red for reasons nobody can fix is a gate people stop reading.
+function skip(label, whyNot) { console.log(`  SKIP  ${label} -- ${whyNot}`); }
 function wait(ms) { return new Promise((r) => setTimeout(r, ms)); }
 
 const root = path.join(__dirname, '..');
@@ -97,15 +108,27 @@ app.whenReady().then(async () => {
 
   assert(m.rowCount === FIXTURE.length,
     `premise: all ${FIXTURE.length} fixture rows rendered (${m.rowCount})`);
-  assert(m.viewport >= 850 && m.viewport <= 900,
-    `premise: measuring in the window size the report was made against (${m.viewport}px)`);
-
+  // y5sx: THE VIEWPORT-INDEPENDENT ASSERTIONS RUN EITHER WAY, and they are the
+  // ones that carry the actual claim. A row's HEIGHT does not depend on how
+  // tall the window is; how many rows FIT obviously does.
   assert(m.rowH > 0 && m.rowH <= 56,
     `a row is at most 56px tall, not the 70 that produced this report (${m.rowH}px)`);
-  assert(m.visible >= 10,
-    `at least ten rows are visible at once, against the seven that were (${m.visible})`);
   assert(m.uniformRows === 1,
     `every row is the same height, so a long name or publisher does not make its own row taller (${m.uniformRows} distinct heights)`);
+
+  // The count is only meaningful in the window the report was made against.
+  // Windows clamps a BrowserWindow to the screen, so a machine with a display
+  // shorter than 900px - a VM, a laptop, the sandbox - gets a smaller viewport
+  // than this asked for and cannot fit ten rows no matter how good the density
+  // is. On the clean-VM run of 2026-09-05 the viewport was 775px and this
+  // failed twice, saying nothing about the product.
+  if (m.viewport >= 850 && m.viewport <= 900) {
+    assert(m.visible >= 10,
+      `at least ten rows are visible at once, against the seven that were (${m.visible}, viewport ${m.viewport}px)`);
+  } else {
+    skip('the ten-rows-visible check',
+      `this display gives a ${m.viewport}px viewport rather than the 850-900px the density report was made against, so a row count measured here is not comparable - the row HEIGHT assertions above still ran, and they are what the density work actually changed`);
+  }
 
   // ------------------------------------------------------------------
   console.log('');

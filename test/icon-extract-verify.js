@@ -100,18 +100,33 @@ app.whenReady().then(async () => {
     } else {
       const withIcon = apps.filter((a) => a && a.icon);
       assert(apps.length > 0, `the engine returned ${apps.length} desktop entries`);
-      assert(withIcon.length > 0,
-        `${withIcon.length} of ${apps.length} carry a DisplayIcon path - this is the data that was collected and discarded for six releases`);
 
-      // Not a count assertion: how many extract is a fact about this machine.
-      // That SOME do is a fact about the feature.
-      let got = 0;
-      for (const a of withIcon.slice(0, 12)) {
-        const r = await invoke('get-app-icon', { source: a.icon });
-        if (r && r.dataUrl) got += 1;
+      // y5sx: "no entry on this machine recorded a DisplayIcon" is a fact about
+      // the MACHINE, not about the feature. A fresh Windows install has about
+      // three desktop entries and none of them writes one, which is how the
+      // clean-VM run of 2026-09-05 produced two red lines here about code that
+      // was working.
+      //
+      // The suite already skipped the no-apps case for exactly this reason. It
+      // just did not have the case where apps exist and none carries an icon,
+      // which is the one a clean VM actually hits.
+      if (withIcon.length === 0) {
+        skip('the DisplayIcon assertions',
+          `${apps.length} desktop entries here and none recorded a DisplayIcon - that is what a machine with almost nothing installed looks like, not a defect. Needs a machine with a real install history; the parser and the extractor are covered above against fixtures either way`);
+      } else {
+        assert(withIcon.length > 0,
+          `${withIcon.length} of ${apps.length} carry a DisplayIcon path - this is the data that was collected and discarded for six releases`);
+
+        // Not a count assertion: how many extract is a fact about this machine.
+        // That SOME do is a fact about the feature.
+        let got = 0;
+        for (const a of withIcon.slice(0, 12)) {
+          const r = await invoke('get-app-icon', { source: a.icon });
+          if (r && r.dataUrl) got += 1;
+        }
+        assert(got > 0,
+          `at least one real installed program produced an icon (${got} of the first 12 tried)`);
       }
-      assert(got > 0,
-        `at least one real installed program produced an icon (${got} of the first 12 tried)`);
     }
   }
 
