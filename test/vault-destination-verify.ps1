@@ -95,38 +95,87 @@ if (-not $isAdmin) {
     $null = New-Item -ItemType Directory -Path $fix -Force
     $null = New-Item -ItemType Directory -Path $vault -Force
     try {
-        $src = Join-Path $fix 'payload.txt'
-        Set-Content -LiteralPath $src -Value 'ATTACKER-CHOSEN-CONTENT' -Encoding ASCII
-        $q = Invoke-Engine 'quarantine-items' @{ vaultRoot=$vault; entryId=[guid]::NewGuid().ToString(); sourceApp='destguard'; files=@(@{path=$src}); registry=@() }
+        $attacks = @(
+            @{ Path = (Join-Path $env:ProgramFiles 'vanish-destguard-probe\marker.txt');       Why = 'Program Files' },
+            @{ Path = (Join-Path ${env:ProgramFiles(x86)} 'vanish-destguard-probe\marker.txt'); Why = 'Program Files (x86)' },
+            @{ Path = (Join-Path $env:ProgramData 'vanish-destguard-probe\marker.txt');        Why = 'ProgramData' },
+            @{ Path = (Join-Path $env:SystemRoot 'System32\vanish-destguard-probe.txt');       Why = 'System32' },
+            @{ Path = 'C:\vanish-destguard-probe.txt';                                          Why = 'drive root' }
+        )
 
-        if (-not $q.success) {
-            Write-Skip 'the live escalation attempt' "could not stage a vault entry to attack with ($($q.error))"
-        } else {
-            $attacks = @(
-                @{ Path = (Join-Path $env:ProgramFiles 'vanish-destguard-probe\marker.txt');       Why = 'Program Files' },
-                @{ Path = (Join-Path ${env:ProgramFiles(x86)} 'vanish-destguard-probe\marker.txt'); Why = 'Program Files (x86)' },
-                @{ Path = (Join-Path $env:ProgramData 'vanish-destguard-probe\marker.txt');        Why = 'ProgramData' },
-                @{ Path = (Join-Path $env:SystemRoot 'System32\vanish-destguard-probe.txt');       Why = 'System32' },
-                @{ Path = 'C:\vanish-destguard-probe.txt';                                          Why = 'drive root' }
-            )
-            foreach ($a in $attacks) {
-                # What an attacker with write access to the vault does: rewrite
-                # originalPath in the entry handed to the elevated restore.
-                $entry = $q.entry | ConvertTo-Json -Depth 8 | ConvertFrom-Json
-                $entry.files[0].originalPath = $a.Path
-                $null = Invoke-Engine 'vault-restore' @{ vaultRoot=$vault; entry=$entry; onConflict='overwrite' }
+        # bcff: A FRESH ENTRY AND A FRESH PAYLOAD PER TARGET.
+        #
+        # This loop used to stage ONE vault entry outside it and clone the entry
+        # object per target - but the entry is JSON, and the PAYLOAD is a file.
+        # Restore uses Move-ItemTransactional, which MOVES that file out of the
+        # vault. So if the guard failed for target N: iteration N wrote into a
+        # protected location, the test deleted the landed file, and the payload
+        # was then gone. Iterations N+1..5 refused for "Vault payload missing.",
+        # $landed was false, and those assertions passed GREEN.
+        #
+        # A guard that failed for ProgramData only - third of five - left targets
+        # 4 and 5 asserting nothing at all while the suite reported five passes.
+        # This is the suite whose own header says it "performs the attack for
+        # real"; it performed one attack and reported five.
+        $staged = 0
+        foreach ($a in $attacks) {
+            $src = Join-Path $fix ('payload-' + [guid]::NewGuid().ToString('N').Substring(0,8) + '.txt')
+            Set-Content -LiteralPath $src -Value 'ATTACKER-CHOSEN-CONTENT' -Encoding ASCII
+            $q = Invoke-Engine 'quarantine-items' @{ vaultRoot=$vault; entryId=[guid]::NewGuid().ToString(); sourceApp='destguard'; files=@(@{path=$src}); registry=@() }
+            if (-not $q.success) {
+                Write-Skip ("the live attempt against " + $a.Why) "could not stage a vault entry to attack with ($($q.error))"
+                continue
+            }
+            $staged++
 
-                $landed = Test-Path -LiteralPath $a.Path
-                Assert-True (-not $landed) ("elevated restore refused to write into " + $a.Why)
-                if ($landed) {
-                    Remove-Item -LiteralPath $a.Path -Force -ErrorAction SilentlyContinue
-                    $d = Split-Path -Parent $a.Path
-                    if ($d -and (Test-Path -LiteralPath $d) -and -not (Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue)) {
-                        Remove-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue
-                    }
+            # What an attacker with write access to the vault does: rewrite
+            # originalPath in the entry handed to the elevated restore.
+            $entry = $q.entry | ConvertTo-Json -Depth 8 | ConvertFrom-Json
+            $entry.files[0].originalPath = $a.Path
+            $res = Invoke-Engine 'vault-restore' @{ vaultRoot=$vault; entry=$entry; onConflict='overwrite' }
+
+            $landed = Test-Path -LiteralPath $a.Path
+            Assert-True (-not $landed) ("elevated restore refused to write into " + $a.Why)
+
+            # bcff, the second half: the engine result used to be discarded
+            # outright ($null = Invoke-Engine). Nothing asserted the restore was
+            # even ATTEMPTED, let alone that it reported a refusal - and "the
+            # file is not there" is also what a crash, a typo in the path, and a
+            # payload that was already gone all look like. Lines 79-83 of this
+            # same file already check .protected and .installedAppRestorable, so
+            # the discipline existed here and was not applied to the loop.
+            $row = @($res.files)[0]
+            Assert-True ($row -and $row.status -ne 'restored') `
+                ("  and reported it as not restored: " + $a.Why + " (status=$($row.status))")
+            Assert-True ($row -and $row.error -and $row.error -match 'protected|refus|not a location|destination') `
+                ("  naming the guard rather than failing for some other reason: " + $a.Why + " (error=$($row.error))")
+
+            # And the payload is STILL IN THE VAULT. A refusal must not consume
+            # the thing it refused to move - which is both the correct behaviour
+            # and the precondition that made this loop's old shape a lie.
+            $vaultPath = Join-Path (Join-Path $vault $q.entry.id) $q.entry.files[0].vaultRelative
+            Assert-True (Test-Path -LiteralPath $vaultPath) `
+                ("  and the payload is still in the vault afterwards: " + $a.Why)
+
+            if ($landed) {
+                Remove-Item -LiteralPath $a.Path -Force -ErrorAction SilentlyContinue
+                $d = Split-Path -Parent $a.Path
+                if ($d -and (Test-Path -LiteralPath $d) -and -not (Get-ChildItem -LiteralPath $d -Force -ErrorAction SilentlyContinue)) {
+                    Remove-Item -LiteralPath $d -Force -ErrorAction SilentlyContinue
                 }
             }
         }
+
+        # The premise, stated rather than assumed: if nothing staged, every
+        # assertion above was skipped and the section proved nothing.
+        Assert-True ($staged -eq $attacks.Count) `
+            "all $($attacks.Count) attacks were staged with their own payload (staged $staged)"
+
+        # WHERE THE POSITIVE CONTROL IS. Five refusals prove nothing on their
+        # own - a restore that was simply broken would produce all five. The
+        # INV-1 symmetry section below is that control: it restores into a real
+        # installed-program folder and requires it to SUCCEED. Read the two
+        # together; neither is worth much alone.
     } finally {
         Remove-Item -LiteralPath $lab -Recurse -Force -ErrorAction SilentlyContinue
     }
