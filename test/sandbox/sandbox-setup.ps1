@@ -3,6 +3,20 @@
 # then runs the unelevated regression suite before handing off to the human
 # checklist for the parts that need a real UAC click or a real install.
 
+param(
+    # dzr: skip the regression suite. Set by start-sandbox.ps1 -RunScript, which
+    # boots the VM to run ONE probe.
+    #
+    # Found the hard way, on the first -RunScript launch: start-sandbox.ps1
+    # refuses -RunSuite and -RunScript together, on the grounds that running one
+    # after the other reports as one result - and then the logon payload called
+    # this script, which ran the suite unconditionally anyway. The guard was
+    # real and the thing it guarded was two files away. A probe run now costs a
+    # VM boot rather than a VM boot plus twenty minutes of a suite nobody asked
+    # for.
+    [switch]$SkipSuite
+)
+
 $nodeDir = "C:\Users\WDAGUtilityAccount\Desktop\nodejs"
 $env:Path = "$nodeDir;$env:Path"
 
@@ -52,8 +66,13 @@ Write-Host ""
 # transcripts into the MAPPED folder, which is the only place a sandbox result
 # still exists after the VM is closed - `npm test` leaves them in test\logs
 # keyed by machine name, which survives, but the run's own stdout did not.
-Write-Host "Running the regression suite..." -ForegroundColor Cyan
-& powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'run-in-sandbox.ps1')
+if ($SkipSuite) {
+    Write-Host "Skipping the regression suite: this boot was started to run one probe." -ForegroundColor Yellow
+    Write-Host "(start-sandbox.ps1 -RunSuite is what runs the suite.)" -ForegroundColor DarkGray
+} else {
+    Write-Host "Running the regression suite..." -ForegroundColor Cyan
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'run-in-sandbox.ps1')
+}
 
 # 2026-08-07: the packaged portable exe is what the operator actually runs, and
 # a bug (blank window on elevated relaunch, commit e00f252) was specific to the

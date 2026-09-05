@@ -445,10 +445,23 @@ const CLEANERS = [
     //
     // Vanish ships no definitions and will not download any: BleachBit's are
     // GPL-3.0+ and this repo is MIT, and INV-4 forbids the network anyway.
+    //
+    // dzr, MEASURED 2026-09-06 against BleachBit v6.0.3: of 257 options in
+    // 104 real definition files, 100 (39%) are withheld and 9 produced a
+    // finding. Nothing failed to parse - the reader is fine, the action
+    // vocabulary is the limit.
+    //
+    // The withheld set is not a random 39%. It is EVERY browser's history,
+    // cookies, cache, form data and vacuum, plus every "most recently used"
+    // list. So the description below now names what is out of reach instead
+    // of only what is in it: the old wording said we perform "the deletions"
+    // and left the reader to assume that was most of it. It is not, and a
+    // panel that lets someone believe they have just cleaned Chrome is worse
+    // than one that sends them to BleachBit for that.
     id: 'definitions',
     icon: 'fa-list-check',
     title: 'Cleaning definitions',
-    desc: 'Cleaning rules written and maintained by the BleachBit project, read from a copy you already have. Vanish only performs the deletions in them - never the instructions that edit a file in place, because those cannot be undone - and everything it does remove goes to quarantine first.',
+    desc: 'Cleaning rules written and maintained by the BleachBit project, read from a copy you already have. Vanish runs only the file deletions in them, because those are the ones quarantine can undo - so browser history, cookies, saved form data and "recently used" lists are NOT covered here, and each one is named as skipped rather than quietly left out. Measured against BleachBit 6.0.3, about 4 in 10 rules are out of reach for that reason. If you want those, run BleachBit itself.',
     needsFolder: true
   }
 ];

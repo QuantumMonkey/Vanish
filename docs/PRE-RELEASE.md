@@ -475,6 +475,55 @@ venue.
    none of those is a change the vault can undo - so an option containing
    one is withheld ENTIRELY and named in the panel, rather than half-run.
 
+   **HOW MUCH OF THE CATALOGUE THAT ACTUALLY REACHES, measured 2026-09-06
+   against BleachBit v6.0.3 (`bd dzr`, `test/sandbox/cleanerml-real-probe.ps1`).**
+   Until this run, every assertion about this feature was against fixture
+   definitions the test suite writes itself - 61 of them, all passing, none
+   of them written by somebody who had not seen our reader.
+
+   | | |
+   |---|---|
+   | definition files read | 104 (43 of them for another OS) |
+   | files that failed to parse | **0** |
+   | options read | 257 |
+   | options that produced a finding | **9** |
+   | withheld - uses an instruction we will not run | 100 (39%) |
+   | blocked - the application was running | 11 |
+   | matched nothing on this machine | 137 |
+   | over the per-option match cap | 0 |
+
+   **The reader is fine. The action vocabulary is the limit.** Nothing
+   failed to parse, so "can Vanish read real CleanerML" is answered yes.
+   What 39% of the catalogue needs is `winreg`, `sqlite.vacuum`, `json`,
+   `cookie` and `search="deep"` - and those are not an oversight, they are
+   the INV-1 line: none of them is a change the vault can put back.
+
+   **SAID PLAINLY, because the UI does not say it and should:** the withheld
+   set is not a random 39%. It is every browser's history, cookies, cache,
+   form data, search engines and vacuum - Chrome, Edge, Firefox, Brave,
+   Opera, Vivaldi, Waterfox, Pale Moon, LibreWolf, Zen, Chromium - plus
+   every "most recently used" list, which are all `winreg`. Pointing Vanish
+   at a definitions folder does not get you BleachBit; it gets you
+   BleachBit's file deletions, which is the part the vault can undo. Anyone
+   who wants the browser rules should run BleachBit, and the panel should
+   stop implying otherwise.
+
+   The `search="deep"` withholdings (10 options: `node_modules`, `venv`,
+   `__pycache__`, `.angular`, backup files, VIM swaps) are the one group we
+   lose nothing by refusing - Machine Hygiene's reclaim finders already
+   answer that question, on this machine, with rebuild costs attached.
+
+   Two things this run did NOT establish, and neither is a pass: the match
+   cap was never reached, because the machine had no large browser profile
+   to reach it with; and the removal half was not exercised at all, on
+   purpose - a first contact with several hundred unknown rules is not the
+   moment to test quarantine.
+
+   Time is a non-issue and the worry recorded on the issue was wrong: 2.0 s
+   for 104 files, 19 ms per file. It scales with what is on the disk rather
+   than with the number of rules, so a fuller machine will be slower, but
+   not by the order of magnitude the issue expected.
+
 3. **`ag0`** Windows Update: a legible list (`Get-HotFix` + DISM
    `/Get-Packages`, read-only) showing type, install date, and whether the
    update is removable at all -- then hand off to `wusa.exe /uninstall` or the

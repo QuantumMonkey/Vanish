@@ -33,8 +33,37 @@ param(
     # which is fine for a debugging session and useless as a release gate:
     # Rule 10 wants a clean-machine pass, and a pass that needs somebody at
     # the keyboard does not get run often enough to be one.
-    [switch]$RunSuite
+    [switch]$RunSuite,
+
+    # Run ONE script from test\sandbox after setup, unattended, instead of the
+    # whole suite. Give the file name only.
+    #
+    #   ... start-sandbox.ps1 -RunScript cleanerml-real-probe.ps1
+    #
+    # dzr: this directory already holds a dozen probe scripts and every one of
+    # them needed a human to boot the sandbox and paste a command. That is the
+    # same objection -RunSuite exists for - "a pass that needs somebody at the
+    # keyboard does not get run often enough" - and it applied to everything
+    # here except the suite. One parameter rather than a switch per probe,
+    # because the next probe should not need this file edited again.
+    [string]$RunScript = ''
 )
+
+if ($RunSuite -and $RunScript) {
+    throw "Pass -RunSuite or -RunScript, not both: they are two different unattended payloads and running one after the other would report as one result."
+}
+if ($RunScript) {
+    # Validated on the HOST, where the failure is readable. A bad name inside
+    # the VM is a line scrolling past in a console nobody is watching, which is
+    # this hook's entire history of failure modes.
+    if ($RunScript -match '[\\/]' -or $RunScript -match '\.\.') {
+        throw "-RunScript takes a file NAME inside test\sandbox, not a path: got '$RunScript'."
+    }
+    $probeOnHost = Join-Path $PSScriptRoot $RunScript
+    if (-not (Test-Path -LiteralPath $probeOnHost -PathType Leaf)) {
+        throw "-RunScript '$RunScript' does not exist in test\sandbox. Nothing was started."
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 
@@ -134,7 +163,7 @@ $logon = @(
     "`$b = Join-Path `$r 'test\logs\sandbox-run';",
     "New-Item -ItemType Directory -Force -Path `$b | Out-Null;",
     "Set-Content -LiteralPath (Join-Path `$b 'LOGON-RAN.txt') -Value ((Get-Date).ToString('s') + ' logon command reached the mapped folder after ' + `$n + 's');",
-    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\sandbox-setup.ps1')",
+    "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\sandbox-setup.ps1')$(if ($RunScript) { ' -SkipSuite' })",
     $(if ($RunSuite) {
         # Sequential statements, no chaining operator: this whole payload is
         # one -Command string inside an XML attribute value, and the last two
@@ -142,6 +171,14 @@ $logon = @(
         "Write-Host 'Running the verification suite...' -ForegroundColor Cyan;" +
         "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\run-in-sandbox.ps1');" +
         "Set-Content -LiteralPath (Join-Path `$b 'SUITE-DONE.txt') -Value ((Get-Date).ToString('s') + ' run-in-sandbox.ps1 returned');"
+    } elseif ($RunScript) {
+        # Same shape as the -RunSuite payload above, and the same rules apply:
+        # sequential statements, no chaining operator, and a done-marker so the
+        # host can tell "it ran and finished" from "it never started" without
+        # guessing. Both of this hook's silent failures were punctuation.
+        "Write-Host 'Running $RunScript...' -ForegroundColor Cyan;" +
+        "powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path `$r 'test\sandbox\$RunScript');" +
+        "Set-Content -LiteralPath (Join-Path `$b 'PROBE-DONE.txt') -Value ((Get-Date).ToString('s') + ' $RunScript returned');"
     } else { '' })
     "} else {",
     "Write-Host 'The repo never appeared at $sandboxRepo after 120s.' -ForegroundColor Red;",

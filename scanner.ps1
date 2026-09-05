@@ -8183,6 +8183,15 @@ function Find-CleanerMlFindings {
     $withheld      = [System.Collections.Generic.List[string]]::new()
     $blocked       = [System.Collections.Generic.List[string]]::new()
     $tooLarge      = [System.Collections.Generic.List[string]]::new()
+    # dzr: options whose actions resolved to NOTHING on this machine. Counted
+    # rather than skipped in silence, which is what every other outcome in this
+    # loop already gets - withheld, blocked and too-large each say so by name.
+    # Zero-match was the one that just vanished, and it is the one that hides a
+    # variable our expander does not know: a definition using an unsupported
+    # $variable resolves to nothing and the option simply never appears, which
+    # is indistinguishable from "that folder is genuinely empty on this PC".
+    # bd dzr asks exactly this question, and it was unanswerable from outside.
+    $noMatch       = 0
     $optionsRead   = 0
     $done          = 0
 
@@ -8222,7 +8231,7 @@ function Find-CleanerMlFindings {
             foreach ($action in @($option.actions)) {
                 foreach ($hit in (Resolve-CleanerMlAction -action $action)) { $matched.Add($hit) }
             }
-            if ($matched.Count -eq 0) { continue }
+            if ($matched.Count -eq 0) { $noMatch++; continue }
 
             $paths = Compress-CleanerMlPaths -paths @($matched | Select-Object -Unique)
             if ($paths.Count -gt $script:CleanerMlMaxMatches) {
@@ -8281,6 +8290,7 @@ function Find-CleanerMlFindings {
     if ($blocked.Count -gt 0)    { $notes.Add("$($blocked.Count) option(s) were skipped because their application is in use: $($blocked -join '; ').") }
     if ($tooLarge.Count -gt 0)   { $notes.Add("$($tooLarge.Count) option(s) matched more than $($script:CleanerMlMaxMatches) items and were not offered, because a vault entry that large is not something you could review before restoring it: $($tooLarge -join '; ').") }
     if ($unreadable.Count -gt 0) { $notes.Add("$($unreadable.Count) file(s) could not be read: $($unreadable -join '; ').") }
+    if ($noMatch -gt 0)          { $notes.Add("$noMatch option(s) were read and matched nothing on this PC - either there is nothing there, or the rule uses something Vanish cannot resolve.") }
     if ($findings.Count -eq 0 -and $optionsRead -gt 0) { $notes.Add("Nothing matched on this machine.") }
 
     # qkgu: a definition file we could not parse is a rule we did not run. It
@@ -8290,11 +8300,25 @@ function Find-CleanerMlFindings {
     # "nothing matched on this machine".
     foreach ($u in $unreadable) { Add-BlindSpot -path ([string]$u) -reason 'definition-unparsable' }
 
+    # dzr: the counts as NUMBERS as well as prose. The note is for the user;
+    # these are for anything that has to reason about coverage - the acceptance
+    # probe asks "how many options matched nothing", and parsing that back out
+    # of an English sentence is how a measurement becomes a regex.
     return @{
-        success  = $true
-        findings = $findings
-        note     = ($notes -join ' ')
-        sources  = @($dirs)
+        success       = $true
+        findings      = $findings
+        note          = ($notes -join ' ')
+        sources       = @($dirs)
+        filesRead     = $files.Count
+        optionsRead   = $optionsRead
+        optionsNoMatch = $noMatch
+        withheldCount = $withheld.Count
+        blockedCount  = $blocked.Count
+        tooLargeCount = $tooLarge.Count
+        unreadableCount = $unreadable.Count
+        otherOsCount  = $otherOs
+        withheld      = @($withheld)
+        tooLarge      = @($tooLarge)
     }
 }
 
@@ -8391,7 +8415,24 @@ function Get-CleanerFindings {
                 # named refusal back into a silent one.
                 $res = Find-CleanerMlFindings -p $p
                 if (-not $res.success) { return @{ success = $false; cleaner = $cleaner; error = $res.error } }
-                return @{ success = $true; cleaner = $cleaner; findings = (ConvertTo-FindingList $res.findings); note = $res.note; sources = @($res.sources) }
+                # dzr: the coverage counts travel too. A caller that drops them
+                # is back to reading the note with a regex, which is the same
+                # mistake as dropping the note was.
+                return @{
+                    success = $true; cleaner = $cleaner
+                    findings = (ConvertTo-FindingList $res.findings)
+                    note = $res.note; sources = @($res.sources)
+                    filesRead = $res.filesRead
+                    optionsRead = $res.optionsRead
+                    optionsNoMatch = $res.optionsNoMatch
+                    withheldCount = $res.withheldCount
+                    blockedCount = $res.blockedCount
+                    tooLargeCount = $res.tooLargeCount
+                    unreadableCount = $res.unreadableCount
+                    otherOsCount = $res.otherOsCount
+                    withheld = @($res.withheld)
+                    tooLarge = @($res.tooLarge)
+                }
             }
             "uwp-leftovers" {
                 $res = Find-UwpLeftovers -p $p

@@ -143,6 +143,26 @@ Set-Content -LiteralPath (Join-Path $defs "linux.xml") -Encoding UTF8 -Value @'
 </cleaner>
 '@
 
+# dzr: an option that is perfectly valid, fully supported, and resolves to
+# NOTHING on this machine. Without one, the zero-match counter is only ever
+# asserted as "the field exists" - which passes on 0 and would still pass if the
+# counter were never incremented.
+#
+# This is the outcome that hides an unsupported variable: the expander returns
+# nothing, the option silently does not appear, and that is indistinguishable
+# from "the folder is genuinely empty here".
+Set-Content -LiteralPath (Join-Path $defs "nomatch.xml") -Encoding UTF8 -Value @'
+<?xml version="1.0" encoding="UTF-8"?>
+<cleaner id="vanishnomatch">
+  <label>Matches Nothing</label>
+  <option id="absent">
+    <label>A folder that is not there</label>
+    <description>d</description>
+    <action command="delete" search="glob" path="C:\NoSuchVanishFolder0dc41f\*.tmp"/>
+  </option>
+</cleaner>
+'@
+
 Set-Content -LiteralPath (Join-Path $defs "broken.xml") -Encoding UTF8 -Value @'
 <?xml version="1.0" encoding="UTF-8"?>
 <cleaner id="vanishbroken">
@@ -358,6 +378,38 @@ try {
     Assert-True ($scan.note -match "search 'deep'") "the whole-filesystem search is named too"
     Assert-True ($scan.note -match 'broken\.xml') "the file that could not be read is named"
     Assert-True ($scan.note -match 'another operating system') "and the definitions written for another OS are accounted for"
+
+    # dzr: THE COUNTS AS NUMBERS, not only as prose.
+    #
+    # An option whose actions resolve to nothing was the one outcome in this
+    # loop that vanished silently - withheld, blocked and too-large each said
+    # so by name, and zero-match just did not appear. That is the outcome that
+    # hides a variable our expander does not know: an unsupported $variable
+    # resolves to nothing and the option is simply absent, which is
+    # indistinguishable from "that folder is empty on this PC".
+    #
+    # Asserted as FIELDS because the acceptance probe has to reason about
+    # coverage, and parsing an English sentence for a number is how a
+    # measurement becomes a regex.
+    Assert-True ($null -ne $scan.optionsRead -and $scan.optionsRead -gt 0) `
+        "the result carries how many options were READ ($($scan.optionsRead))"
+    # Greater than zero, not merely present. nomatch.xml above exists so this
+    # assertion can discriminate: `-ne $null` passes on 0 and would still pass
+    # if the counter were never incremented at all.
+    Assert-True ([int]$scan.optionsNoMatch -ge 1) `
+        "and how many matched NOTHING ($($scan.optionsNoMatch)) - the outcome that used to be silent"
+    Assert-True ($scan.note -match 'matched nothing on this PC') `
+        "the note says so in words too, so the user sees it and not only a caller"
+    Assert-True ($scan.withheldCount -eq @($scan.withheld).Count) `
+        "the withheld COUNT and the withheld LIST agree ($($scan.withheldCount) vs $(@($scan.withheld).Count))"
+    Assert-True ($null -ne $scan.filesRead -and $scan.filesRead -gt 0) `
+        "and how many files were read ($($scan.filesRead))"
+
+    # The arithmetic has to close, or the numbers are decoration. Every option
+    # read ends in exactly one of these buckets.
+    $accounted = [int]$scan.optionsNoMatch + [int]$scan.withheldCount + [int]$scan.blockedCount + [int]$scan.tooLargeCount + @($scan.findings).Count
+    Assert-True ($accounted -le [int]$scan.optionsRead) `
+        "the outcomes never exceed the options read ($accounted of $($scan.optionsRead)) - a bucket counted twice would show up here"
 
     # ==================================================================
     # A definition file is data, not a program
