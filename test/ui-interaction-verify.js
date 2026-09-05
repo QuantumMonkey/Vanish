@@ -453,11 +453,30 @@ app.whenReady().then(async () => {
   await new Promise((r) => setTimeout(r, 400));
 
   // --- Every tab reachable, and the destructive lock is honest ------------
+  //
+  // p171 split these two lists apart, because they stopped being the same set.
+  // NAV_TABS is what the sidebar offers. PANEL_TABS is every panel that must
+  // render without blowing up - which is a superset, and has to be, or a screen
+  // that is reached from somewhere else gets no coverage at all.
+  const NAV_TABS = ['all-apps', 'audit', 'task-manager', 'system-clean', 'quarantine', 'settings', 'about'];
+  const PANEL_TABS = NAV_TABS.concat(['force-uninstall']);
+
   console.log('');
   console.log('Navigation and Audit Mode locking');
-  for (const tab of ['all-apps', 'audit', 'task-manager', 'system-clean', 'quarantine', 'force-uninstall', 'settings', 'about']) {
+  // p171: force-uninstall is NOT in this list any more, and that is the change
+  // rather than an omission. It stopped being a peer in the sidebar, because a
+  // peer entry asked the user to know in advance that their uninstall was going
+  // to fail. Its two real routes are asserted below; NAV_TABS is what is
+  // actually in the sidebar.
+  for (const tab of NAV_TABS) {
     await assertClickable(win, `.nav-item[data-tab="${tab}"]`, `the ${tab} tab is clickable`);
   }
+  const strayNav = await win.webContents.executeJavaScript(
+    `document.querySelectorAll('.nav-item[data-tab="force-uninstall"]').length`
+  );
+  assert(strayNav === 0,
+    'and Force Uninstall is no longer one of them - removed, not merely unused',
+    `${strayNav} sidebar entr(y/ies) still present`);
 
   const locked = await win.webContents.executeJavaScript(`(() => {
     const all = Array.from(document.querySelectorAll('[data-destructive="true"]'));
@@ -489,8 +508,18 @@ app.whenReady().then(async () => {
   // on every tab, and a generic check keeps working when panels gain content.
   console.log('');
   console.log('k0k: every tab renders without an error state');
-  for (const tab of ['all-apps', 'audit', 'task-manager', 'system-clean', 'quarantine', 'force-uninstall', 'settings', 'about']) {
-    await win.webContents.executeJavaScript(`document.querySelector('.nav-item[data-tab="${tab}"]').click()`);
+  // force-uninstall IS still in this list, and deliberately. It stopped being a
+  // sidebar entry, not a panel - and a panel reachable only in code is exactly
+  // the one that can blow up unnoticed, which is the defect this loop exists
+  // for (five window.api methods were missing from the fixture entirely and the
+  // Health Advisor rendered nothing but "is not a function" while this suite
+  // reported 62/62 green). It is driven through switchTab rather than a click.
+  for (const tab of PANEL_TABS) {
+    await win.webContents.executeJavaScript(`(() => {
+      const nav = document.querySelector('.nav-item[data-tab="${tab}"]');
+      if (nav) { nav.click(); } else { switchTab('${tab}'); }
+      return true;
+    })()`);
     await new Promise((r) => setTimeout(r, 700));
     const state = await win.webContents.executeJavaScript(`(() => {
       const panel = Array.from(document.querySelectorAll('.content-area'))
@@ -520,6 +549,101 @@ app.whenReady().then(async () => {
     );
     assert(!state.notAFunction, `${tab}: no "is not a function" text reached the panel`);
   }
+
+  // --- p171: the two routes that replaced the sidebar entry ----------------
+  //
+  // Removing a nav entry without proving the destination is still reachable is
+  // how a feature quietly stops existing. Both routes are exercised for real
+  // here rather than checked for in the source.
+  console.log('');
+  console.log('p171: Force Uninstall is reached from where it is wanted');
+
+  // ROUTE 1, proactive: the Health Advisor counts broken entries and links in.
+  // The stub reports none, which is the ordinary case and still has to render
+  // an honest empty state rather than nothing at all.
+  const advisorRoute = await win.webContents.executeJavaScript(`(() => {
+    try {
+      switchTab('audit');
+      const section = document.getElementById('audit-broken-section');
+      const body = document.getElementById('audit-broken-body');
+      return {
+        section: Boolean(section),
+        text: body ? body.textContent.replace(/\\s+/g, ' ').trim() : '(no body)'
+      };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(advisorRoute.section === true,
+    'the Health Advisor carries a section for programs that cannot uninstall themselves',
+    JSON.stringify(advisorRoute));
+  assert(typeof advisorRoute.text === 'string' && advisorRoute.text.length > 0,
+    'and it says something rather than rendering empty', String(advisorRoute.text).slice(0, 120));
+
+  // With findings, it must NAME them and offer the way in. "3 programs" sends
+  // the user to a screen to find out which; the names are what let them decide
+  // whether to bother.
+  const withFindings = await win.webContents.executeJavaScript(`(() => {
+    try {
+      renderBrokenEntriesSummary({ success: true, findings: [
+        { name: 'GhostApp' }, { name: 'DeadTool' }
+      ]});
+      const body = document.getElementById('audit-broken-body');
+      const badge = document.getElementById('audit-broken-count');
+      const btn = document.getElementById('btn-audit-open-force');
+      return {
+        text: body.textContent.replace(/\\s+/g, ' ').trim(),
+        badge: badge ? badge.textContent : null,
+        hasButton: Boolean(btn)
+      };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(!withFindings.error, 'the section renders findings without throwing', withFindings.error || '');
+  assert(/GhostApp/.test(withFindings.text) && /DeadTool/.test(withFindings.text),
+    'it NAMES the broken programs rather than only counting them', String(withFindings.text).slice(0, 160));
+  assert(withFindings.badge === '2', `the badge carries the count (${withFindings.badge})`);
+  assert(withFindings.hasButton === true, 'and there is a way through to review them');
+
+  const clickedThrough = await win.webContents.executeJavaScript(`(() => {
+    try {
+      document.getElementById('btn-audit-open-force').click();
+      const panel = document.getElementById('force-panel');
+      return { visible: panel ? panel.style.display !== 'none' : false };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(clickedThrough.visible === true,
+    'and it actually opens the panel', JSON.stringify(clickedThrough));
+
+  // The way back, which only matters because the sidebar no longer highlights
+  // anything while this panel is open.
+  const backOut = await win.webContents.executeJavaScript(`(() => {
+    try {
+      const back = document.getElementById('btn-force-back');
+      if (!back) return { present: false };
+      back.click();
+      const audit = document.getElementById('audit-panel');
+      return { present: true, backOnAudit: audit ? audit.style.display !== 'none' : false };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(backOut.present === true, 'the panel offers a way back, since no nav item is highlighted while it is open');
+  assert(backOut.backOnAudit === true, 'and it lands on the Health Advisor', JSON.stringify(backOut));
+
+  // ROUTE 2, reactive: the wizard reveals the offer only after a failure.
+  const offer = await win.webContents.executeJavaScript(`(() => {
+    try {
+      const el = document.getElementById('native-uninst-force-offer');
+      const before = el ? el.style.display : '(missing)';
+      showForceUninstallOffer();
+      const after = el ? el.style.display : '(missing)';
+      hideForceUninstallOffer();
+      return { before, after, reset: el ? el.style.display : '(missing)' };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(offer.before === 'none',
+    'the wizard hides the Force Uninstall offer until an uninstaller has actually failed',
+    JSON.stringify(offer));
+  assert(offer.after === 'block', 'a failure reveals it', JSON.stringify(offer));
+  assert(offer.reset === 'none',
+    'and it is cleared again, so a failure does not follow the operator into the next program',
+    JSON.stringify(offer));
 
   // ==========================================================================
   // The ping tile names its destination (bd vanish-uninstaller-kct)

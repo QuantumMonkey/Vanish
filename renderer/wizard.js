@@ -16,6 +16,10 @@
 function openUninstallWizard(app) {
   wizState.currentScreenIndex = 0;
   wizState.createRestorePoint = true;
+  // p171: cleared per uninstall. The offer is revealed by a failure, and a
+  // failure belongs to the program it happened to - carrying it into the next
+  // program's wizard would suggest that one is broken too, on no evidence.
+  hideForceUninstallOffer();
   // d6y: per-uninstall, but starts from whatever was picked last time -
   // appSettings.preferSilentUninstall is only ever written by this
   // checkbox's own change handler below, never assumed true on a settings
@@ -216,7 +220,30 @@ function updateNativeUninstPromptText() {
     : "Vanish will open the uninstaller that came with this program. Click below, then follow the steps on screen.";
 }
 
+// p171: revealed when the native uninstaller has failed, and only then.
+//
+// Reset by showScreen so it does not survive into the next app's wizard - a
+// suggestion that this program might be broken, shown on a program that has not
+// failed, is worse than not offering it at all.
+function showForceUninstallOffer() {
+  const offer = document.getElementById('native-uninst-force-offer');
+  if (offer) offer.style.display = 'block';
+}
+
+function hideForceUninstallOffer() {
+  const offer = document.getElementById('native-uninst-force-offer');
+  if (offer) offer.style.display = 'none';
+}
+
 function setupWizardControls() {
+  const btnForce = document.getElementById('btn-native-uninst-force');
+  if (btnForce) {
+    btnForce.addEventListener('click', () => {
+      closeUninstallWizard();
+      switchTab('force-uninstall');
+    });
+  }
+
   // Close / Cancel click
   elements.wizCloseX.addEventListener('click', confirmCancel);
 
@@ -346,6 +373,17 @@ function setupWizardControls() {
       toast(res.error, 'warn');
     } else {
       toast(`The uninstaller did not finish: ${res.error} You can still scan for leftovers.`, 'warn', 7000);
+      // p171: THE MOMENT Force Uninstall is actually wanted. It used to be a
+      // peer entry in the sidebar, which asked the user to know in advance that
+      // this was going to happen - and nobody knows that in advance. The offer
+      // belongs on the failure.
+      //
+      // An offer rather than a redirect: the uninstaller failing is not proof
+      // the entry is broken (it may have been cancelled, or need a reboot), and
+      // scanning for leftovers is still the right next step for most of these.
+      // So the wizard does not move, and a way out appears next to the button
+      // that just failed.
+      showForceUninstallOffer();
     }
   });
 

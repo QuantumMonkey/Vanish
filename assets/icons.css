@@ -201,6 +201,15 @@
    simply was not run between writing the card and adding these, which is the
    only reason four squares reached a screenshot. */
 .fa-arrow-right { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4.5 12h15'/%3E%3Cpath d='M13.2 5.6 19.5 12l-6.3 6.4'/%3E%3C/svg%3E"); }
+/* p171: the mirror of fa-arrow-right above, for the Force Uninstall panel's way
+   back - that panel stopped being a nav peer, so nothing in the sidebar
+   highlights while it is open and the route out has to live in its header.
+   Added as the other single direction for the same reason fa-arrow-up and
+   fa-arrow-down are both here rather than only fa-arrows-up-down. Same
+   horizontal stroke, head on the other end. Caught by test/icon-verify.js on
+   the first full run after it was referenced, which is what that suite is
+   for - a missing glyph ships as a conspicuous solid square. */
+.fa-arrow-left { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19.5 12h-15'/%3E%3Cpath d='M10.8 5.6 4.5 12l6.3 6.4'/%3E%3C/svg%3E"); }
 .fa-circle-exclamation { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M12 7.4v5.2'/%3E%3Cpath d='M12 16.3v0.05'/%3E%3C/svg%3E"); }
 .fa-circle-question { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='9'/%3E%3Cpath d='M9.6 9.4a2.5 2.5 0 1 1 3.3 2.4c-0.6 0.25-0.9 0.8-0.9 1.5v0.4'/%3E%3Cpath d='M12 16.4v0.05'/%3E%3C/svg%3E"); }
 .fa-clock-rotate-left { --vi: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.6 12a8.6 8.6 0 1 0 2.6-6.1'/%3E%3Cpath d='M3.2 3.6v4.6h4.6'/%3E%3Cpath d='M12 7.6V12l3.2 2'/%3E%3C/svg%3E"); }

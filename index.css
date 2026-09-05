@@ -481,9 +481,43 @@ body::before {
    because repeat(4, 1fr) gives each card 117px at 800 wide and nothing clamps
    width. Fixing it is a width problem (reflow or collapse the grid), not
    another clamp. bd vanish-uninstaller-2xnj. */
+
+/* 2xnj, FIXED 2026-09-05, and the fix is a width rule because the defect was a
+   width defect. Two things changed together:
+
+   The row lost two of its four cards (see index.html) - "Total Disk Space"
+   restated the Storage panel and "System Safety" restated the Audit Mode
+   banner and the sidebar badge, so half this row was spending the workspace's
+   vertical budget repeating what was already on screen.
+
+   And the columns are now a FIXED WIDTH rather than a fraction of whatever the
+   window happens to be. repeat(2, 1fr) would have fixed the wrapping too, but
+   it would have given each card 680px at 1440 wide - a card mostly made of
+   nothing. A capped column with justify-content:start keeps the cards the same
+   size at every window width, which is also what makes the height predictable:
+   with one-line labels guaranteed, the row's height is icon + padding, and
+   those the clamps above already bound.
+
+   MEASURED, one window size per process because a second offscreen window in
+   the same run does not settle:
+
+     window      row height     label lines     workspace
+     800x600     123 -> 86      3 -> 1          298 -> 335
+     1080x720     94 -> 94      1 -> 1          447 -> 447
+     1440x900     94 -> 94      1 -> 1          627 -> 627
+
+   The large windows do not change, which is the point: nothing was wrong with
+   them. What changed is that the small one no longer costs MORE than the large
+   one - 86 against 94, where it used to be 123 against 94.
+
+   Guarded by test/summary-row-verify.js, which asserts that COMPARISON rather
+   than any of the pixel counts above. A test pinned to "86px" would fail the
+   first time somebody adjusts a padding clamp for a good reason, and the number
+   was never the property - the inversion was. */
 .dashboard-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 260px));
+  justify-content: start;
   gap: clamp(10px, 1.6vh, 14px);
   padding: clamp(10px, 2.2vh, 14px) 32px;
 }

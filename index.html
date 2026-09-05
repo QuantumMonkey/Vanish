@@ -96,10 +96,13 @@
             <i class="fa-solid fa-box-archive"></i>
             <span>Quarantine</span>
           </div>
-          <div class="nav-item" data-tab="force-uninstall">
-            <i class="fa-solid fa-bolt"></i>
-            <span>Force Uninstall</span>
-          </div>
+          <!-- p171: Force Uninstall is no longer a peer here. Its panel still
+               exists and switchTab('force-uninstall') still reaches it - from
+               the Health Advisor section that now counts broken entries, and
+               from the uninstall wizard when an uninstaller actually fails.
+               Those are the two moments it is really wanted; a sidebar slot
+               implied a third, where the user already knew their uninstall was
+               going to fail. -->
           <div class="nav-item" data-tab="settings">
             <i class="fa-solid fa-sliders"></i>
             <span>Settings</span>
@@ -234,24 +237,22 @@
               <span class="stat-label">Store Apps</span>
             </div>
           </div>
-          <div class="stat-card">
-            <div class="stat-icon green">
-              <i class="fa-solid fa-hard-drive"></i>
-            </div>
-            <div class="stat-info">
-              <span class="stat-value" id="stat-total-size">0 MB</span>
-              <span class="stat-label">Total Disk Space</span>
-            </div>
-          </div>
-          <div class="stat-card">
-            <div class="stat-icon red">
-              <i class="fa-solid fa-shield-halved"></i>
-            </div>
-            <div class="stat-info">
-              <span class="stat-value" id="stat-restore-status">Ready</span>
-              <span class="stat-label">System Safety</span>
-            </div>
-          </div>
+          <!-- 2xnj: TWO CARDS, NOT FOUR. Operator decision 2026-09-05.
+
+               "Total Disk Space" restated the Storage panel one tab away, and
+               "System Safety" restated both the persistent Audit Mode banner at
+               the top of every screen and the badge in the sidebar - so half of
+               this row was spending the workspace's vertical budget to repeat
+               things already on screen.
+
+               It is also what fixed the layout, and that was the measured
+               finding rather than a hoped-for side effect. The row's height on
+               a narrow window is set by the labels WRAPPING, which is a
+               function of card WIDTH; at 800x600 four cards were 117px each and
+               "Total Disk Space" wrapped to three lines. Two cards cannot wrap
+               at any width this app supports. Measured before: 123px at
+               800x600 against 94px at 1440x900 - MORE room on the window that
+               could least afford it. -->
         </div>
 
         <!-- 5b0: active column filters, as removable chips. In normal flow and
@@ -590,6 +591,31 @@
               </div>
               <div id="audit-redundancy-list" style="display: flex; flex-direction: column; gap: 10px;">
                 <!-- redundancy groups injected by renderer -->
+              </div>
+            </div>
+
+            <!-- Section: programs that can no longer uninstall themselves.
+
+                 p171: Force Uninstall was a peer entry in the sidebar, which
+                 asked the user to know IN ADVANCE that an uninstall would fail.
+                 Nobody knows that in advance. But it is not ONLY reached after
+                 a failure either - its own lede says "Vanish finds these for
+                 you, so you do not have to remember what the program was
+                 called", which is a machine-wide scan and is exactly the
+                 question this screen already exists to ask.
+
+                 So the capability keeps both of the ways it is really reached:
+                 here, proactively, on the landing page, where a count appears
+                 without anyone going looking; and from the uninstall wizard at
+                 the moment an uninstaller actually fails. What it loses is the
+                 sidebar slot that implied a third way nobody uses. -->
+            <div class="audit-section" id="audit-broken-section">
+              <div class="audit-section-title">
+                <i class="fa-solid fa-bolt"></i> Programs that cannot uninstall themselves
+                <span class="audit-badge danger" id="audit-broken-count" style="display:none;">0</span>
+              </div>
+              <div id="audit-broken-body">
+                <!-- injected by renderer -->
               </div>
             </div>
 
@@ -964,9 +990,23 @@
             <i class="fa-solid fa-bolt"></i>
             Force Uninstall
           </div>
-          <button class="btn-sec btn-compact" id="btn-rescan-broken">
-            <i class="fa-solid fa-rotate-right"></i> Re-scan
-          </button>
+          <div style="display: flex; gap: 8px;">
+            <!-- p171: this panel is no longer a nav peer, so nothing in the
+                 sidebar highlights while it is open - which is the honest
+                 signal for a screen you were sent to rather than one you chose.
+                 It does mean there is no way back through the sidebar, so the
+                 way back lives here. Health Advisor rather than "wherever you
+                 came from": it is the landing page, it is where the proactive
+                 route into this panel starts, and a back button whose
+                 destination changes depending on history is a back button
+                 nobody can predict. -->
+            <button class="btn-sec btn-compact" id="btn-force-back">
+              <i class="fa-solid fa-arrow-left"></i> Health Advisor
+            </button>
+            <button class="btn-sec btn-compact" id="btn-rescan-broken">
+              <i class="fa-solid fa-rotate-right"></i> Re-scan
+            </button>
+          </div>
         </div>
 
         <div class="panel-scroll">
@@ -1554,6 +1594,21 @@
             <span>Run the program's uninstaller</span>
           </button>
           <div style="font-size: 11px; color: var(--text-muted); margin-top: 14px;">When it has finished, click Scan Leftovers.</div>
+          <!-- p171: revealed only when the uninstaller has actually failed. It
+               is an OFFER, not a redirect - a failed run is not proof the entry
+               is broken (it may have been cancelled, or need a reboot), and
+               scanning for leftovers is still the right next step for most of
+               these. Hidden by default so a screen nobody has failed on carries
+               no suggestion that they might. -->
+          <div id="native-uninst-force-offer" style="display: none; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border-glass); text-align: left;">
+            <div style="font-size: 12px; color: var(--text-gray); margin-bottom: 10px;">
+              If this program can no longer uninstall itself at all, Vanish can remove the entry and what it
+              left behind - to quarantine, so it can be put back.
+            </div>
+            <button class="btn-sec btn-compact" id="btn-native-uninst-force">
+              <i class="fa-solid fa-bolt"></i> <span>Check whether it is broken</span>
+            </button>
+          </div>
         </div>
 
         <!-- Screen 4: Scanner Loading -->

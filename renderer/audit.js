@@ -177,6 +177,30 @@ async function loadAuditData(force = false) {
       fail: (msg) => { auditSectionFailed('audit-redundancy-list', 'group installed programs', msg); auditReportBlind('overlapping programs'); }
     },
     {
+      // p171: the proactive half of Force Uninstall, which used to require
+      // finding a sidebar entry you would only look for if you already knew.
+      // Read-only and works in Audit Mode - detecting a broken entry is a
+      // question, and only the removal needs Full Mode.
+      run: async () => {
+        const res = await window.api.findBrokenEntries();
+        // The engine reports a failure as a RESOLVED { success: false }, not a
+        // rejection, so it would reach draw() and render as an empty section -
+        // "no broken entries" from a scan that did not run. qkgu's defect,
+        // one screen along. Turn it into the rejection this runner's fail()
+        // path already handles.
+        if (!res || res.success !== true) {
+          throw new Error((res && res.error) || 'The scan did not return a result.');
+        }
+        return res;
+      },
+      draw: (broken) => {
+        renderBrokenEntriesSummary(broken);
+        const n = ((broken && broken.findings) || []).length;
+        auditReportWork(n, n === 1 ? 'program that cannot uninstall itself' : 'programs that cannot uninstall themselves');
+      },
+      fail: (msg) => { auditSectionFailed('audit-broken-body', 'check which programs can still uninstall themselves', msg); auditReportBlind('broken uninstall entries'); }
+    },
+    {
       // Slowest by a wide margin, and deliberately last so it is started last.
       // Its placeholder is a table ROW, not a replacement for the wrapper:
       // renderStartupTable fills audit-startup-tbody and returns silently if
@@ -1638,6 +1662,57 @@ async function runStartupAction(index) {
 // browsers for different needs is a deliberate choice, not an oversight -
 // waiving records that choice without hiding the suggestion or losing the
 // ability to act on it later.
+// p171: the Health Advisor's half of Force Uninstall. A count and a way in -
+// not a second copy of the panel, which would be the rule-written-twice defect
+// this repository keeps finding. Everything about reviewing and removing stays
+// where it already is.
+function renderBrokenEntriesSummary(broken) {
+  const body = document.getElementById('audit-broken-body');
+  const badge = document.getElementById('audit-broken-count');
+  if (!body) return;
+
+  const found = (broken && broken.findings) || [];
+  if (badge) {
+    badge.textContent = found.length;
+    badge.style.display = found.length > 0 ? 'inline-flex' : 'none';
+  }
+
+  if (found.length === 0) {
+    body.innerHTML = `<div class="panel-state">
+        <i class="fa-solid fa-circle-check" style="color: var(--color-success);"></i>
+        <div>Every program here can still uninstall itself.</div>
+      </div>`;
+    return;
+  }
+
+  // Named, not just counted. "3 programs" sends the user to a screen to find
+  // out which; the names are what let them decide whether to bother.
+  const names = found.slice(0, 5).map((f) => esc(f.name || f.displayName || '(unnamed entry)'));
+  const rest = found.length - names.length;
+
+  body.innerHTML = `
+    <div class="panel-state" style="text-align: left; padding: 12px 14px;">
+      <i class="fa-solid fa-bolt" style="color: var(--color-warning);"></i>
+      <div>
+        <div>${found.length === 1
+          ? 'One program is still listed in Programs and Features but can no longer remove itself.'
+          : `${esc(String(found.length))} programs are still listed in Programs and Features but can no longer remove themselves.`}</div>
+        <div class="finding-evidence" style="margin-left: 0; margin-top: 6px;">
+          ${names.join(', ')}${rest > 0 ? `, and ${esc(String(rest))} more` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="cleaner-actions">
+      <button class="btn-sec btn-compact" id="btn-audit-open-force">
+        <i class="fa-solid fa-bolt"></i> Review them
+      </button>
+      <span style="font-size: 11.5px; color: var(--text-muted);">Nothing is removed until you pick it, and what you pick goes to quarantine.</span>
+    </div>`;
+
+  const btn = document.getElementById('btn-audit-open-force');
+  if (btn) btn.addEventListener('click', () => switchTab('force-uninstall'));
+}
+
 function renderRedundancyGroups(redundancy) {
   const list = document.getElementById('audit-redundancy-list');
   const countBadge = document.getElementById('audit-redundancy-count');

@@ -22,6 +22,9 @@ let forceScanMode = 'Moderate';
 
 function setupForceUninstall() {
   document.getElementById('btn-rescan-broken').addEventListener('click', () => loadBrokenEntries());
+  // p171: the sidebar no longer carries this panel, so the way back is here.
+  const back = document.getElementById('btn-force-back');
+  if (back) back.addEventListener('click', () => switchTab('audit'));
   document.getElementById('btn-force-scan').addEventListener('click', () => runForceScan());
 
   document.getElementById('force-name-input').addEventListener('keydown', (e) => {

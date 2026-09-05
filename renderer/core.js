@@ -285,8 +285,6 @@ const elements = {
   // Dashboard Stats
   statTotalApps: document.getElementById('stat-total-apps'),
   statUwpApps: document.getElementById('stat-uwp-apps'),
-  statTotalSize: document.getElementById('stat-total-size'),
-  statRestoreStatus: document.getElementById('stat-restore-status'),
   
   // Workspace & Table
   appsTbody: document.getElementById('apps-tbody'),
@@ -467,13 +465,10 @@ async function checkElevation() {
   if (isAdmin) {
     elements.adminIndicator.className = 'admin-badge elevated';
     elements.adminIndicator.innerHTML = '<i class="fa-solid fa-shield-halved"></i><span>Full Mode</span>';
-    elements.statRestoreStatus.textContent = 'Enabled';
     banner.style.display = 'none';
   } else {
     elements.adminIndicator.className = 'admin-badge unelevated';
     elements.adminIndicator.innerHTML = '<i class="fa-solid fa-eye"></i><span>Audit Mode</span>';
-    // Keep this short: it renders in a fixed-height stat card.
-    elements.statRestoreStatus.textContent = 'Read-only';
     bannerText.textContent = tierState.bannerText;
     banner.style.display = 'flex';
   }
@@ -749,7 +744,9 @@ async function loadApplications() {
   // rediscover that.
   elements.statTotalApps.textContent = '...';
   elements.statUwpApps.textContent = '...';
-  elements.statTotalSize.textContent = '...';
+  // 2xnj: the size card is gone - it restated the Storage panel. The tier card
+  // went with it; the Audit Mode banner and the sidebar badge already say that,
+  // in two places the user cannot scroll away from.
   updateFilterStatus(0);
 
   try {
@@ -889,14 +886,13 @@ function updateDashboardStats() {
   const uwpCount = shown.filter(app => app.type === 'UWP').length;
   const componentCount = allApps.length - allApps.filter((a) => a.classification === 'application').length;
 
-  let totalBytes = 0;
-  shown.forEach(app => {
-    if (app.sizeBytes) totalBytes += app.sizeBytes;
-  });
-
+  // 2xnj: the running byte total went with the card that displayed it. It was
+  // never a trustworthy number anyway - it summed only the rows that HAD a
+  // sizeBytes, which after mp31 is the ones somebody happened to scroll past,
+  // so it grew as you scrolled and read as a total of everything. The Storage
+  // panel answers this question properly and is one tab away.
   elements.statTotalApps.textContent = shown.length;
   elements.statUwpApps.textContent = uwpCount;
-  elements.statTotalSize.textContent = formatBytes(totalBytes, 1);
 
   const badge = document.getElementById('components-count');
   if (badge) badge.textContent = componentCount;
