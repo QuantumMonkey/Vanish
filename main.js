@@ -616,12 +616,21 @@ const SIZE_CACHE_MAX = 400;
 // Overridable so the suite can drive the budget rather than assert around it.
 // A budget that has never been observed to bite is a budget nobody has tested,
 // and this one is the whole reason the feature is safe to ship.
-const SIZE_BUDGET_MS = Number(process.env.VANISH_SIZE_BUDGET_MS) > 0
-  ? Number(process.env.VANISH_SIZE_BUDGET_MS)
-  : 1500;
-const SIZE_MAX_FILES = Number(process.env.VANISH_SIZE_MAX_FILES) > 0
-  ? Number(process.env.VANISH_SIZE_MAX_FILES)
-  : 200000;
+//
+// 2brn: BEHIND testHatchesAllowed, like the other two hatches in this file.
+// These two were read unconditionally, which made them real configuration in a
+// packaged build rather than a test hatch - and forty lines up this file says
+// the hatches "do not exist at all" in a packaged build. An environment
+// variable that sets the walk budget in a shipped app is a way to make the
+// main process hang from outside it; !app.isPackaged is what makes the comment
+// true.
+function sizeHatch(name, fallback) {
+  if (!testHatchesAllowed) return fallback;
+  const n = Number(process.env[name]);
+  return n > 0 ? n : fallback;
+}
+const SIZE_BUDGET_MS = sizeHatch('VANISH_SIZE_BUDGET_MS', 1500);
+const SIZE_MAX_FILES = sizeHatch('VANISH_SIZE_MAX_FILES', 200000);
 
 // The same shape rule scanner.ps1's Get-InstallFolderCreated applies, and for
 // the same two reasons: a relative path would resolve against whatever this
@@ -632,15 +641,57 @@ function parseLocalDirectory(raw) {
   return pathShape.localRootedPath(raw);
 }
 
+// 2brn: THE BOUNDS ARE INSIDE THE LOOP THAT DOES THE WORK.
+//
+// Both budgets used to be tested once per DIRECTORY, at the top of the while
+// loop. The inner `for (const e of entries)` - which does every statSync, i.e.
+// all of the work - had no check in it at all. My own comment justified that:
+//
+//   "Checked per DIRECTORY rather than per file: Date.now() in the inner loop
+//    is itself measurable at this file count, and a single directory's entries
+//    are bounded by what one readdir returns."
+//
+// The second clause is simply false. One readdir returns however many entries
+// the directory holds, which is not a bound. MEASURED, 60,000 files in one
+// directory against a 1,500 ms budget: the walk ran 2,471 ms and returned
+// complete = true. It is linear past that, and it is reachable without
+// anything pathological - the walk is driven by the IntersectionObserver
+// against InstallLocation values from the registry, and package caches,
+// %WINDIR%\Installer and flat asset folders routinely hold tens of thousands
+// of files in one directory.
+//
+// THE FIRST CLAUSE WAS ALSO WRONG, and this was worth measuring rather than
+// working around. Same walk, same machine, budget set high enough that nothing
+// trips it:
+//
+//   clock read per directory   2587 / 2355 ms        1 read
+//   clock read per file        2519 / 2501 ms   60,000 reads
+//   clock read every 1024      2689 / 2375 ms       58 reads
+//
+// The spread between two runs of the SAME shape is larger than the spread
+// between shapes. 60,000 Date.now() calls are not measurable next to 60,000
+// statSync calls, so the premise that bought the unbounded loop did not hold.
+//
+// So the check is per FILE rather than behind a counter mask, which the issue
+// also offered. It costs nothing measurable and it bounds the overrun by ONE
+// statSync instead of by 1,024 of them - and a directory where each stat is
+// slow (a compressed volume, a filter driver) is exactly where a coarse
+// granularity would hurt most. Measured after the change: 1,501 ms against the
+// 1,500 ms budget.
+//
+// WHY THIS IS NOT A CORRECTNESS DEFECT, stated so nobody "fixes" the totals:
+// the bytes returned were right and complete=true was honest - the walk did
+// finish. What was wrong is that nothing bounded how long it took, inside a
+// synchronous ipcMain.handle in the single-threaded main process, where every
+// other IPC call queues behind it including Task Manager's 2-second refresh.
 function measureDirectoryBounded(dir, budgetMs, maxFiles) {
   const started = Date.now();
   let total = 0;
   let files = 0;
   const stack = [dir];
   while (stack.length) {
-    // Checked per DIRECTORY rather than per file: Date.now() in the inner loop
-    // is itself measurable at this file count, and a single directory's
-    // entries are bounded by what one readdir returns.
+    // Still checked here too: a tree that is deep rather than wide spends its
+    // time in readdirSync, which the inner loop's per-file check never reaches.
     if (Date.now() - started > budgetMs) return { bytes: total, complete: false };
     if (files > maxFiles) return { bytes: total, complete: false };
     const current = stack.pop();
@@ -662,6 +713,9 @@ function measureDirectoryBounded(dir, budgetMs, maxFiles) {
         stack.push(full);
       } else {
         files += 1;
+        // Both bounds, enforced per unit of work rather than per directory.
+        if (files > maxFiles) return { bytes: total, complete: false };
+        if (Date.now() - started > budgetMs) return { bytes: total, complete: false };
         try {
           total += fs.statSync(full).size;
         } catch {

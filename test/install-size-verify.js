@@ -128,6 +128,70 @@ app.whenReady().then(async () => {
 
     // ----------------------------------------------------------------
     console.log('');
+    console.log('2brn: ONE wide directory, which is the shape that got past the budget');
+
+    // THE FIXTURE ABOVE IS WHY THIS BUG SURVIVED. 40 dirs x 60 files gives the
+    // per-directory budget check forty chances to fire, so it fired, and the
+    // suite went green over a loop whose inner `for (const e of entries)` had
+    // no check in it at all.
+    //
+    // One directory gives it exactly one chance, at the top, before any work
+    // has happened. Measured on the real shape: 60,000 files in one directory
+    // ran 2,471 ms against a 1,500 ms budget and returned complete = true.
+    //
+    // Asserted as complete === false rather than as a duration: a timing
+    // assertion is a flaky test wearing a performance badge, and "the budget
+    // fired" is the same property stated deterministically. Under the old code
+    // this comes back true.
+    const flat = path.join(work, 'one-wide-dir');
+    fs.mkdirSync(flat, { recursive: true });
+    const blob = Buffer.alloc(64, 0x79);
+    for (let i = 0; i < 4000; i += 1) fs.writeFileSync(path.join(flat, `f${i}.bin`), blob);
+
+    const w = await invoke('measure-install-size', { source: flat });
+    assert(w && w.complete === false,
+      'a single directory wide enough to blow the budget reports incomplete - the check is inside the loop that does the work, not once per directory',
+      JSON.stringify(w));
+    assert(w && w.bytes === null,
+      'and still returns no number, so nothing renders a partial total',
+      JSON.stringify(w));
+
+    // The file cap had the identical defect and the identical fix - it was
+    // also tested once per directory, so a single directory holding more than
+    // the cap sailed past it.
+    const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const walkFn = mainSrc.slice(
+      mainSrc.indexOf('function measureDirectoryBounded'),
+      mainSrc.indexOf('ipcMain.handle(\'measure-install-size\'')
+    );
+    const inner = walkFn.slice(walkFn.indexOf('for (const e of entries)'));
+    assert(/files > maxFiles/.test(inner),
+      'the FILE cap is enforced inside the inner loop too, not only per directory');
+    assert(/Date\.now\(\) - started > budgetMs/.test(inner),
+      'and so is the time budget');
+
+    // ----------------------------------------------------------------
+    console.log('');
+    console.log('2brn: the budget overrides are test hatches, not configuration');
+
+    // main.js says forty lines above these that its test hatches "do not exist
+    // at all" in a packaged build. These two were read unconditionally, which
+    // made that comment false - and an environment variable that sets the walk
+    // budget in a shipped app is a way to make the main process hang from
+    // outside it.
+    assert(/const testHatchesAllowed = !app\.isPackaged/.test(mainSrc),
+      'premise: the gate this suite is asserting against exists');
+    assert(/function sizeHatch\([\s\S]{0,200}?if \(!testHatchesAllowed\) return fallback;/.test(mainSrc),
+      'the budget overrides go through a helper that refuses outside a dev run');
+    const rawReads = (mainSrc.match(/process\.env\.VANISH_SIZE_(?:BUDGET_MS|MAX_FILES)/g) || []);
+    assert(rawReads.length === 0,
+      `neither variable is read directly any more (${rawReads.length} direct read(s) left)`,
+      rawReads.join(', '));
+    assert(/sizeHatch\('VANISH_SIZE_BUDGET_MS'/.test(mainSrc) && /sizeHatch\('VANISH_SIZE_MAX_FILES'/.test(mainSrc),
+      'and both constants come from it - the gate is worth nothing if one of them bypasses it');
+
+    // ----------------------------------------------------------------
+    console.log('');
     console.log('A subtree it cannot read makes the whole total incomplete');
     // A total that silently omits a folder is the worst answer available here:
     // it is confident, sortable and wrong, and nothing on screen says so.

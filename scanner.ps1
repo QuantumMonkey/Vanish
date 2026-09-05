@@ -1425,7 +1425,18 @@ function Invoke-DeelevatedViaScheduledTask {
 
         $actionArgs = @{ Execute = $ExePath }
         if ($ArgList -and @($ArgList).Count -gt 0) {
-            $actionArgs.Argument = ((@($ArgList) | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+            # kfb4: the same quoter the elevated relaunch already uses, rather
+            # than a third hand-rolled '"' + $_ + '"'. That form is not merely
+            # duplication - it is WRONG for the arguments this path actually
+            # carries. Windows requires a backslash immediately before a quote
+            # to be doubled, so a directory ending in a separator, which is
+            # exactly what app.getAppPath() can hand us, produces
+            #     "C:\path\to\app\"
+            # where the trailing backslash escapes the closing quote and the
+            # argument swallows the next one. ConvertTo-ProcessArgument has
+            # handled that since it was written; these two call sites simply
+            # never used it.
+            $actionArgs.Argument = ((ConvertTo-ProcessArgumentList $ArgList) -join ' ')
         }
         $workDir = Split-Path -Parent $ExePath
         if ($workDir) { $actionArgs.WorkingDirectory = $workDir }
@@ -8854,9 +8865,37 @@ if ($Action) {
                 if (-not (Test-Path -LiteralPath $Params.exePath)) {
                     throw "The application file no longer exists at '$($Params.exePath)'."
                 }
+                # kfb4: BUILT HERE, and it was not. The scheduled-task call
+                # forty lines down passed a bare $argList, which is assigned
+                # only inside the relaunch-ELEVATED branch - so on this path it
+                # was always $null, and Invoke-DeelevatedViaScheduledTask has
+                # never once been exercised with an argument vector.
+                #
+                # It was silent because this file sets no Set-StrictMode, so an
+                # undefined variable reads as $null rather than throwing. That
+                # is deliberate and stays: dot-sourcing runs in the CALLER's
+                # scope (see the note in finders/_contract.ps1), so a strict
+                # mode here would impose semantics on 8,500 lines never written
+                # for it, and the failures would surface as unrelated features
+                # breaking in a VM.
+                #
+                # Shipping impact was nil - packaged builds pass [] - but in a
+                # dev run the de-elevated relaunch lost app.getAppPath() and
+                # started bare Electron, and this sits in the middle of the
+                # privilege-DROP path, which is not where a silent $null
+                # belongs.
+                #
+                # Derived once and used by both mechanisms below, so the two
+                # cannot disagree about what the app is being restarted with.
+                $argList = @()
+                if ($Params.argList) { $argList = @($Params.argList) }
+
                 $argString = ''
-                if ($Params.argList -and @($Params.argList).Count -gt 0) {
-                    $argString = ' ' + ((@($Params.argList) | ForEach-Object { '"' + $_ + '"' }) -join ' ')
+                if ($argList.Count -gt 0) {
+                    # The same quoter, for the same reason as the scheduled-task
+                    # path above. Three copies of this rule existed and only one
+                    # of them was correct.
+                    $argString = ' ' + ((ConvertTo-ProcessArgumentList $argList) -join ' ')
                 }
                 # The whole target (exe path + its own args) is ONE argument to
                 # runas - it is not runas's own args, so it gets its own quoting

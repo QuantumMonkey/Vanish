@@ -52,6 +52,81 @@ Assert ($taskCallIdx -gt 0) 'the scheduled-task mechanism is called by relaunch-
 Assert ($runasCallIdx -gt 0) 'runas is still present as a fallback'
 Assert ($taskCallIdx -lt $runasCallIdx) 'the scheduled task is attempted BEFORE runas, not after'
 
+# --- kfb4: the argument vector actually reaches the mechanism --------------
+Write-Host ''
+Write-Host 'The arguments are built on this path, not borrowed from another branch'
+
+# $argList was assigned ONLY inside the relaunch-ELEVATED branch. On this path
+# it was $null, so Invoke-DeelevatedViaScheduledTask - the one mechanism 9vp
+# measured as working - had never once been called with an argument vector.
+# Silent, because this file sets no Set-StrictMode and an undefined variable
+# reads as $null.
+#
+# Asserted against the BRANCH rather than the whole file, which is the point:
+# a grep for "$argList =" passes on the elevated branch's copy, which is
+# exactly the assignment that was not in scope here.
+$deelevStart = $scanner.IndexOf('"relaunch-deelevated" {')
+$deelevEnd   = $scanner.IndexOf('"list-lockers" {', $deelevStart)
+Assert ($deelevStart -gt 0 -and $deelevEnd -gt $deelevStart) `
+    'premise: this suite can isolate the relaunch-deelevated branch'
+$deelev = $scanner.Substring($deelevStart, $deelevEnd - $deelevStart)
+
+$assignIdx = $deelev.IndexOf('$argList = @()')
+$useIdx    = $deelev.IndexOf('Invoke-DeelevatedViaScheduledTask -ExePath')
+Assert ($assignIdx -gt 0) `
+    '$argList is assigned INSIDE this branch rather than inherited from another'
+Assert ($useIdx -gt 0 -and $assignIdx -lt $useIdx) `
+    'and assigned BEFORE it is handed to the scheduled-task mechanism'
+Assert ($deelev -match '\$argList = @\(\$Params\.argList\)') `
+    'from the parameters the caller actually sent'
+
+# --- kfb4: one quoting rule, and it is the correct one ---------------------
+Write-Host ''
+Write-Host 'Arguments are quoted by the shared quoter, not by three hand-rolled copies'
+
+# The hand-rolled '"' + $_ + '"' form does not double a backslash before a
+# quote, which Windows requires. A directory ending in a separator - which is
+# what app.getAppPath() can hand us - becomes "C:\path\to\app\", where the
+# trailing backslash escapes the closing quote and the argument swallows the
+# next one. ConvertTo-ProcessArgument has always handled that; two of the three
+# call sites simply never used it.
+# Comment lines are stripped first. The assertion is about CODE, and the first
+# version of it failed on the comment two hundred lines up in scanner.ps1 that
+# explains what the hand-rolled form was and why it was wrong - which is a
+# check that cannot survive its own explanation.
+$codeOnly = (($scanner -split "`r?`n") | Where-Object { $_.TrimStart() -notmatch '^#' }) -join "`n"
+$handRolled = ([regex]::Matches($codeOnly, "'\`"' \+ \`$_ \+ '\`"'")).Count
+Assert ($handRolled -eq 0) `
+    "no hand-rolled argument quoting is left in the engine (found $handRolled)"
+Assert ($scanner -match 'ConvertTo-ProcessArgumentList \$ArgList') `
+    'the scheduled-task action quotes through the shared helper'
+Assert ($deelev -match 'ConvertTo-ProcessArgumentList \$argList') `
+    'and so does the runas fallback, so the two cannot disagree about the command line'
+
+# The quoter itself, exercised rather than trusted - these are the two cases
+# the hand-rolled version got wrong.
+. $scannerPath
+
+# The case that breaks, stated as the pair it is. A path with a space MUST be
+# quoted, and once quoted its trailing backslash must be doubled or it escapes
+# the closing quote. The hand-rolled form produced "C:\Program Files\app\" and
+# the argument after it was swallowed.
+Assert ((ConvertTo-ProcessArgument 'C:\Program Files\app\') -eq '"C:\Program Files\app\\"') `
+    'a quoted path with a trailing backslash doubles it, so it cannot escape the closing quote'
+Assert (('"' + 'C:\Program Files\app\' + '"') -ne (ConvertTo-ProcessArgument 'C:\Program Files\app\')) `
+    'and that is genuinely different from what the hand-rolled form produced - the two are not equivalent'
+
+# No space and no quote needs no quoting at all, which is also why a trailing
+# backslash is harmless here: there is no closing quote for it to escape. The
+# hand-rolled form added quotes unconditionally and broke this case too.
+Assert ((ConvertTo-ProcessArgument 'C:\path\to\app\') -eq 'C:\path\to\app\') `
+    'an argument needing no protection is passed through untouched, trailing separator and all'
+
+Assert ((ConvertTo-ProcessArgument 'a "b" c') -eq '"a \"b\" c"') `
+    'an embedded quote is escaped rather than ending the argument'
+Assert ((ConvertTo-ProcessArgument '') -eq '""') `
+    'and an empty argument still occupies a slot rather than vanishing from the vector'
+
 # --- The task settings that would otherwise bite later ---------------------
 Write-Host ''
 Write-Host 'The task is created with settings that do not surprise the user later'

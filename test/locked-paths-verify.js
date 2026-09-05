@@ -90,7 +90,10 @@ const entry = {
   ],
 };
 
-const found = lockFailuresFrom(entry);
+// 2brn: returns { paths, dropped } now, because the cap has to be counted and
+// a count hung off the array as a non-enumerable property vanishes through the
+// JSON.stringify on its way into the oplog.
+const found = lockFailuresFrom(entry).paths;
 assert(found.length === 1, `only the locked FILE is recorded (${found.length})`, JSON.stringify(found));
 assert(found[0] && found[0].path === 'C:\\a\\locked.dll', 'and it is the right one');
 assert(found[0] && /another process/.test(found[0].reason),
@@ -102,8 +105,51 @@ assert(!found.some((f) => /HKCU/i.test(f.path)),
 assert(!found.some((f) => f.path === ''),
   'a failed row with no path is dropped rather than recorded as an empty entry');
 
-assert(lockFailuresFrom({}).length === 0, 'an entry with no files yields nothing');
-assert(lockFailuresFrom(null).length === 0, 'and neither does a missing entry');
+assert(lockFailuresFrom({}).paths.length === 0, 'an entry with no files yields nothing');
+assert(lockFailuresFrom(null).paths.length === 0, 'and neither does a missing entry');
+
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('2brn: the write is capped at the number the reader will ever return');
+
+// store.lockedPaths() stops at 50. This wrote every locked path there was - so
+// on a bulk uninstall with hundreds of files held open, everything past the
+// fiftieth was written, could never be read, and still spent the oplog's 5 MB
+// rotation budget. Rotation evicts the OLDEST records, so rows nothing could
+// read were pushing out the elevation history the diagnostic collector needs.
+//
+// A bound that exists in the reader and not in the writer is not a bound. It
+// is a filter over a queue that is still growing.
+const { LOCK_PATH_LIMIT } = require('../lib/lock-failure');
+const flood = { files: [] };
+for (let i = 0; i < 200; i += 1) {
+  flood.files.push({
+    originalPath: `C:\\a\\held${i}.dll`,
+    status: 'failed',
+    error: 'The process cannot access the file because it is being used by another process.'
+  });
+}
+const cappedWrite = lockFailuresFrom(flood);
+assert(cappedWrite.paths.length === LOCK_PATH_LIMIT,
+  `200 locked files write ${LOCK_PATH_LIMIT} rows, not 200 (${cappedWrite.paths.length})`);
+assert(cappedWrite.dropped === 200 - LOCK_PATH_LIMIT,
+  `and the remainder is COUNTED rather than silently truncated (${cappedWrite.dropped})`);
+assert(LOCK_PATH_LIMIT === 50,
+  'and the writer limit IS the reader limit - store.lockedPaths(50) is the number this has to match');
+
+// The count has to survive the trip into the oplog, which is JSON. A first
+// version hung it off the array as a non-enumerable property, where
+// JSON.stringify drops it - so the number would have vanished on the one hop
+// that mattered.
+const roundTripped = JSON.parse(JSON.stringify(cappedWrite));
+assert(roundTripped.dropped === cappedWrite.dropped,
+  'and it survives JSON, because the oplog is the only place it needs to arrive');
+
+const underCap = lockFailuresFrom({
+  files: [{ originalPath: 'C:\\a\\one.dll', status: 'failed', error: 'in use' }]
+});
+assert(underCap.dropped === 0,
+  'an ordinary result drops nothing, so the count cannot read as a warning when there is none');
 
 // ---------------------------------------------------------------------------
 console.log('');
