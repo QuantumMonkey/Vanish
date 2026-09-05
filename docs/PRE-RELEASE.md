@@ -183,11 +183,27 @@ publication, and the thing being taken or left is the same product.
 > 2. ~~**No clean-VM pass** (Rule 10).~~ **MET 2026-09-02.** Windows 10 was
 >    dropped from scope by operator decision (they do not run it and will not
 >    return to it), and the Windows 11 half is green in both tiers from one
->    command: `testun-all.ps1 -BothTiers`. `1qp` still needs its own real
+>    command: `test\run-all.ps1 -BothTiers`. `1qp` still needs its own real
 >    run, because a suite passing is not evidence that a destructive path works.
+>
+>    **RE-MEASURED 2026-09-06: 76 suites, 2599 passed, 0 failed, 20 named
+>    skips.** Worth recording because the run before it, on 2026-09-05, was
+>    2587 passed and **6 failed** - and not one of the six was a defect. Two
+>    were a budget fixture calibrated to this machine's disk speed (`43po`: a
+>    clock is machine-dependent, a file cap is not), and four were suites
+>    failing a premise a fresh VM cannot meet - a 775px display, and three
+>    installed programs none of which recorded a DisplayIcon (`y5sx`).
+>
+>    That distinction is the gate, not the number. A clean-VM pass carrying six
+>    red lines somebody explains away by hand is not a gate anyone keeps
+>    reading, and "the budget did not bite" is indistinguishable from "the
+>    budget is broken" when the budget is fine and the machine is quick. The
+>    twenty skips are all NAMED and each says what it could not test and why,
+>    which is the honest form of the same information.
 > 3. **Single-user acceptance.** One external user, one demo recording.
 >
-> None of the eighteen open bd issues moves any of the three. That is the
+> None of the bd issues open at the time moved any of the three, and on
+> 2026-09-06 the board reached ZERO with all three still standing. That is the
 > point of writing them down here: the coding backlog and the release gate are
 > different lists, and progress on the first is not progress on the second.
 

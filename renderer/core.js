@@ -1652,4 +1652,3 @@ function setupSidebarNavigation() {
     switchTab(link.getAttribute('data-goto-tab'));
   });
 }
-
