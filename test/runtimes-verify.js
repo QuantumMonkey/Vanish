@@ -184,6 +184,23 @@ app.whenReady().then(async () => {
   // listener, and whether the checkbox nodes were still the same objects
   // afterwards (a toolbar re-render would replace them and silently discard
   // the startup listeners, which is the leading candidate).
+  //
+  // 2026-09-05, MEASURED: 20 consecutive runs, 20 passes, on the same machine
+  // and with the failing mode fully reachable - 149 total entries, 75
+  // applications, 74 components that would reappear if the filter broke. So
+  // this is not the fresh-VM case the issue warned about, where 3 of 3 passes
+  // proved nothing because there were no components to hide.
+  //
+  // At the rate originally observed (1 in 3), twenty clean runs is a 0.03%
+  // outcome. The rate has genuinely changed.
+  //
+  // NOT DIAGNOSED, and that distinction is the point of writing this down:
+  // nobody found the cause, it simply stopped reproducing. If it returns, the
+  // evidence block below is what makes the next failure actionable - it will
+  // say whether each dispatch was heard, whether the checkbox nodes survived,
+  // and whether a 750 ms wait settles it (a race, this test's fault) or does
+  // not (a real product bug). Those want opposite fixes, and until this block
+  // existed the failure line could not tell them apart.
   const restored = await js(`(() => {
     const snap = (tag) => ({
       tag,
