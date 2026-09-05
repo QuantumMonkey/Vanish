@@ -889,9 +889,19 @@ function pingTileHtml() {
   const labelTitle = linkLocal && pingDestinationIsGateway
     ? ` title="${esc(pingDestination)} -- your router's link-local IPv6 address. Addresses starting fe80: are defined to be non-routable: this packet physically cannot leave your local network, and no server on the internet ever sees it. Vanish shows this one rather than a 192.168.x.x address because this machine has no IPv4 default route."`
     : '';
+  // wy7a: a CHOICE, not a text box. main.js will only ping this PC's own
+  // router or a public resolver it knows, so a free-text field could offer
+  // something the boundary refuses - and a control that accepts input the app
+  // then rejects is a worse experience than one that never offered it.
   const editRow = pingEditing
-    ? `<input type="text" class="net-ping-dest-input" id="net-ping-dest-input" value="${esc(pingDestination || '')}"
-         placeholder="IP address or hostname" spellcheck="false">`
+    ? `<select class="net-ping-dest-input" id="net-ping-dest-input">
+         ${pingDestinationOptions()
+           .map(
+             (o) =>
+               `<option value="${esc(o.value)}"${o.value === pingDestination ? ' selected' : ''}>${esc(o.label)}</option>`
+           )
+           .join('')}
+       </select>`
     : `<div class="net-rate-label"${labelTitle}>
          to ${label}
          <button class="net-ping-edit-btn" id="net-ping-edit-btn" title="Change what Ping tests against">
@@ -952,11 +962,11 @@ function wirePingTile() {
   if (input) {
     input.addEventListener('click', (e) => e.stopPropagation());
     const commit = () => {
-      const value = input.value.trim();
+      const value = String(input.value || '').trim();
       if (value) {
-        // kct: an edited destination is only still "your router" if the user
-        // typed the detected gateway back in. Compared rather than assumed,
-        // so retyping the same address does not silently downgrade the label.
+        // kct: an edited destination is only still "your router" if it IS the
+        // detected gateway. Compared rather than assumed, so re-picking the
+        // same address does not silently downgrade the label.
         pingDestinationIsGateway =
           !!(netPrimaryAdapter && netPrimaryAdapter.gatewayAddress === value);
         pingDestination = value;
@@ -965,12 +975,26 @@ function wirePingTile() {
       pingEditing = false;
       reRenderPingTile();
     };
+    input.addEventListener('change', commit);
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') commit();
       if (e.key === 'Escape') { pingEditing = false; reRenderPingTile(); }
     });
     input.addEventListener('blur', commit);
   }
+}
+
+// wy7a: the same set main.js enforces, phrased for a person. Kept next to the
+// control that uses it rather than beside the enforcing copy, because these are
+// not two implementations of one rule - main.js decides, and this only decides
+// what to OFFER. If they ever disagree the boundary wins and the user sees a
+// refusal, which is the right way round.
+function pingDestinationOptions() {
+  const options = [];
+  const gw = netPrimaryAdapter && netPrimaryAdapter.gatewayAddress;
+  if (gw) options.push({ value: gw, label: `Your router (${gw})` });
+  options.push({ value: '1.1.1.1', label: 'Cloudflare (1.1.1.1)' });
+  options.push({ value: '8.8.8.8', label: 'Google (8.8.8.8)' });
+  return options;
 }
 
 async function runPing() {

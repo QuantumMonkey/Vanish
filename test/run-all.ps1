@@ -83,6 +83,7 @@ $suites = @(
     @{ Name = "Switches + restore (3)";        Kind = "ps";       Path = "test\phase3-verify.ps1" },
     @{ Name = "Uninstall queue (TASK-11)";     Kind = "node";     Path = "test/queue-verify.js" },
     @{ Name = "Settings validation";           Kind = "node";     Path = "test/settings-verify.js" },
+    @{ Name = "Settings gate + ping (wy7a)"; Kind = "electron"; Path = "test/settings-gate-verify.js" },
     @{ Name = "Store migration (SEC-3)";       Kind = "node";     Path = "test/store-migration-verify.js" },
     @{ Name = "System Clean scans (4)";        Kind = "ps";       Path = "test\phase4-verify.ps1" },
     @{ Name = "System Clean purges (4)";       Kind = "electron"; Path = "test/phase4-ipc-verify.js" },

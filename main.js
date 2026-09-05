@@ -1220,11 +1220,56 @@ ipcMain.handle('get-settings', async () => store.readSettings());
 // The reply now always says WHICH settings are in effect and whether the change
 // was actually written. It never rejects: a rejection is what produced the
 // silence in the first place.
+// wy7a: the settings that are destructive BY DEFERRAL.
+//
+// vault-delete is fullModeOnly. autoPurgeSweep is not gated by anything,
+// because it does not need to be - it runs at every elevated start, reads
+// autoPurgeEnabled and autoPurgeRetentionDays off disk, and deletes forever
+// every entry older than the cutoff. With retention 0 the cutoff is now, and
+// "every entry older than now" is the whole vault.
+//
+// So an Audit Mode renderer - the tier in which every destructive channel is
+// supposed to be refused - could call setSettings({ autoPurgeEnabled: true,
+// autoPurgeRetentionDays: 0 }) and the operator's entire quarantine would be
+// permanently deleted at their next Full Mode start, with no prompt. The gate
+// on vault-delete is not defeated, it is SIDESTEPPED: the destructive act is
+// scheduled from the tier that cannot perform it.
+//
+// GATING THE TWO FIELDS RATHER THAN THE WHOLE CHANNEL. Operator decision
+// 2026-09-05. Making all of set-settings fullModeOnly is a simpler rule with
+// nothing to keep a list of, but it also stops an Audit Mode user changing
+// their scan depth or their theme - and Audit Mode is the tier we want people
+// to spend time in. Everything else in this patch still saves unelevated.
+//
+// Named explicitly rather than derived, because a rule like "anything matching
+// /purge/" silently stops covering a field somebody renames.
+const ELEVATED_ONLY_SETTINGS = ['autoPurgeEnabled', 'autoPurgeRetentionDays'];
+
 ipcMain.handle('set-settings', async (event, patch) => {
   let saved;
   let error = null;
+
+  const incoming = patch && typeof patch === 'object' ? patch : {};
+  const refusedKeys = isFullMode()
+    ? []
+    : ELEVATED_ONLY_SETTINGS.filter((k) => Object.prototype.hasOwnProperty.call(incoming, k));
+
+  if (refusedKeys.length > 0) {
+    // The rest of the patch is applied. Refusing the whole save because one
+    // field was out of reach would lose changes the user is entitled to make,
+    // and would teach them that Audit Mode cannot save settings at all.
+    for (const k of refusedKeys) delete incoming[k];
+    store.appendOplog({
+      action: 'settings-refused',
+      tier: currentTier,
+      items: {},
+      outcome: 'refused',
+      meta: { refusedKeys }
+    });
+  }
+
   try {
-    saved = store.writeSettings(patch || {});
+    saved = store.writeSettings(incoming);
   } catch (err) {
     error = err;
     // What is ON DISK, which is what the app is actually running with. The
@@ -1238,16 +1283,22 @@ ipcMain.handle('set-settings', async (event, patch) => {
     tier: currentTier,
     items: {},
     outcome: error ? 'error' : 'success',
-    meta: { patch, error: error ? error.message : undefined }
+    meta: { patch: incoming, refusedKeys, error: error ? error.message : undefined }
   });
 
   const writable = store.canWriteState();
+  const refusalReason = refusedKeys.length > 0
+    ? 'Automatic purge settings can only be changed in Full Mode, because they schedule a permanent deletion that runs at the next elevated start. Everything else was saved.'
+    : null;
   return {
     settings: saved,
     saved: !error,
+    // Named, so the renderer can say which control snapped back rather than
+    // leaving the user to notice.
+    refusedKeys,
     reason: error
       ? (writable.writable ? error.message : `${writable.reason} Restart as administrator to change it.`)
-      : null
+      : refusalReason
   };
 });
 
@@ -1757,9 +1808,24 @@ fullModeOnly('network-hold-revert', async () => {
 // bfh.1: reading who is using the network is read-only and works in Audit Mode.
 // It samples local byte counters twice and asks Windows which process owns each
 // connection - it opens no socket of its own (INV-4).
+// wy7a: the gateway addresses this process has SEEN, from its own engine call.
+//
+// The ping allowlist below needs to know what this machine's router is, and it
+// must not learn that from the renderer - a value the caller supplies is not a
+// constraint on the caller. This is read out of the result of the same
+// get-network-activity call the panel already makes before the ping tile can
+// exist, so it costs nothing and comes from the engine rather than the page.
+let observedGateways = [];
+
 ipcMain.handle('get-network-activity', async (event, params) => {
   try {
-    return await runPowerShell('get-network-activity', params || {});
+    const result = await runPowerShell('get-network-activity', params || {});
+    if (result && Array.isArray(result.adapters)) {
+      observedGateways = result.adapters
+        .map((a) => (a && typeof a.gatewayAddress === 'string' ? a.gatewayAddress.trim() : ''))
+        .filter(Boolean);
+    }
+    return result;
   } catch (error) {
     console.error('Error reading network activity:', error);
     return { success: false, verdict: 'unreadable', adapters: [], processes: [], error: error.message };
@@ -1767,13 +1833,53 @@ ipcMain.handle('get-network-activity', async (event, params) => {
 });
 
 // kp0: the app's one deliberate exception to "zero network I/O" - a single
-// ICMP echo, only on an explicit user tap (enforced in the renderer: this
-// channel has no interval, no auto-call on tab open, nothing that reaches it
-// except a click). Available in Audit Mode like the rest of this panel - it
-// reads/probes, it does not remove or write anything on this PC.
+// ICMP echo, only on an explicit user tap. Available in Audit Mode like the
+// rest of this panel: it probes, it does not remove or write anything here.
+//
+// wy7a: BOTH OF ITS CONSTRAINTS USED TO LIVE IN THE RENDERER, and the comment
+// that stood here said so approvingly - "enforced in the renderer". The
+// destination was passed through to Test-Connection with no allowlist, and
+// pingConsentGiven was read only in renderer/audit.js. So a compromised
+// renderer could make the app send packets to a host of its choosing, without
+// consent, from a product whose README's first promise is "No telemetry, no
+// network calls."
+//
+// INV-2 is explicit that this is the wrong side of the line: "the renderer's
+// disabled states are a convenience; THIS is the boundary." The renderer's
+// consent dialog is still the right place to ASK - it is careful, it names
+// what is sent and where - but it cannot be the thing that enforces the
+// answer.
+//
+// Operator decision 2026-09-05: consent moves here, and the destination is
+// chosen from a fixed set rather than named. Two public resolvers and this
+// machine's own router - the router being the only one that matters for "is it
+// my connection or the app", and the two resolvers for "is it my router". A
+// destination the caller can type is not a constraint on the caller.
+const PUBLIC_PING_TARGETS = ['1.1.1.1', '8.8.8.8'];
+
 ipcMain.handle('network-ping', async (event, params) => {
+  const settings = store.readSettings();
+  if (settings.pingConsentGiven !== true) {
+    return {
+      success: false,
+      error: 'Vanish has not been given permission to send network traffic. Nothing was sent.'
+    };
+  }
+
+  const wanted = String((params && params.destination) || '').trim();
+  const allowed = PUBLIC_PING_TARGETS.concat(observedGateways);
+  const match = allowed.find((a) => a.toLowerCase() === wanted.toLowerCase());
+  if (!match) {
+    return {
+      success: false,
+      error: `Vanish will only ping this PC's own router or a public resolver it knows (${PUBLIC_PING_TARGETS.join(', ')}). Nothing was sent.`
+    };
+  }
+
   try {
-    return await runPowerShell('network-ping', params || {});
+    // The matched value, not the caller's string, and nothing else from the
+    // payload travels with it.
+    return await runPowerShell('network-ping', { destination: match });
   } catch (error) {
     console.error('Error pinging:', error);
     return { success: false, error: error.message };

@@ -111,7 +111,7 @@ Discovery depth and deletion are independent: you can scan Advanced and still de
 
 ## What Vanish does NOT do
 
-- **No telemetry, no network calls.** There is no analytics code and no cloud lookup anywhere in the codebase. The CSP names no external origin (`connect-src 'none'`) -- verify with a grep, don't take the README's word for it.
+- **No telemetry, and nothing that phones home.** There is no analytics code and no cloud lookup anywhere in the codebase. The CSP names no external origin (`connect-src 'none'`) -- verify with a grep, don't take the README's word for it. Vanish sends outbound traffic in exactly **two** places, both on the Network panel, both off until you agree to them separately, and neither ever on a timer: a single ICMP ping (to your own router, or to `1.1.1.1` / `8.8.8.8` -- it will not send one anywhere else), and the connection speed test. Nothing is ever sent unless you tap the tile.
 - **No autonomous deletion.** No scheduler, no background service, no "auto-clean" -- with one narrow, explicit exception: an *optional* setting to permanently purge quarantined items past a retention period at app start, off by default. Every other removal traces to a checkbox you ticked that session.
 - **Not an antivirus.** Vanish surfaces information; it makes no threat judgments.
 - **No silent auto-elevation.** Vanish can be set to *ask* Windows for elevation automatically at startup instead of waiting for a click (Settings → "Start Vanish as administrator", off by default) -- but Windows' own UAC consent prompt still appears on every single launch either way. There is no path in this codebase that skips it.
