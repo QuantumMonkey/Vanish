@@ -3610,6 +3610,176 @@ function Test-ProtectedDestination {
 
 
 # ==========================================================================
+# dvem: THE REGISTRY HALF, which cihg and SEC-2 both shipped without.
+# ==========================================================================
+# cihg was built because "quarantine a file, overwrite the payload inside the
+# vault entry folder, restore" returned success and put back somebody else's
+# content. It hashes and verifies every FILE row. The registry row of the same
+# vault entry had no hash of any kind, and the restore path went straight from
+# "the file exists" to running it as administrator:
+#
+#     if (-not (Test-Path -LiteralPath $regFile)) { ...missing...; continue }
+#     $null = & reg.exe import "$regFile" 2>&1
+#
+# reg.exe import applies whatever the file says. Resolve-SafeVaultPath proves
+# the .reg sits inside the entry folder and says nothing about its contents.
+#
+# THREE CHECKS, IN INCREASING ORDER OF WHAT THEY ASSUME:
+#
+#   1. The hash (added at the quarantine site, checked at the restore site,
+#      mirroring the file rows exactly). Catches the payload being swapped
+#      under a manifest nobody touched.
+#   2. Containment, below. Every key the .reg writes must be the row's own
+#      recorded keyPath or beneath it. Catches the .reg being swapped for one
+#      that targets somewhere else entirely, which the hash also catches, and
+#      catches a manifest whose hash was updated to match, which it does not.
+#   3. Test-ProtectedRegistryDestination, below. A rule in CODE rather than in
+#      data, so it holds when checks 1 and 2 are both satisfied by an attacker
+#      who can write the manifest.
+#
+# BEING HONEST ABOUT WHAT THIS DOES NOT FIX. The manifest is the trust root,
+# and while it is user-writable (al45: check-data-dir reports protected=false
+# with the operator's own account as a non-admin writer, and SEC-3's ACL is
+# applied only from the first ELEVATED start) an attacker who can write it can
+# satisfy the hash and containment together. Check 3 is the one that still
+# holds, and SEC-3 is the actual root. This narrows the window; it does not
+# close it, and pretending otherwise would be the kind of comment this
+# repository has already been bitten by.
+
+# Every key a .reg file would write, normalised to the HKLM\... short form the
+# manifest uses.
+#
+# Returns $null - not an empty list - when the file cannot be read or parsed.
+# An unparsable restore manifest must REFUSE, not sail through a containment
+# check that found no keys to object to; "I could not look" is not "there is
+# nothing there", which is the same rule the finder contract states.
+function Get-RegFileKeyPaths {
+    param([string]$path)
+
+    $lines = $null
+    try { $lines = @(Get-Content -LiteralPath $path -ErrorAction Stop) } catch { return $null }
+    if ($null -eq $lines) { return $null }
+
+    $keys = [System.Collections.Generic.List[string]]::new()
+    $continued = $false
+    foreach ($raw in $lines) {
+        $line = [string]$raw
+        # A hex value can span lines, each continued one ending in a backslash.
+        # A '[' inside such a continuation is DATA, and reg.exe does not treat
+        # it as a key header either - so neither does this.
+        if ($continued) {
+            $continued = $line.TrimEnd().EndsWith('\')
+            continue
+        }
+        $continued = $line.TrimEnd().EndsWith('\')
+
+        $t = $line.Trim()
+        if (-not $t.StartsWith('[')) { continue }
+        if (-not $t.EndsWith(']')) { return $null }   # a header we cannot read
+
+        $inner = $t.Substring(1, $t.Length - 2).Trim()
+        # "[-HKEY_...]" DELETES the key on import. reg.exe export never writes
+        # one, so its presence in a vault manifest means the file is not the
+        # file we wrote. Refuse the whole thing rather than reason about it.
+        if ($inner.StartsWith('-')) { return $null }
+
+        $norm = ConvertTo-RegExePath $inner
+        if ([string]::IsNullOrWhiteSpace($norm)) { return $null }
+        $keys.Add($norm.TrimEnd('\'))
+    }
+    return ,@($keys)
+}
+
+# Is $child the same key as $parent, or beneath it? Segment-aware on purpose:
+# a plain StartsWith would accept "HKLM\Software\AppEvil" as being under
+# "HKLM\Software\App".
+function Test-RegPathWithin {
+    param([string]$child, [string]$parent)
+    if ([string]::IsNullOrWhiteSpace($child) -or [string]::IsNullOrWhiteSpace($parent)) { return $false }
+    $c = $child.TrimEnd('\')
+    $p = $parent.TrimEnd('\')
+    if ($c.Equals($p, [System.StringComparison]::OrdinalIgnoreCase)) { return $true }
+    return $c.StartsWith($p + '\', [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+# Keys Vanish will not be the mechanism for writing as administrator.
+#
+# ASKED AT BOTH ENDS, and that is the design rather than belt-and-braces. INV-1
+# says quarantine may only take what restore can put back; a predicate applied
+# only at restore produces an entry that quarantines cleanly and can never be
+# restored, which is a worse failure than refusing up front. Writing it once
+# and calling it from both sites is what keeps that true.
+#
+# The list is deliberately SHORT and every line is here because Vanish has no
+# cleaner that touches it. A guard that refuses things the app legitimately
+# does gets relaxed by the next person under deadline; one that has never
+# fired on a legitimate key does not.
+#
+# Note what is NOT here, and why:
+#   Run / RunOnce                the startup cleaner quarantines these, by design
+#   ...CurrentControlSet\Services\<name>   so does the services cleaner
+#   ...Control\Session Manager\Environment the PATH cleaner exports this whole
+#                                key as its restore manifest (mode=manifest-only)
+# A blanket refusal of the Control subtree would have broken that third one
+# silently at restore time - found by asking this question at the quarantine
+# end too, which is the point.
+function Test-ProtectedRegistryDestination {
+    param([string]$keyPath)
+
+    if ([string]::IsNullOrWhiteSpace($keyPath)) { return $true }
+    $k = (ConvertTo-RegExePath $keyPath)
+    if ([string]::IsNullOrWhiteSpace($k)) { return $true }
+    $k = $k.TrimEnd('\')
+
+    $segments = @($k -split '\\' | Where-Object { $_ -ne '' })
+    if ($segments.Count -lt 1) { return $true }
+
+    # An unrecognised prefix means ConvertTo-RegExePath did not recognise the
+    # hive and handed the string back unchanged. Nothing downstream should
+    # import that.
+    if (@('HKLM', 'HKCU', 'HKCR', 'HKU', 'HKCC') -notcontains $segments[0]) { return $true }
+
+    # A bare hive is never a key anything here quarantines.
+    if ($segments.Count -lt 2) { return $true }
+
+    # Depth, and it is NOT one number for every hive - a first draft used a flat
+    # minimum of three and broke the PATH cleaner, which quarantines
+    # "HKCU\Environment". Two segments. Caught by phase4-ipc-verify, which is
+    # what that suite is for.
+    #
+    # The rule this guard actually enforces is "Vanish will not be the mechanism
+    # for an ELEVATED write that grants code execution", and HKCU is the
+    # operator's own hive: a write there carries their own privilege and is
+    # something they could do without us. The machine-wide hives are where depth
+    # matters, because "HKLM\SOFTWARE" as a restore target is not an uninstall
+    # remnant, it is the whole registry.
+    if ($segments[0] -ne 'HKCU' -and $segments.Count -lt 3) { return $true }
+
+    # SAM and SECURITY hold the account database and the LSA policy. Vanish has
+    # no code that reads them, let alone writes them.
+    if ($segments[0] -eq 'HKLM' -and @('SAM', 'SECURITY') -contains $segments[1]) { return $true }
+
+    # The classic elevated-persistence writes. Each of these executes attacker
+    # code as SYSTEM or inside every process on the machine, and none of them is
+    # somewhere an uninstaller leaves rubbish.
+    $blocked = @(
+        'HKLM\SYSTEM\CurrentControlSet\Control\Lsa',
+        'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows',                     # AppInit_DLLs
+        'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon',                    # Userinit, Shell
+        'HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options',
+        'HKLM\SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Windows',
+        'HKLM\SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Winlogon',
+        'HKLM\SOFTWARE\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Image File Execution Options'
+    )
+    foreach ($b in $blocked) {
+        if (Test-RegPathWithin -child $k -parent $b) { return $true }
+    }
+
+    return $false
+}
+
+
+# ==========================================================================
 # z3s, OPEN HALF. Operator decision 2026-08-19: a restore MAY write into a
 # protected location when the destination is the file's own recorded
 # original path.
@@ -4166,6 +4336,24 @@ function Invoke-QuarantineItems {
             status   = "failed"
             error    = $null
             mode     = $mode
+            # dvem: declared here rather than only on the success path, so every
+            # registry row has the same shape whatever happened to it - the file
+            # rows already do this, and a row whose fields appear only sometimes
+            # is how a consumer learns to guess.
+            contentHash = $null
+            hashAlgo    = $null
+            hashNote    = $null
+        }
+
+        # dvem: THE SAME PREDICATE THE RESTORE ASKS, asked here first. INV-1 -
+        # quarantine may only take what restore can put back - so a key restore
+        # would refuse must not be quarantined in the first place. An entry that
+        # goes in and can never come out is a worse failure than a refusal.
+        if (Test-ProtectedRegistryDestination $regExePath) {
+            $row.status = "refused"
+            $row.error  = "Vanish will not quarantine this key: restoring it would mean writing to a location that grants code execution as administrator, so it is not something the vault can promise to undo."
+            $regRows.Add($row)
+            continue
         }
 
         if (-not (Test-Path -LiteralPath $psPath)) {
@@ -4189,6 +4377,15 @@ function Invoke-QuarantineItems {
             $regRows.Add($row)
             continue
         }
+
+        # dvem: hash what the vault NOW HOLDS, exactly as the file rows do, so
+        # restore has something to check the .reg against. Same three fields,
+        # same helper, same rule that a hash which cannot be taken records why
+        # and leaves the entry restorable.
+        $rh = Get-VaultContentHash -path $regFile
+        $row.contentHash = $rh.hash
+        $row.hashAlgo    = $rh.algo
+        $row.hashNote    = $rh.why
 
         if ($mode -eq "manifest-only") {
             $row.status  = "quarantined"
@@ -4381,6 +4578,60 @@ function Invoke-VaultRestore {
             $res.error = "Restore manifest (.reg) missing."
             $regResults.Add($res); continue
         }
+
+        # dvem, CHECK 3 FIRST because it is the one that does not trust the
+        # manifest. The other two compare the file against what the manifest
+        # says; this compares the manifest against a rule in code, so it is the
+        # check that still holds when the manifest itself is the thing that was
+        # tampered with.
+        if (Test-ProtectedRegistryDestination $r.keyPath) {
+            $res.error = "Refused: $($r.keyPath) is not a key Vanish will write as administrator. Nothing was imported."
+            $regResults.Add($res); continue
+        }
+
+        # dvem, CHECK 2. reg.exe import writes whatever the file names, and up
+        # to here the only thing proved about the file is that it sits inside
+        # the entry folder. Every key it would write must be the key this row
+        # says was exported, or beneath it.
+        $regKeys = Get-RegFileKeyPaths -path $regFile
+        if ($null -eq $regKeys) {
+            $res.error = "Refused: the restore manifest could not be read as a registry export. Nothing was imported."
+            $regResults.Add($res); continue
+        }
+        if ($regKeys.Count -eq 0) {
+            $res.error = "Refused: the restore manifest names no registry key. Nothing was imported."
+            $regResults.Add($res); continue
+        }
+        $stray = @($regKeys | Where-Object { -not (Test-RegPathWithin -child $_ -parent $r.keyPath) })
+        if ($stray.Count -gt 0) {
+            $res.error = "Refused: the restore manifest would write outside the key it recorded. Expected everything under $($r.keyPath); found $($stray[0]). Nothing was imported."
+            $regResults.Add($res); continue
+        }
+
+        # dvem, CHECK 1 - cihg's check, which the registry rows never had. Same
+        # wording and the same back-compat rule as the file half: an entry
+        # quarantined before this shipped has no hash, and restores with a note
+        # saying it could not be verified rather than a claim that it was.
+        $res.verified = $false
+        $res.verifyNote = $null
+        if ([string]::IsNullOrWhiteSpace($r.contentHash)) {
+            $res.verifyNote = if ($r.hashNote) {
+                "Not verified: no hash was recorded when this key was quarantined ($($r.hashNote))."
+            } else {
+                'Not verified: this entry predates registry content hashing, so there is nothing to check the manifest against.'
+            }
+        } else {
+            $actualReg = Get-VaultContentHash -path $regFile
+            if ([string]::IsNullOrWhiteSpace($actualReg.hash)) {
+                $res.verifyNote = "Not verified: the restore manifest could not be re-hashed now ($($actualReg.why))."
+            } elseif ($actualReg.hash -ne $r.contentHash) {
+                $res.error = "Refused: the restore manifest has changed since this key was quarantined. Expected $($r.hashAlgo) $($r.contentHash.Substring(0, [Math]::Min(16, $r.contentHash.Length)))..., found $($actualReg.hash.Substring(0, [Math]::Min(16, $actualReg.hash.Length))).... Nothing was imported. The .reg is still in the vault; inspect it before restoring."
+                $regResults.Add($res); continue
+            } else {
+                $res.verified = $true
+            }
+        }
+
         try {
             $null = & reg.exe import "$regFile" 2>&1
             if ($LASTEXITCODE -eq 0) { $res.status = "restored" }

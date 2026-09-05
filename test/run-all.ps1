@@ -1,4 +1,4 @@
-# Runs every Vanish verification suite and prints one summary.
+﻿# Runs every Vanish verification suite and prints one summary.
 # Read-only suites run in either tier; the rest need Full Mode and will say so.
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File test\run-all.ps1
@@ -75,6 +75,7 @@ $suites = @(
     # real elevated write attempt against a throwaway vault, and asserts the
     # undo path still works when the data directory is locked.
     @{ Name = "Restore destination guard";   Kind = "ps";       Path = "test\vault-destination-verify.ps1" },
+    @{ Name = "Registry restore guard (dvem)"; Kind = "ps";       Path = "test\vault-registry-integrity-verify.ps1" },
     @{ Name = "Elevation tiers (TASK-04)";     Kind = "electron"; Path = "test/tier-verify.js" },
     @{ Name = "Vault IPC (TASK-02/03)";        Kind = "electron"; Path = "test/vault-ipc-verify.js" },
     @{ Name = "Startup actions IPC (dmu)";     Kind = "electron"; Path = "test/startup-action-ipc-verify.js" },
