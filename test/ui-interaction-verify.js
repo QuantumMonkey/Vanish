@@ -547,16 +547,29 @@ app.whenReady().then(async () => {
       `the auto-detected destination is named as the user's router, with the address (got: "${detected}")`
     );
 
-    // Replace it with something Vanish cannot vouch for.
-    await win.webContents.executeJavaScript(`
+    // wy7a: the control is a SELECT now, not a text box - main.js will only
+    // ping this PC's own router or a public resolver it knows, and a field
+    // that accepts input the boundary then rejects is worse than one that
+    // never offered it. Driven the way a person drives a select: open, choose,
+    // commit. Returned as a value rather than thrown, because a throw in here
+    // HANGS Electron rather than rejecting - which is exactly what happened
+    // when this block was left driving the old text box (bd hy56).
+    const pick = await win.webContents.executeJavaScript(`
       (() => {
-        document.getElementById('net-ping-edit-btn').click();
-        const i = document.getElementById('net-ping-dest-input');
-        i.value = '8.8.8.8';
-        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      })();
-      true;
+        try {
+          const btn = document.getElementById('net-ping-edit-btn');
+          if (!btn) return 'no edit button - the tile is stuck open';
+          btn.click();
+          const i = document.getElementById('net-ping-dest-input');
+          if (!i) return 'no destination control after clicking edit';
+          if (i.tagName !== 'SELECT') return 'the control is a ' + i.tagName + ', not a SELECT';
+          i.value = '8.8.8.8';
+          i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          return true;
+        } catch (e) { return String((e && e.stack) || e); }
+      })()
     `);
+    assert(pick === true, 'the destination picker opens and takes a choice', String(pick));
     await wait(300);
     const edited = await win.webContents.executeJavaScript(
       `document.querySelector('#net-ping-tile .net-rate-label').textContent.replace(/\\s+/g, ' ').trim()`
@@ -569,15 +582,24 @@ app.whenReady().then(async () => {
 
     // Typing the detected gateway back in earns the label back - the flag is
     // compared against the real gateway, not latched off on first edit.
-    await win.webContents.executeJavaScript(`
+    const pickBack = await win.webContents.executeJavaScript(`
       (() => {
-        document.getElementById('net-ping-edit-btn').click();
-        const i = document.getElementById('net-ping-dest-input');
-        i.value = '192.168.1.1';
-        i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-      })();
-      true;
+        try {
+          const btn = document.getElementById('net-ping-edit-btn');
+          if (!btn) return 'no edit button - the tile is stuck open';
+          btn.click();
+          const i = document.getElementById('net-ping-dest-input');
+          if (!i) return 'no destination control after clicking edit';
+          const values = Array.from(i.options).map((o) => o.value);
+          if (!values.includes('192.168.1.1')) return 'the router is not on offer: ' + values.join(', ');
+          i.value = '192.168.1.1';
+          i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          return true;
+        } catch (e) { return String((e && e.stack) || e); }
+      })()
     `);
+    assert(pickBack === true,
+      'the detected router is offered as a choice and can be picked back', String(pickBack));
     await wait(300);
     const restored = await win.webContents.executeJavaScript(
       `document.querySelector('#net-ping-tile .net-rate-label').textContent.replace(/\\s+/g, ' ').trim()`

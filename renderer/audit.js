@@ -977,9 +977,20 @@ function wirePingTile() {
     };
     input.addEventListener('change', commit);
     input.addEventListener('keydown', (e) => {
+      // Enter still commits. It did when this was a text box, and removing it
+      // when the control became a select left the tile stuck in edit mode: the
+      // edit button is only rendered when it is NOT editing, so the next thing
+      // to reach for it got null. In ui-interaction-verify that threw inside
+      // executeJavaScript, which Electron HANGS on rather than rejecting, and
+      // the whole run stalled - see bd hy56, whose timeout is what caught it.
+      if (e.key === 'Enter') commit();
       if (e.key === 'Escape') { pingEditing = false; reRenderPingTile(); }
     });
-    input.addEventListener('blur', commit);
+    // Blur CLOSES the editor without committing. A select always has some
+    // option selected, so committing on blur would silently change the
+    // destination for a user who opened the control and clicked away - which a
+    // text box could not do, because leaving it empty was a no-op.
+    input.addEventListener('blur', () => { pingEditing = false; reRenderPingTile(); });
   }
 }
 

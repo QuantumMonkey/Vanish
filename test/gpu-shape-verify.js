@@ -103,7 +103,11 @@ if (payload && payload.success !== true) {
   // An idle machine can legitimately report nothing, so an empty map is not a
   // failure on its own - but it IS what the bug looked like, so say so.
   if (entries.length === 0) {
-    console.log('  NOTE  byPid is empty - no process was using the GPU at sample time.');
+    // hy56: SKIP, not NOTE. The shape checks are in the else branch, so this
+    // path runs none of them - and run-all.ps1 counts skips by matching ^SKIP,
+    // which meant four to five assertions vanished from the run silently,
+    // counted neither as skips nor as anything else.
+    console.log('  SKIP  byPid is empty - no process was using the GPU at sample time.');
     console.log('        Not a failure, but this is also what the regression looked like:');
     console.log('        re-run while something is rendering to exercise the shape checks.');
   } else {
@@ -139,7 +143,9 @@ if (payload && payload.success !== true) {
 
   const adapters = payload.byAdapter || [];
   if (adapters.length === 0) {
-    console.log('  NOTE  No adapters reported at sample time - nothing to check here.');
+    // hy56: SKIP for the same reason - the adapterKey and LUID assertions are
+    // all in the else branch and did not run.
+    console.log('  SKIP  No adapters reported at sample time - nothing to check here.');
   } else {
     assert(adapters.every((a) => typeof a.adapterKey === 'string' && a.adapterKey.length > 0),
       'every adapter carries an adapterKey');

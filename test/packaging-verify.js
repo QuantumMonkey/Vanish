@@ -65,7 +65,9 @@ for (const sib of siblings) {
   if (!fs.existsSync(onDisk)) {
     // A path the engine builds for something that does not exist in the source
     // tree either is not a packaging problem - it is a runtime-optional path.
-    console.log(`  NOTE  ${sib} is referenced by the engine but absent from the source tree; nothing to package`);
+    // hy56: SKIP - the extraResources assertion below is skipped by the
+    // continue, so this is one fewer packaging check than the total implies.
+    console.log(`  SKIP  ${sib} is referenced by the engine but absent from the source tree; nothing to package`);
     continue;
   }
   assert(

@@ -63,6 +63,30 @@ if (-not $TierResultFile) {
 
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
+# hy56: A PER-SUITE DEADLINE, IN THE RUNNER RATHER THAN IN EACH SUITE.
+#
+# Several suites document that Electron HANGS rather than fails on a rejected
+# executeJavaScript, and only nine of roughly twenty-two carry a watchdog of
+# their own. A hang in one of the others stalls the WHOLE run indefinitely -
+# which happened on 2026-09-05, on a run started to verify an unrelated fix. The
+# suite passed 114/114 when run on its own minutes later, so nothing was even
+# wrong with it: the runner simply had no way to give up.
+#
+# Putting the deadline here rather than adding a watchdog to each suite is the
+# point. A watchdog per suite is a rule twenty-two files have to remember; a
+# deadline in the runner covers the one that gets written next week too.
+#
+# Ten minutes is deliberately generous - real-data-verify and the hygiene panel
+# take minutes on a loaded machine, and a timeout that fires on a slow suite
+# would teach everyone to raise it until it never fires at all.
+$SuiteTimeoutSeconds = 600
+
+$electronCmd = Join-Path $root 'node_modules\.bin\electron.cmd'
+
+# The helper lives in its own file so test\runner-guard-verify.ps1 can assert
+# the kill path without registering a deliberately-hanging suite in this list.
+. (Join-Path $PSScriptRoot 'lib\suite-runner.ps1')
+
 Write-Host ""
 Write-Host "=======================================" -ForegroundColor Cyan
 Write-Host " Vanish verification suite" -ForegroundColor Cyan
@@ -71,6 +95,7 @@ Write-Host ("Tier: {0}" -f $(if ($isAdmin) { "Full Mode" } else { "Audit Mode - 
 
 $suites = @(
     @{ Name = "Vault engine (TASK-01)";        Kind = "ps";       Path = "test\vault-verify.ps1" },
+    @{ Name = "Runner guards (hy56)";          Kind = "ps";       Path = "test\runner-guard-verify.ps1" },
     # The restore destination guard, attacked rather than confirmed. Performs a
     # real elevated write attempt against a throwaway vault, and asserts the
     # undo path still works when the data directory is locked.
@@ -196,18 +221,19 @@ foreach ($suite in $suites) {
         continue
     }
 
-    $output = switch ($suite.Kind) {
-        "ps"       { & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $suite.Path 2>&1 }
-        "node"     { & node $suite.Path 2>&1 }
-        "electron" { & ".\node_modules\.bin\electron.cmd" $suite.Path 2>&1 }
+    $run = switch ($suite.Kind) {
+        "ps"       { Invoke-SuiteProcess -exe 'powershell.exe' -argv @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $suite.Path) -timeoutSeconds $SuiteTimeoutSeconds }
+        "node"     { Invoke-SuiteProcess -exe 'node' -argv @($suite.Path) -timeoutSeconds $SuiteTimeoutSeconds }
+        "electron" { Invoke-SuiteProcess -exe $electronCmd -argv @($suite.Path) -timeoutSeconds $SuiteTimeoutSeconds }
         # Fixture-simulated Full Mode (VANISH_STUB_TIER), independent of whether
         # THIS process is actually elevated - runs in either tier.
         "electron-full" {
             $env:VANISH_STUB_TIER = "full"
-            try { & ".\node_modules\.bin\electron.cmd" $suite.Path 2>&1 }
+            try { Invoke-SuiteProcess -exe $electronCmd -argv @($suite.Path) -timeoutSeconds $SuiteTimeoutSeconds }
             finally { Remove-Item Env:\VANISH_STUB_TIER -ErrorAction SilentlyContinue }
         }
     }
+    $output = $run.Lines
 
     # On disk BEFORE anything is parsed out of it, so a suite that printed its
     # findings and then died still leaves them behind to read.
@@ -235,8 +261,19 @@ foreach ($suite in $suites) {
         foreach ($w in $warnLines) { Write-Host ("  " + $w) -ForegroundColor Yellow }
         foreach ($f in $failLines) { Write-Host ("  " + $f) -ForegroundColor Red }
     } else {
-        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; FailLines = $failLines; WarnLines = $warnLines; SkipLines = $skipLines; Log = $logPath }
-        Write-Host ("  did not report a result (needs Full Mode, or it crashed) - full output: {0}" -f $logPath) -ForegroundColor DarkYellow
+        # hy56: "did not report a result" ALWAYS means a crash or a hang, and
+        # the old message led with the wrong diagnosis. Every registered suite
+        # prints a Result line even when it skips its entire body - verified in
+        # vault-verify.ps1, finder-credentials-verify.ps1,
+        # data-dir-ownership-verify.js and relaunch-live-probe.ps1 - so "needs
+        # Full Mode" was never the explanation, and offering it first sent
+        # people to check their shell instead of reading the log.
+        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; Crashed = $true; TimedOut = $run.TimedOut; FailLines = $failLines; WarnLines = $warnLines; SkipLines = $skipLines; Log = $logPath }
+        if ($run.TimedOut) {
+            Write-Host ("  TIMED OUT after {0}s and was killed - full output: {1}" -f $SuiteTimeoutSeconds, $logPath) -ForegroundColor Red
+        } else {
+            Write-Host ("  CRASHED - printed no Result line. Full output: {0}" -f $logPath) -ForegroundColor Red
+        }
     }
 }
 
@@ -248,13 +285,22 @@ Write-Host "=======================================" -ForegroundColor Cyan
 $totalPassed = 0
 $totalFailed = 0
 $missingSuites = @()
+$crashedSuites = @()
 foreach ($r in $results) {
     if (-not $r.Ran) {
         if ($r.Missing) {
             Write-Host ("  {0,-32} FILE MISSING  ({1})" -f $r.Name, $r.Path) -ForegroundColor Red
             $missingSuites += $r
         } else {
-            Write-Host ("  {0,-32} NOT RUN  (needs Full Mode, or it crashed -- read its log)" -f $r.Name) -ForegroundColor DarkYellow
+            # hy56: counted, and RED. This used to print DarkYellow and leave
+            # the exit code at zero - so a crashed or hung suite produced a
+            # green run that had silently tested less. run-all.ps1's own
+            # argument for the missing-FILE case applies here unchanged, and it
+            # is already written twenty lines up: "the alternative is a green
+            # exit code on a run that silently tested less."
+            $what = if ($r.TimedOut) { "TIMED OUT  (killed after ${SuiteTimeoutSeconds}s -- read its log)" } else { "CRASHED  (no Result line -- read its log)" }
+            Write-Host ("  {0,-32} {1}" -f $r.Name, $what) -ForegroundColor Red
+            $crashedSuites += $r
         }
         continue
     }
@@ -397,12 +443,30 @@ if ($missingSuites.Count -gt 0) {
     Write-Host ("  them, so the TOTAL above is missing their assertions entirely.") -ForegroundColor Red
 }
 
+# hy56: the same treatment, for the same reason. z6k fixed this for a missing
+# FILE and left it broken for a suite that ran and died - which is the harder
+# one to notice, because the suite is registered, present, and printed
+# something.
+if ($crashedSuites.Count -gt 0) {
+    Write-Host ""
+    Write-Host " Suites that did NOT finish" -ForegroundColor Red
+    Write-Host " --------------------------" -ForegroundColor Red
+    foreach ($r in $crashedSuites) {
+        $what = if ($r.TimedOut) { "timed out after ${SuiteTimeoutSeconds}s" } else { "crashed without printing a Result line" }
+        Write-Host ("  {0,-32} {1}" -f $r.Name, $what) -ForegroundColor Red
+        Write-Host ("      {0}" -f $r.Log) -ForegroundColor DarkGray
+    }
+    Write-Host ("  Every registered suite prints a Result line even when it skips its whole") -ForegroundColor Red
+    Write-Host ("  body, so this is never 'needs Full Mode'. The TOTAL above is missing their") -ForegroundColor Red
+    Write-Host ("  assertions entirely.") -ForegroundColor Red
+}
+
 Write-Host ""
 Write-Host ("Every suite's full output: {0}" -f $logDir) -ForegroundColor DarkGray
 Write-Host "Rule 10 reminder: passing here is 'In Progress', not 'Complete'." -ForegroundColor DarkGray
 Write-Host "Complete requires a real run of anything that elevates, deletes or restores." -ForegroundColor DarkGray
 
-$exitCode = [int](($totalFailed -gt 0) -or ($missingSuites.Count -gt 0))
+$exitCode = [int](($totalFailed -gt 0) -or ($missingSuites.Count -gt 0) -or ($crashedSuites.Count -gt 0))
 
 # ---------------------------------------------------------------------------
 # pnor: the de-elevated child hands its counts back and stops here.
