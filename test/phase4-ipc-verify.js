@@ -170,6 +170,8 @@ app.whenReady().then(async () => {
 
   if (!tier.isFullMode) {
     console.log('');
+    // See the note in vault-ipc-verify: a marker, deliberately not a Result line.
+    console.log('SUITE-REFUSED: needs Full Mode - every purge and restore under test is a write. The -BothTiers run covers it from the elevated half.');
     console.log('This verification needs Full Mode. Re-run from an elevated shell.');
     app.exit(2);
     return;

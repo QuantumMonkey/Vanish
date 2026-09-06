@@ -254,6 +254,12 @@ foreach ($suite in $suites) {
     # other than what it claims, which is this codebase's recurring defect.
     $skipLines = @($output | Select-String -Pattern '^\s*SKIP\b' | ForEach-Object { $_.Line.Trim() })
 
+    # A whole suite declining to run, deliberately, with its reason. Distinct
+    # from a SKIP (one assertion inside a suite that did run) and from silence
+    # (a crash). See the three-state note further down.
+    $refusedLine = ($output | Select-String -Pattern '^\s*SUITE-REFUSED:\s*(.+)$' |
+        Select-Object -First 1 | ForEach-Object { $_.Matches[0].Groups[1].Value.Trim() })
+
     $summary = ($output | Select-String -Pattern '^Result: (\d+) passed, (\d+) failed' | Select-Object -Last 1)
     if ($summary) {
         $passed = [int]$summary.Matches[0].Groups[1].Value
@@ -263,19 +269,33 @@ foreach ($suite in $suites) {
         Write-Host ("  {0} passed, {1} failed" -f $passed, $failed) -ForegroundColor $colour
         foreach ($w in $warnLines) { Write-Host ("  " + $w) -ForegroundColor Yellow }
         foreach ($f in $failLines) { Write-Host ("  " + $f) -ForegroundColor Red }
+    } elseif ($refusedLine -and -not $run.TimedOut) {
+        # A SUITE THAT REFUSED ITSELF, ON PURPOSE, AND SAID SO.
+        #
+        # hy56 asserted that every registered suite prints a Result line even
+        # when it skips its whole body, and made the absence of one fatal. That
+        # premise came from the issue text and is FALSE: vault-ipc-verify,
+        # startup-action-ipc-verify and phase4-ipc-verify all refuse in Audit
+        # Mode and deliberately print NO Result line, with a comment explaining
+        # why - "Result: 0 passed, 0 failed" would report a clean zero-assertion
+        # pass instead of NOT RUN, which is the silence-that-looks-like-success
+        # this repository keeps fixing.
+        #
+        # Both intents were right and they needed a third state rather than one
+        # of them losing. A suite now has three outcomes, which is the same
+        # shape finders/_contract.ps1 uses one layer down: it RAN (a Result
+        # line), it REFUSED (this marker, with a reason), or it went silent -
+        # and only the third is a defect.
+        $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; Refused = $true; Reason = $refusedLine; FailLines = $failLines; WarnLines = $warnLines; SkipLines = $skipLines; Log = $logPath }
+        Write-Host ("  REFUSED: {0}" -f $refusedLine) -ForegroundColor DarkYellow
     } else {
-        # hy56: "did not report a result" ALWAYS means a crash or a hang, and
-        # the old message led with the wrong diagnosis. Every registered suite
-        # prints a Result line even when it skips its entire body - verified in
-        # vault-verify.ps1, finder-credentials-verify.ps1,
-        # data-dir-ownership-verify.js and relaunch-live-probe.ps1 - so "needs
-        # Full Mode" was never the explanation, and offering it first sent
-        # people to check their shell instead of reading the log.
+        # Genuine silence: no Result line and no refusal marker. That is a crash
+        # or a hang, and it is the only one of the three that is fatal.
         $results += @{ Name = $suite.Name; Passed = 0; Failed = 0; Ran = $false; Crashed = $true; TimedOut = $run.TimedOut; FailLines = $failLines; WarnLines = $warnLines; SkipLines = $skipLines; Log = $logPath }
         if ($run.TimedOut) {
             Write-Host ("  TIMED OUT after {0}s and was killed - full output: {1}" -f $SuiteTimeoutSeconds, $logPath) -ForegroundColor Red
         } else {
-            Write-Host ("  CRASHED - printed no Result line. Full output: {0}" -f $logPath) -ForegroundColor Red
+            Write-Host ("  CRASHED - no Result line and no SUITE-REFUSED marker. Full output: {0}" -f $logPath) -ForegroundColor Red
         }
     }
 }
@@ -289,11 +309,18 @@ $totalPassed = 0
 $totalFailed = 0
 $missingSuites = @()
 $crashedSuites = @()
+$refusedSuites = @()
 foreach ($r in $results) {
     if (-not $r.Ran) {
         if ($r.Missing) {
             Write-Host ("  {0,-32} FILE MISSING  ({1})" -f $r.Name, $r.Path) -ForegroundColor Red
             $missingSuites += $r
+        } elseif ($r.Refused) {
+            # Named and counted, not fatal. A suite that says "I need Full Mode
+            # and this is not it" has reported honestly; the -BothTiers run is
+            # what makes sure the other half covers it.
+            Write-Host ("  {0,-32} REFUSED  ({1})" -f $r.Name, $r.Reason) -ForegroundColor DarkYellow
+            $refusedSuites += $r
         } else {
             # hy56: counted, and RED. This used to print DarkYellow and leave
             # the exit code at zero - so a crashed or hung suite produced a

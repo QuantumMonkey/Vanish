@@ -121,6 +121,15 @@ app.whenReady().then(async () => {
     // zero-assertion pass instead of NOT RUN - which is exactly the "silence
     // that looks like success" this repo keeps fixing. vault-ipc-verify and
     // phase4-ipc-verify refuse the same way.
+    //
+    // STILL NO Result LINE, and now a marker instead. hy56 made the absence of
+    // a Result line fatal, on a premise that turned out false - that every
+    // suite prints one even when it skips its whole body. These three do not,
+    // for the good reason above, so the -BothTiers run of 2026-09-06 reported
+    // them as CRASHED. Both intents were right; what was missing was a third
+    // state. This line is it: a refusal is a suite reporting honestly, silence
+    // is a defect, and run-all can now tell them apart.
+    console.log('SUITE-REFUSED: needs Full Mode - every action under test is a write. The -BothTiers run covers it from the elevated half.');
     clearTimeout(watchdog);
     app.exit(2);
     return;

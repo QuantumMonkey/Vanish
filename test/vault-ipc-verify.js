@@ -99,6 +99,10 @@ app.whenReady().then(async () => {
 
   if (!tier.isFullMode) {
     console.log('');
+    // The marker run-all.ps1 reads to tell a deliberate refusal from a crash.
+    // NOT a "Result:" line: that would report a clean zero-assertion pass,
+    // which is the silence-that-looks-like-success this repo keeps fixing.
+    console.log('SUITE-REFUSED: needs Full Mode - every path under test is a write. The -BothTiers run covers it from the elevated half.');
     console.log('This verification needs Full Mode. Re-run from an elevated shell.');
     app.exit(2);
     return;

@@ -164,6 +164,39 @@ throw "died halfway"
 
     # ==================================================================
     Write-Host ""
+    Write-Host "A suite may REFUSE itself, and that is not a crash" -ForegroundColor Cyan
+
+    # hy56 made the absence of a Result line fatal on a premise that turned out
+    # FALSE: that every registered suite prints one even when it skips its whole
+    # body. vault-ipc-verify, startup-action-ipc-verify and phase4-ipc-verify all
+    # refuse in Audit Mode and deliberately print no Result line, with a comment
+    # explaining why - "Result: 0 passed, 0 failed" would report a clean
+    # zero-assertion pass. The -BothTiers run of 2026-09-06 reported all three as
+    # CRASHED.
+    #
+    # Both intents were right. What was missing was a third state, which is the
+    # same shape finders/_contract.ps1 uses one layer down: the suite RAN, it
+    # REFUSED with a reason, or it went silent - and only silence is a defect.
+    Assert-True ($runAll -match 'SUITE-REFUSED') `
+        "run-all reads a SUITE-REFUSED marker"
+    Assert-True ($runAll -match '\$refusedSuites \+= \$r') `
+        "and collects those suites separately from the crashed ones"
+    Assert-True (-not ($runAll -match '\$exitCode = \[int\]\([^)]*\$refusedSuites')) `
+        "a refusal does NOT fail the run - the suite reported honestly, and -BothTiers is what covers the other half"
+    Assert-True ($runAll -match 'REFUSED  \(\{1\}\)' -or $runAll -match 'REFUSED') `
+        "and it is NAMED in the summary, so a refusal is visible rather than merely non-fatal"
+
+    # The three that actually emit it, checked by name. A marker nothing prints
+    # is a state that never happens.
+    foreach ($s in @('vault-ipc-verify.js', 'startup-action-ipc-verify.js', 'phase4-ipc-verify.js')) {
+        $src = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot $s)
+        Assert-True ($src -match "SUITE-REFUSED:") "$s emits the marker when it refuses"
+        Assert-True (-not ($src -match "console\.log\('Result: 0 passed, 0 failed'\)")) `
+            "$s still does NOT print a zero-assertion Result line, which is what the marker exists to avoid"
+    }
+
+    # ==================================================================
+    Write-Host ""
     Write-Host "The skips that were invisible to the skip machinery" -ForegroundColor Cyan
 
     # run-all.ps1 counts skips by matching ^SKIP. Three sites printed NOTE while
