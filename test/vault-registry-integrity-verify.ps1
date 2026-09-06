@@ -3,9 +3,24 @@
 #
 #   powershell -NoProfile -ExecutionPolicy Bypass -File test\vault-registry-integrity-verify.ps1
 #
-# NEEDS FULL MODE for nothing at all - every key here is under HKCU, which the
-# operator owns. That is deliberate: this suite performs the attack for real,
-# and an attack suite that needs administrator to run is one nobody runs.
+# NEEDS FULL MODE, and the first version of this header said the opposite.
+#
+# "Every key here is under HKCU, which the operator owns" is true and is not the
+# point: quarantine-items refuses in Audit Mode whatever the hive, because the
+# vault itself is a Full Mode operation. The claim was written from the shape of
+# the fixture rather than from the engine's own gate, and it went unnoticed
+# because every run of this suite so far has been elevated.
+#
+# The -BothTiers run of 2026-09-06 found it. Unelevated, the quarantine was
+# refused, the assertions failed, and then the suite CRASHED - writing a tampered
+# .reg to a path the refused quarantine had never created, under
+# $ErrorActionPreference = 'Stop'. A crash is worse than a failure here: it
+# produces no Result line, which run-all counts as a suite that did not finish
+# (hy56), and it buries the actual reason under a DirectoryNotFoundException.
+#
+# So the tier is checked once, up front, and the whole thing skips with its
+# reason - the same shape vault-destination-verify already uses for its live
+# escalation attempt.
 #
 # WHAT WAS WRONG. cihg exists because "quarantine a file, overwrite the payload
 # inside the vault entry folder, restore" returned success and handed back
@@ -55,6 +70,23 @@ function Invoke-Engine($action, $params) {
     }
     $raw = & powershell.exe @psArgs 2>&1 | Out-String
     return $raw.Trim() | ConvertFrom-Json
+}
+
+# The tier gate, before anything is created. quarantine-items refuses in Audit
+# Mode, and every assertion in this file is downstream of a successful
+# quarantine - so an unelevated run has nothing to say and should say that,
+# once, rather than failing eleven times and then crashing on a path the
+# refusal never created.
+$isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host ""
+    Write-Host "Vault registry integrity and destination guard (dvem)"
+    Write-Host "====================================================="
+    Write-Host ""
+    Write-Host "  SKIP  the whole suite -- quarantine-items is Full Mode only, whatever the hive, so an unelevated run cannot stage a single vault entry to attack. The destination predicate itself is pure and is covered in either tier by the Test-ProtectedRegistryDestination assertions at the end of the elevated run." -ForegroundColor DarkYellow
+    Write-Host ""
+    Write-Host "Result: 0 passed, 0 failed"
+    exit 0
 }
 
 $vaultRoot = Join-Path $env:TEMP ("vanish-dvem-" + [Guid]::NewGuid().ToString('N').Substring(0, 8))
