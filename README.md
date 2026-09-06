@@ -6,7 +6,7 @@ Vanish opens on a **Health Advisor** dashboard: what this machine is, where the 
 
 The "for developers" part is not decoration. A general-purpose cleaner does not know that `node_modules` is disposable and a `.jks` keystore is not, that an unpushed branch exists nowhere else in the world, or that a stash is invisible to every other tool you own. Vanish leads with **what a delete would destroy** and only then with what it would free -- see [Rescue before reclaim](#rescue-before-reclaim).
 
-> Working version **0.9.0**, verified locally with `npm test`. Versions track milestones and keep moving past 1.0 -- see [docs/RELEASING.md](docs/RELEASING.md). 1.0 is the release that meets the gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md), not a finish line. Read [Status](#status) before you rely on this.
+> **1.0.0**, verified locally with `npm test` -- 2,711 assertions, and again unelevated through a de-elevated scheduled task, because an Administrator token reads through a Deny ACE and nine suites cannot build the condition they exist to test while elevated. **1.0 is not a finish line here and versions keep moving past it** -- see [docs/RELEASING.md](docs/RELEASING.md). It does mean the ship gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) are met and nothing is carried as unfinished; it does not mean the work stops. Read [Status](#status) and [Known limitations](#known-limitations) before you rely on it.
 
 <!-- DEMO GIF PLACEHOLDER
 Record with ScreenToGif: 30-60s showing scan → app select → wizard →
@@ -119,9 +119,9 @@ Discovery depth and deletion are independent: you can scan Advanced and still de
 
 ## Status
 
-Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. For 1.0 the clean-VM gate was **waived deliberately** rather than met -- see [Known limitations](#known-limitations) -- so treat everything below as "works on the machines it was built and used on," not "certified everywhere."
+Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. The clean-VM gate is now **met for Windows 11** -- see [Known limitations](#known-limitations) for what that still does not cover -- so treat everything below as "works on Windows 11, on the machines it was built and used on," not "certified everywhere."
 
-**Implemented and locally verified (working version 0.9.0):**
+**Implemented and locally verified (1.0.0):**
 - Quarantine-first removal for every destructive path -- files move into a versioned vault, registry keys export to a `.reg` restore manifest, *before* anything is removed ([lib/vault.js](lib/vault.js))
 - Audit Mode / Full Mode elevation tiers enforced independently in both the main process and the PowerShell engine -- a destructive action reachable only through a channel neither layer gates has not been found ([main.js](main.js) `fullModeOnly()`, [scanner.ps1](scanner.ps1) `Test-IsElevated`)
 - Restore point before uninstall, on by default, admin-gated ([scanner.ps1](scanner.ps1) `Create-RestorePoint`)
@@ -144,21 +144,24 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) §5 for the full implemented-vs-designed 
 
 ## Known limitations
 
-Three release gates were waived for 1.0 by deliberate decision, not oversight.
-Each has a real cost and it belongs here rather than in a commit message --
-an app whose whole argument is "we tell you what we actually know" does not
-get to be vague about its own shipping standard.
+1.0 here means *finished*, not *shipped with waivers* -- that is
+[docs/PRE-RELEASE.md](docs/PRE-RELEASE.md)'s definition and it is the scope
+authority. The code gates are met and the issue tracker is empty.
 
-| Waived | What it means for you |
+What follows is not a list of things left undone. It is the cost of decisions
+that were taken deliberately, and it belongs here rather than in a commit
+message -- an app whose whole argument is "we tell you what we actually know"
+does not get to be vague about its own shipping standard.
+
+| The decision | What it means for you |
 | --- | --- |
-| **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate for this release. |
+| **The binary is unsigned** | Windows SmartScreen will show "Windows protected your PC" on any machine other than the developer's. You have to click through it. There is no code-signing certificate, and for a non-commercial take-it-or-leave-it publication that cost was judged not worth paying. It reverses the moment there is a certificate. |
 | ~~**No clean-VM acceptance pass**~~ **Met, for Windows 11 only** | The full suite now runs unattended on a fresh Windows 11 image in Windows Sandbox and passes in both tiers -- Full Mode and, on a normal install, the de-elevated half too. What that still does NOT cover: the sandbox image ships with UAC disabled, so its own Audit Mode half cannot run there; and **Vanish has never been run on Windows 10 at all.** Windows 10 was dropped from scope on 2026-09-02 rather than waived -- it is not a target, and the requirement line below says so. |
 | **Single-user acceptance** | One person has used this end to end: the person who wrote it. Every "works" claim carries that caveat. |
 | **Machine Hygiene takes minutes, not seconds** | Last measured 2026-09-02 at **162.6 s** through the real panel for all thirteen checks, on the machine it was built on. One check (`duplicate-content`) is 88% of that, and about two thirds of ITS time is contention with the other twelve rather than work. It scales with the size of your profile. The screen shows which check is working and findings appear as they land, so the wait is legible -- but it is a wait, and this number has moved before. |
 
-The first reverses the moment there is a certificate. The clean-VM one is now
-met for Windows 11. Single-user acceptance reverses the moment someone else
-uses it -- reopen `442` in the issue tracker if you are that someone.
+Single-user acceptance reverses the moment someone else uses it -- open an issue
+if you are that someone, and say which of these turned out to be wrong.
 
 ### Not a waived gate, but a one-way door
 

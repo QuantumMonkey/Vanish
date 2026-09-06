@@ -28,6 +28,9 @@ confusion.
 `0` while the ship gates in [PRE-RELEASE.md](PRE-RELEASE.md) are outstanding.
 `1` when they are met -- that is what 1.0.0 means and all it means.
 
+MAJOR now also rolls when MINOR would reach `10`; see the no-double-digits
+amendment under MINOR below, which is the reason 1.0.0 arrived when it did.
+
 **After `1.0.0`, MAJOR keeps moving.** Bump it for a break in a contract
 someone outside this repo could be relying on: the IPC action interface, the
 `scanner.ps1` action names or payload shapes, the on-disk vault schema, or a
@@ -53,8 +56,38 @@ Concretely, any of:
   panel loads, a new shared surface every feature routes through.
 * An IPC or engine interface gains actions in a way older callers survive.
 
-Double digits are expected and correct. `0.13.0` is unambiguous and accurate.
-Never reset, compress, or cap the digit to keep it looking tidy.
+**~~Double digits are expected and correct. `0.13.0` is unambiguous and
+accurate. Never reset, compress, or cap the digit to keep it looking tidy.~~
+OVERRULED BY THE OPERATOR, 2026-09-06:**
+
+> *"i just dont like double digits in versioning"*
+
+That is a taste, it is the operator's to have, and it is recorded here rather
+than applied silently -- the previous rule said the opposite in bold, so a
+future session reading only this file would undo it.
+
+It is also the reason **0.10.0 became 1.0.0** and, so far as the number itself
+goes, the only reason. The ship gates in [PRE-RELEASE.md](PRE-RELEASE.md) were
+independently met and the bd board was empty, so `1` was also correct under the
+MAJOR rule above -- but the two facts arrived from opposite directions and the
+tidiness one came first. Saying so matters because the alternative is a version
+history that implies a ceremony nobody performed.
+
+**The constraint that governs it:** *"the numbers do need to mean something."*
+So this is not licence to roll a digit for neatness whenever one looks large.
+What it means concretely:
+
+* MINOR runs `0`-`9` within a MAJOR. A tenth milestone rolls MAJOR rather than
+  producing `1.10.0`.
+* MAJOR therefore means two things at once now: a contract break, *or* nine
+  milestones since the last roll. Both are real events; neither is decoration.
+* PATCH is left alone. It is the digit nobody reads as a claim, and capping it
+  would push genuine bug fixes into MINOR, which would make MINOR mean less --
+  the exact failure this constraint is guarding against.
+
+**OPEN, and deliberately not decided here:** whether PATCH may show double
+digits (`1.0.12`). It has not happened yet, and inventing the answer before the
+case exists is how the *old* rule in this section got written.
 
 ### PATCH (third digit)
 
@@ -88,7 +121,7 @@ MAJOR.
 | `0.9.2` | 2026-08-29 | One walk of the disk answers four checks instead of four, and the biggest unit stops being scheduled last: 107 seconds to 81 |
 | `0.9.3` | 2026-08-29 | The two git checks stop reporting the same repository once per junction alias -- 27 paths were 14 repositories -- and share one walk: 60 seconds to 7 |
 | `0.9.4` | 2026-08-29 | The consumer search stops listing one tree once per marker; and the benchmarks are re-based after the old per-check figures failed to reproduce |
-| `0.10.0` | 2026-09-06 | The honesty pass. A refused sweep stops reading as a clean machine, Force Uninstall moves out of the sidebar to the two places it is actually wanted, and the definitions panel says how much of BleachBit's catalogue it cannot reach |
+| `1.0.0` | 2026-09-06 | The honesty pass -- numbered 1.0.0 rather than 0.10.0 on the operator's no-double-digits rule, with the gates independently met. A refused sweep stops reading as a clean machine, Force Uninstall moves out of the sidebar to the two places it is actually wanted, and the definitions panel says how much of BleachBit's catalogue it cannot reach |
 
 `0.9` previously named the pre-release chore list (the elevated confirmations,
 the demo recording, signing, a second machine, a final docs pass). Those are

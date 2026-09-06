@@ -8,10 +8,23 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
-## [0.10.0] -- 2026-09-06
+## [1.0.0] -- 2026-09-06
 
-**The honesty pass.** A MINOR bump by docs/RELEASING.md's own test - "what would
-a user have to be told?" - because four of them are things a user notices:
+**The honesty pass.**
+
+**Why this number.** The work below is a MINOR bump by docs/RELEASING.md's own
+test - "what would a user have to be told?" - which made it `0.10.0`. It is
+`1.0.0` because the operator does not want double digits in a version, and said
+so; the ship gates were independently met and the board was empty, so `1` was
+also correct under the MAJOR rule, but the tidiness reason came first and the
+version history should not imply a ceremony nobody performed.
+
+**1.0 is not a finish line.** Versions keep moving past it. See
+docs/RELEASING.md, where the double-digit rule this reverses is recorded
+alongside the constraint that governs it: the numbers still have to mean
+something.
+
+Four of the changes below are things a user notices:
 
 - A System Clean sweep that was **refused** no longer draws a green tick and the
   words "Nothing left behind here." An ACL on one registry key used to do that.
