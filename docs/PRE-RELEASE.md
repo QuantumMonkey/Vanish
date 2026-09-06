@@ -76,7 +76,7 @@ and the waivers previously recorded against 1.0 move to 0.9's gate instead.
 | **0.6** | Say which, and say what matters | SHIPPED 2026-08-14: `aaw` (GPU column names the adapter) and `ddx` (what can be reached from outside). Still open under this theme: `tda` (startup items split killable/necessary), `h55` (unlocker picks from a list), `5b0` (column filters) |
 | **0.7** | Space you can actually recover | `7v3` (orphaned MSI/MSP cache, 1.2 GB measured), `be8` (firewall rule orphans), `ztl` (SharedDLLs + ghost PnP) |
 | **0.8** | Other people's tools, used properly | `7sl` BUILT 2026-08-19 (consume BleachBit CleanerML definitions), `ag0` (Windows Update list + handoff), `bcu` (more game platforms), `ht8` (runtime redistributables) |
-| **0.9** | Pre-release | ~~The six elevated confirmations~~ (done 2026-08-29), the demo recording, code signing, a second machine, final docs pass |
+| **0.9** | Pre-release | ~~The six elevated confirmations~~ (done 2026-08-29), ~~the demo recording~~ (done 2026-09-06), code signing, a second machine, final docs pass |
 | **1.0** | Everything above, done | No waivers carried forward |
 
 ### What 0.9 actually is, in plain terms
@@ -98,14 +98,45 @@ it does:
 | `bfh.2` | Turn the network hold on, confirm background transfers pause, turn it off, confirm everything returns |
 | `1qp` | Force Uninstall one genuinely broken entry and confirm the outcome |
 
-**"The demo GIF"** is a 30-60 second screen recording of one normal run - scan,
-pick a program, walk the wizard, review the leftovers, purge - saved as
+**"The demo GIF"** is a 30-60 second screen recording, saved as
 `docs/media/vanish-demo.gif` and dropped into the README where a placeholder
-comment currently sits. It exists so someone landing on the repo can see what
-the app does without installing it. It needs a human because it is a recording
-of a person using software.
+comment used to sit. It exists so someone landing on the repo can see what the
+app does without installing it.
 
-Neither is code. Both are 0.9.
+**DONE 2026-09-06, and two things in the paragraph above turned out to be
+wrong.** It is `docs/media/vanish-demo.gif`: 56 seconds, 4.2MB, made by
+`test/sandbox/demo-record.js`.
+
+1. *"It needs a human because it is a recording of a person using software."*
+   Half right, and the half that was wrong mattered. Driving the UI is
+   scriptable, so the recorder does that. Deciding what a stranger should be
+   shown, and whether a caption is true of the frame under it, is not -- two
+   captions were written before the frames existed and had to be replaced,
+   including the best line available (*"a section that could not be read says so
+   -- it does not say clean"*), because every section on this machine was
+   readable and the words would have been describing something not on screen.
+   Staging a denied key to make the caption true was the other option, and it is
+   the one this project exists to refuse.
+
+2. *"scan, pick a program, walk the wizard, review the leftovers, purge."* The
+   last two beats are not recordable unattended: they uninstall a real program
+   from the operator's machine and move real files into the vault. The recording
+   opens the wizard on its configure screen -- which is UI setup and nothing
+   else -- and closes it. What the GIF therefore does NOT show is a completed
+   uninstall or a real purge, and the README says so rather than letting the
+   omission read as coverage.
+
+Two costs bought along the way, both kept because they are reusable:
+`tools/gif-encode.js` (a GIF89a encoder, because this machine has no ffmpeg and
+a dev-only movie is not worth a lockfile entry -- see RELEASING.md on `npm ci`)
+and `tools/gif-decode.js`, which exists to check the encoder rather than trust
+it. Registered in `run-all.ps1` as "GIF encoder (f1tx)".
+
+The account name is redacted to `you` in the recording. It is a **public** repo
+under a pseudonym and the findings are full of `C:\Users\<name>`; promptgate
+Rule 18 already forbids local paths in doc files, and a GIF is a doc file that
+happens not to be greppable. Identifiers only -- no finding, count or verdict is
+touched.
 
 ## Cut permanently
 
@@ -253,7 +284,7 @@ publication, and the thing being taken or left is the same product.
       silent switch" text can never work against `steam.exe`, so today the app
       tells the user to do something that cannot succeed. Design is already
       written up in the issue.
-- [x] **`k2o`** Docs pass **done 2026-08-13** (README, CHANGELOG, ARCHITECTURE, including the renderer decomposition). The demo GIF still needs a human to record it.
+- [x] **`k2o`** Docs pass **done 2026-08-13** (README, CHANGELOG, ARCHITECTURE, including the renderer decomposition). The demo GIF landed 2026-09-06 (`f1tx`).
 
 ### Phase 3 -- live verification (operator, Windows Sandbox)
 
@@ -449,7 +480,7 @@ venue.
   deliberately ships NO definition of our own - see the note under 0.8
   below - and still wants one acceptance pass against a real BleachBit
   install, which needs a machine that has one.
-- The demo GIF, code signing, one external user.
+- Code signing and one external user. (The demo GIF landed 2026-09-06, `f1tx`.)
 
 - [ ] **Superseded note kept for the record:** 0.5 did not claim
       it.** The theme is "elevation you can trust" and what shipped is

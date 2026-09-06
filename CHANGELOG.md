@@ -8,6 +8,56 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
+## [Unreleased]
+
+**The demo recording, which was the last item in docs/PRE-RELEASE.md.**
+
+No shipped code changed, and there is deliberately no version bump: `tools/` and
+`test/` are outside package.json's `files` whitelist, and the README is not in
+the binary. Publishing a `1.0.1` whose executables are byte-identical to
+`1.0.0`'s would be noise.
+
+- **`docs/media/vanish-demo.gif`** -- 56 seconds, 4.2MB, in the README where a
+  placeholder comment sat. Real app, real engine, real machine: the programs,
+  counts, sizes and findings are that machine's own. Three things are staged and
+  labelled -- the two scans are a time-lapse, the captions are an overlay added
+  by the recorder, and the account name is replaced with `you`. **No destructive
+  action was recorded**: the uninstall wizard is opened on its configure screen
+  and closed, and every scan shown is read-only. So the GIF does not show a
+  completed uninstall or a purge, and the README says so.
+- **`test/sandbox/demo-record.js`** -- the recorder, kept so the GIF can be
+  remade when the UI moves rather than being a one-off nobody can reproduce.
+- **`tools/gif-encode.js`** -- an animated GIF89a encoder with no dependencies.
+  This machine has no ffmpeg, ImageMagick or gifski, and a development-only
+  movie does not justify a lockfile entry in a project that builds releases with
+  `npm ci` specifically so every package is pinned and integrity-checked. Global
+  palette by median cut, inter-frame diffing with transparency, and a dirty
+  rectangle per frame; stepped rather than smooth scrolling in the scenario took
+  the file from 10.1MB to 4.2MB, because the encoder pays for changed pixels.
+- **`tools/gif-decode.js`** -- a reader written from the format rather than from
+  the encoder, so the round trip is a check and not a tautology. The recorder
+  uses it to verify its own output before writing the file: a diff-and-composite
+  chain fails late by construction, so the last frame is the one that proves the
+  other two hundred.
+- **`test/gif-encode-verify.js`** -- 23 assertions, registered in `run-all.ps1`.
+  Exact pixel equality where the fixture has fewer colours than the palette,
+  the size claims measured against the emitted structure rather than described,
+  the LZW dictionary driven past 4096 codes on purpose so the mid-stream reset
+  is actually exercised, and finally the file handed to Chromium.
+
+Two defects in the recorder worth recording, both of which produced a
+plausible-looking result rather than an error:
+
+- It loaded the page before awaiting `main.bootstrapped`, so the renderer cached
+  a tier that had not been resolved yet. An **elevated machine filmed itself in
+  Audit Mode**, under a modal offering to restart as administrator that then
+  dimmed the app for the rest of the take. main.js exports that promise for
+  exactly this reason.
+- The pan named `.panel-scroll`, which matches nothing on the Health Advisor, so
+  it set `scrollTop` on no element and reported success -- a beat filmed a
+  motionless page under a caption promising to show what was below it. It now
+  finds whatever is actually scrollable and says so when nothing is.
+
 ## [1.0.0] -- 2026-09-06
 
 **The honesty pass.**

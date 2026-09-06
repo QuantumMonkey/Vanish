@@ -6,14 +6,20 @@ Vanish opens on a **Health Advisor** dashboard: what this machine is, where the 
 
 The "for developers" part is not decoration. A general-purpose cleaner does not know that `node_modules` is disposable and a `.jks` keystore is not, that an unpushed branch exists nowhere else in the world, or that a stash is invisible to every other tool you own. Vanish leads with **what a delete would destroy** and only then with what it would free -- see [Rescue before reclaim](#rescue-before-reclaim).
 
-> **1.0.0**, verified locally with `npm test` -- 2,711 assertions, and again unelevated through a de-elevated scheduled task, because an Administrator token reads through a Deny ACE and nine suites cannot build the condition they exist to test while elevated. **1.0 is not a finish line here and versions keep moving past it** -- see [docs/RELEASING.md](docs/RELEASING.md). It does mean the ship gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) are met and nothing is carried as unfinished; it does not mean the work stops. Read [Status](#status) and [Known limitations](#known-limitations) before you rely on it.
+> **1.0.0**, verified locally with `npm test` -- 2,766 assertions, and again unelevated through a de-elevated scheduled task, because an Administrator token reads through a Deny ACE and nine suites cannot build the condition they exist to test while elevated. **1.0 is not a finish line here and versions keep moving past it** -- see [docs/RELEASING.md](docs/RELEASING.md). It does mean the ship gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) are met and nothing is carried as unfinished; it does not mean the work stops. Read [Status](#status) and [Known limitations](#known-limitations) before you rely on it.
 
-<!-- DEMO GIF PLACEHOLDER
-Record with ScreenToGif: 30-60s showing scan → app select → wizard →
-leftover review tree → purge summary. Replace this block with:
 ![Vanish demo](docs/media/vanish-demo.gif)
--->
-> 📸 *Demo GIF coming -- see [docs/RELEASING.md](docs/RELEASING.md) for the release checklist.*
+
+<sub>**What you are looking at, and what is not literal.** Every frame is the real
+application driving the real engine against a real machine -- the programs, the
+counts, the sizes and the findings are that machine's own, and nothing on screen
+is mocked. Three things are staged and are marked as such: the two scans are a
+**time-lapse** (19 seconds of scanning shown in about 3, labelled on screen while
+it runs), the captions are an **overlay** added by the recorder and are not part
+of the app, and the **account name is replaced with `you`** in the paths.
+**Nothing destructive was recorded** -- the uninstall wizard is opened on its
+configure screen and closed again, and every scan shown is read-only. Remake it
+with `npx electron test/sandbox/demo-record.js`.</sub>
 
 ---
 

@@ -139,6 +139,10 @@ $suites = @(
     @{ Name = "Security regressions";          Kind = "ps";       Path = "test\security-verify.ps1" },
     @{ Name = "Details panel layout (5z5)";    Kind = "electron"; Path = "test/details-panel-layout-verify.js" },
     @{ Name = "Summary row layout (2xnj)";    Kind = "node";     Path = "test/summary-row-verify.js" },
+    # The README's demo GIF is produced by tools/gif-encode.js. Round-tripped
+    # through an independently written decoder, and finally handed to Chromium,
+    # because the decoder that matters for a README is somebody else's browser.
+    @{ Name = "GIF encoder (f1tx)";            Kind = "electron"; Path = "test/gif-encode-verify.js" },
     @{ Name = "Install date provenance (c0y)"; Kind = "electron"; Path = "test/install-date-provenance-verify.js" },
     @{ Name = "Install date sources (mp31)";   Kind = "ps";       Path = "test\install-date-source-verify.ps1" },
     @{ Name = "Install folder sizing (mp31)";  Kind = "electron"; Path = "test/install-size-verify.js" },
