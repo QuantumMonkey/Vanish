@@ -8,6 +8,27 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
+## [0.10.0] -- 2026-09-06
+
+**The honesty pass.** A MINOR bump by docs/RELEASING.md's own test - "what would
+a user have to be told?" - because four of them are things a user notices:
+
+- A System Clean sweep that was **refused** no longer draws a green tick and the
+  words "Nothing left behind here." An ACL on one registry key used to do that.
+- **Force Uninstall left the sidebar.** It is reached from the Health Advisor,
+  which counts and names programs that can no longer uninstall themselves, and
+  from the uninstall wizard at the moment an uninstaller actually fails. A
+  sidebar entry asked you to know in advance that your uninstall would fail.
+- **Two of the four summary cards are gone.** "Total Disk Space" restated the
+  Storage panel and "System Safety" restated the banner and the sidebar badge -
+  and removing them fixed a layout defect where the row cost *more* on a small
+  window than a large one (123px at 800x600 against 94px at 1440x900).
+- The **cleaning-definitions panel says what it cannot reach**: measured against
+  BleachBit 6.0.3, about 4 in 10 rules use instructions the vault cannot undo,
+  and they are every browser's history, cookies and cache.
+
+Everything below this heading shipped in it.
+
 ## [Unreleased]
 
 ### Fixed -- System Clean said your machine was clean when it had not been allowed to look
