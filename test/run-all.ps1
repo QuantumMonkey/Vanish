@@ -132,6 +132,7 @@ $suites = @(
     @{ Name = "Shared runtimes (ht8)";         Kind = "electron"; Path = "test/runtimes-verify.js" },
     @{ Name = "Windows updates (ag0)";         Kind = "electron"; Path = "test/updates-verify.js" },
     @{ Name = "Missing engine (frr)";          Kind = "electron"; Path = "test/engine-missing-verify.js" },
+    @{ Name = "Channel census";               Kind = "node";     Path = "test/channel-census-verify.js" },
     @{ Name = "Network attribution (bfh.1)";   Kind = "ps";       Path = "test\network-verify.ps1" },
     @{ Name = "Dead refs (7v3/be8/ztl)";       Kind = "ps";       Path = "test\dead-reference-verify.ps1" },
     @{ Name = "Force uninstall (REQ-20)";      Kind = "ps";       Path = "test\force-verify.ps1" },
