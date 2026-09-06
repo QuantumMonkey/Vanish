@@ -86,6 +86,53 @@ const MSI_ORPHAN = `${MSI_CACHE}\\vanish-ipc-orphan-probe.msi`;
 const UWP_DIR = `${process.env.LOCALAPPDATA}\\Packages\\${UWP_FAMILY}`;
 const UWP_FILE = `${UWP_DIR}\\LocalState\\payload.bin`;
 
+// THE OPERATOR'S REAL PATH, captured before anything touches it.
+//
+// This suite plants a dead directory into the LIVE HKCU\Environment PATH,
+// because the PATH cleaner has to be tested against a real PATH - there is no
+// fixture registry to point it at. cleanup() removed every other planted
+// artefact and left this one, on the reasoning that the purge itself puts the
+// PATH back.
+//
+// It does, WHEN THE PURGE SUCCEEDS. On 2026-09-06 a bug of mine made it refuse,
+// the assertions failed, and the planted entry stayed in the operator's real
+// PATH until it was removed by hand. A cleanup that only runs down the happy
+// path is not cleanup; it is a second thing that has to work.
+//
+// Captured once, restored in the finally, kind preserved - HKCU\Environment
+// Path is REG_EXPAND_SZ and writing it back as a plain string would silently
+// stop %VAR% entries expanding, which is a worse outcome than the debris.
+let originalUserPath = null;
+let originalUserPathKind = null;
+
+function capturePath() {
+  try {
+    originalUserPath = ps(
+      `(Get-Item -LiteralPath 'HKCU:\\Environment').GetValue('Path','','DoNotExpandEnvironmentNames')`
+    );
+    originalUserPathKind = ps(`(Get-Item -LiteralPath 'HKCU:\\Environment').GetValueKind('Path')`);
+  } catch {
+    originalUserPath = null;
+  }
+}
+
+function restorePath() {
+  if (originalUserPath === null) return;
+  const now = ps(
+    `(Get-Item -LiteralPath 'HKCU:\\Environment').GetValue('Path','','DoNotExpandEnvironmentNames')`
+  );
+  if (now === originalUserPath) return;
+  const kind = originalUserPathKind || 'ExpandString';
+  ps(`
+    $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $true)
+    $k.SetValue('Path', @'
+${originalUserPath}
+'@, [Microsoft.Win32.RegistryValueKind]::${kind})
+    $k.Close()
+  `);
+  console.log('  NOTE  the user PATH was left modified and has been restored to its captured value');
+}
+
 function cleanup() {
   ps(`
     foreach ($k in @('${HANDLER_KEY}','${CLSID_KEY}','${SVC_KEY}')) {
@@ -94,6 +141,7 @@ function cleanup() {
     if (Test-Path -LiteralPath '${UWP_DIR}') { Remove-Item -LiteralPath '${UWP_DIR}' -Recurse -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath '${MSI_ORPHAN}') { Remove-Item -LiteralPath '${MSI_ORPHAN}' -Force -ErrorAction SilentlyContinue }
   `);
+  restorePath();
 }
 
 app.whenReady().then(async () => {
@@ -126,6 +174,10 @@ app.whenReady().then(async () => {
     app.exit(2);
     return;
   }
+
+  // BEFORE the first cleanup(), which now calls restorePath() and would
+  // otherwise have nothing captured to restore to.
+  capturePath();
 
   cleanup();
 
@@ -499,6 +551,28 @@ app.whenReady().then(async () => {
       cleanerEntries.every((e) => (e.registry || []).every((r) => r.regFile)),
       'every quarantined registry row references a .reg restore manifest file'
     );
+
+    // THE SUITE LEFT THE MACHINE AS IT FOUND IT.
+    //
+    // Asserted rather than assumed, and asserted BEFORE the finally rather than
+    // inside it, so a difference is a FAILURE the operator reads - not a repair
+    // that happens quietly. restorePath() in cleanup() is the safety net for
+    // the case where this assertion never runs because something threw first;
+    // this line is what makes the ordinary case visible.
+    //
+    // It exists because on 2026-09-06 the PATH cleaner's purge was refused by a
+    // bug, the assertions failed, and the planted dead directory stayed in the
+    // operator's real PATH until it was removed by hand. Nothing in this suite
+    // noticed, because the only thing that put the PATH back was the purge
+    // under test.
+    const pathNow = ps(
+      `(Get-Item -LiteralPath 'HKCU:\\Environment').GetValue('Path','','DoNotExpandEnvironmentNames')`
+    );
+    assert(pathNow === originalUserPath,
+      'the user PATH is byte-identical to how this suite found it',
+      `captured ${originalUserPath && originalUserPath.length} chars, now ${pathNow && pathNow.length} - diff: ${String(pathNow).replace(String(originalUserPath), '(unchanged)').slice(0, 120)}`);
+    assert(!/Vanish\\Definitely\\Missing/.test(String(pathNow)),
+      'and specifically carries none of this suite\'s planted entries');
   } finally {
     cleanup();
   }

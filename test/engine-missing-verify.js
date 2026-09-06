@@ -176,7 +176,7 @@ app.whenReady().then(async () => {
       'and the later failures still return the friendly error rather than falling back to raw text'
     );
 
-    // Other panels take the same path, not just the one that was reported.
+    // EVERY CHANNEL, not three of them.
     //
     // qkgu changed the CONTRACT of two of these without changing this
     // guarantee. get-startup-items used to catch and resolve with
@@ -185,9 +185,83 @@ app.whenReady().then(async () => {
     // its verdict counted a check that never ran. It rejects now. What must
     // still hold is the thing this loop is actually here for: whatever crosses
     // the boundary carries no raw shell text, whether it crosses as a value or
-    // as a rejection. So take the message from either shape and test the same
-    // string.
-    for (const channel of ['get-startup-items', 'get-listeners', 'find-broken-entries']) {
+    // as a rejection.
+    //
+    // THIS USED TO COVER THREE OF SIXTY-FOUR. The property is security-relevant
+    // - PowerShell error text carries internal paths, and a panel that renders
+    // it hands the user something they cannot act on and should not see - and
+    // it was spot-checked on the three channels somebody had happened to think
+    // about. The channel census of 2026-09-06 counted 64 registrations.
+    //
+    // THE PARTITION IS ASSERTED, which is the part that keeps working. Every
+    // registered channel must appear in exactly one of two places: invoked
+    // below, or excluded with a REASON. A channel added next month lands in
+    // neither and this suite fails - which is the only version of this that
+    // does not quietly rot back to three.
+    const mainSrc = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+    const registered = [...new Set(
+      [...mainSrc.matchAll(/(?:ipcMain\.(?:handle|on)|fullModeOnly)\(\s*'([^']+)'/g)].map((m) => m[1])
+    )];
+    assert(registered.length > 50,
+      `premise: the channel list was actually extracted from main.js (${registered.length} found)`);
+
+    // Not invoked, and each says why. These do real work that does not route
+    // through the engine, so removing the engine proves nothing about them and
+    // calling them here would have side effects on the machine running the
+    // suite rather than on a fixture.
+    const EXCLUDED = {
+      'browse-for-path': 'opens a modal file dialog and blocks until a human answers it',
+      'relaunch-elevated': 'raises a real UAC prompt',
+      'relaunch-deelevated': 'launches a second copy of the app',
+      'window-minimize': 'window control, no engine and nothing to leak',
+      'window-maximize': 'window control, no engine and nothing to leak',
+      'window-close': 'would close the window this suite is running in',
+      'open-vault-folder': 'opens Explorer on the operator machine',
+      'open-data-folder': 'opens Explorer on the operator machine',
+      'open-known-link': 'opens a Settings page; t4m9 covers what it will and will not accept',
+      'network-ping': 'sends a packet when consent is set; wy7a covers its refusals',
+      'network-speedtest': 'sends network traffic when consent is set'
+    };
+
+    const tested = registered.filter((c) => !EXCLUDED[c]);
+
+    // A NEW CHANNEL IS TESTED BY DEFAULT, which is the safe direction and is
+    // structural rather than asserted: `tested` is everything not named in
+    // EXCLUDED, so adding a channel to main.js adds it to this loop with no
+    // edit here.
+    //
+    // THE FIRST VERSION OF THIS ASSERTED "tested + excluded === registered",
+    // WHICH IS A TAUTOLOGY - tested is DERIVED by filtering registered, so the
+    // sum is always the total and the check could never fail. That is the same
+    // shape as the mirror guard deleted in bcff, written in the same week, by
+    // me. Recorded rather than quietly replaced, because the lesson is that a
+    // guard whose subject is a value you just computed is not a guard.
+    //
+    // What can actually fail, and what each one catches:
+    const staleExclusions = Object.keys(EXCLUDED).filter((c) => !registered.includes(c));
+    assert(staleExclusions.length === 0,
+      'every excluded channel still exists - an exclusion left behind for a deleted channel silently pre-approves the next channel to take that name',
+      staleExclusions.join(', '));
+
+    // THE EXCLUSION COUNT IS PINNED. Excluding a channel is how you make this
+    // suite stop looking at it, so growing the list has to be a decision
+    // somebody makes on purpose and writes a reason for - not a line added
+    // while chasing a red test. Raise this number only after reading the new
+    // reason and agreeing with it.
+    assert(Object.keys(EXCLUDED).length === 11,
+      `the exclusion list is the eleven reviewed on 2026-09-06 (${Object.keys(EXCLUDED).length} now)`,
+      Object.keys(EXCLUDED).join(', '));
+
+    // Non-vacuity: the filter must not have excluded the things this suite
+    // exists for. Named channels rather than a count, so "53 tested" cannot be
+    // 53 of the wrong ones.
+    for (const must of ['list-processes', 'get-desktop-apps', 'cleaner-scan', 'vault-restore', 'set-settings']) {
+      assert(tested.includes(must), `${must} is among the channels actually invoked`);
+    }
+    console.log(`  (${tested.length} channels invoked with the engine missing, ${Object.keys(EXCLUDED).length} excluded by name)`);
+
+    const leaky = [];
+    for (const channel of tested) {
       let crossed;
       try {
         crossed = JSON.stringify(await invoke(channel, {}));
@@ -195,7 +269,24 @@ app.whenReady().then(async () => {
         crossed = String((err && err.message) || err);
       }
       const l = rawTextIn(crossed);
-      assert(l.length === 0, `${channel} leaks no raw shell text either`, l.join(', '));
+      if (l.length > 0) {
+        leaky.push(`${channel}: matched ${l.join(', ')} in "${String(crossed).slice(0, 140)}"`);
+      }
+    }
+    assert(leaky.length === 0,
+      `no channel leaks raw shell text with the engine gone (${tested.length} checked)`,
+      leaky.slice(0, 6).join('\n        '));
+
+    // The three the operator actually saw, kept as named assertions rather than
+    // folded into the count above: a loop that reports "0 of 33 leaked" is a
+    // weaker thing to read than a line naming the channel that was reported.
+    for (const channel of ['get-startup-items', 'get-listeners', 'find-broken-entries']) {
+      let crossed;
+      try {
+        crossed = JSON.stringify(await invoke(channel, {}));
+      } catch (err) {
+        crossed = String((err && err.message) || err);
+      }
       assert(/restart/i.test(crossed),
         `${channel} still tells the user what to DO, however it reports`,
         crossed.slice(0, 120));
