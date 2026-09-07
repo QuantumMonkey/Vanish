@@ -108,6 +108,114 @@ console.log('----------------------------------------------------');
     `every registered suite file exists (${rows.length} checked, ${missing.length} missing)`);
 }
 
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('Every JavaScript file in the repository actually parses');
+// ---------------------------------------------------------------------------
+//
+// A duplicate top-level `const` is a SyntaxError at MODULE INSTANTIATION, and
+// in this repository that is not a loud failure -- it is a hang.
+//
+// Three times now. `mainSrc` in updates-verify, `small` in
+// install-size-verify, and `deadline` in screenshot-probe.js on 2026-09-07.
+// The last one is the clearest illustration: nothing in the file ran, not even
+// the mkdirSync on its first line, so app.whenReady() was never registered,
+// Electron raised a modal error dialog with nobody there to click OK, and the
+// run sat at zero CPU with no output for twenty minutes looking like a slow
+// scan. The renderer's classic scripts fail the same way and worse -- they
+// share ONE global lexical environment, so a collision takes the whole file
+// down and the page simply renders without that feature.
+//
+// `node --check` finds all of it in milliseconds. There is no reason for a
+// human to be the one who notices.
+{
+  const { execFileSync } = require('child_process');
+
+  const dirs = ['lib', 'renderer', 'tools', 'test', path.join('test', 'sandbox'), path.join('test', 'fixtures')];
+  const files = [path.join(root, 'main.js'), path.join(root, 'preload.js')];
+  for (const d of dirs) {
+    const full = path.join(root, d);
+    if (!fs.existsSync(full)) continue;
+    for (const name of fs.readdirSync(full)) {
+      if (name.endsWith('.js')) files.push(path.join(full, name));
+    }
+  }
+
+  assert(files.length > 40, `the scan found the JavaScript to check (${files.length} files)`);
+
+  const broken = [];
+  for (const file of files) {
+    try {
+      execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
+    } catch (e) {
+      const why = String((e.stderr && e.stderr.toString()) || e.message)
+        .split('\n').find((l) => /Error/.test(l)) || 'did not parse';
+      broken.push(`${path.relative(root, file)}: ${why.trim()}`);
+    }
+  }
+  for (const b of broken) console.log(`        ${b}`);
+  assert(broken.length === 0,
+    `every JavaScript file parses (${files.length} checked, ${broken.length} broken)`);
+}
+
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('Every unreadable reason the engine emits is classified (sf71)');
+// ---------------------------------------------------------------------------
+//
+// lib/findings.js groups blind spots by CAUSE so the screen can say why it did
+// not read something, and in particular so it never offers elevation against a
+// limit Vanish imposed on itself. An unclassified reason is not a crash -- it
+// falls into 'unknown' and is worded as not-yet-explained, which is the safe
+// default -- but it is a reason the user gets no explanation for, so a new one
+// should be noticed here rather than in a screenshot.
+//
+// This greps for the literals the finders pass to New-Unreadable. It is a
+// LOWER BOUND and says so: 'git-error' and 'dubious-ownership' are built in a
+// variable and would not be caught by this scan at all, which is exactly why
+// 'unknown' has to stay a real, visible bucket rather than a assertion that
+// this list is complete.
+{
+  const findings = require(path.join(root, 'lib', 'findings.js'));
+
+  // Test hatches, not engine vocabulary: scanner.ps1 uses these to inject
+  // synthetic unreadable records for the suites. Nothing a user can reach.
+  const HATCH_ONLY = new Set(['probe', 'state']);
+
+  const sources = [path.join(root, 'scanner.ps1')].concat(
+    fs.readdirSync(path.join(root, 'finders'))
+      .filter((f) => f.endsWith('.ps1'))
+      .map((f) => path.join(root, 'finders', f))
+  );
+
+  const seen = new Set();
+  for (const file of sources) {
+    const text = fs.readFileSync(file, 'utf8');
+    const re = /-reason\s+'([a-z][a-z0-9-]*)'/g;
+    let m;
+    while ((m = re.exec(text)) !== null) seen.add(m[1]);
+  }
+
+  assert(seen.size > 20, `the scan actually found reason codes (${seen.size})`);
+
+  const unclassified = [...seen]
+    .filter((r) => !HATCH_ONLY.has(r))
+    .filter((r) => findings.blindCauseOf(r) === 'unknown')
+    .sort();
+
+  for (const r of unclassified) {
+    console.log(`        unclassified reason: ${r} -- add it to BLIND_CAUSES in lib/findings.js`);
+  }
+  assert(unclassified.length === 0,
+    `every reason literal in the engine has a cause (${seen.size} found, ${unclassified.length} unclassified)`);
+
+  // The hatch reasons must stay unclassified, or the exclusion above is
+  // silently covering for a real gap.
+  const hatchesStillUnknown = [...HATCH_ONLY].every((r) => findings.blindCauseOf(r) === 'unknown');
+  assert(hatchesStillUnknown,
+    'the two test-hatch reasons are still unclassified, so excluding them is not hiding a real one');
+}
+
 console.log('');
 console.log(`Result: ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

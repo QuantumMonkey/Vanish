@@ -27,7 +27,7 @@ const path = require('node:path');
 app.disableHardwareAcceleration();
 
 const root = path.join(__dirname, '..', '..');
-require(path.join(root, 'main.js'));
+const main = require(path.join(root, 'main.js'));
 
 const outDir = process.argv[2] || path.join(root, 'dist', 'screenshots');
 
@@ -37,6 +37,18 @@ function wait(ms) {
 
 app.whenReady().then(async () => {
   fs.mkdirSync(outDir, { recursive: true });
+
+  // BEFORE the window exists (bd oumb). main.js resolves the tier with an
+  // async check-admin call and exports this promise so "a harness that
+  // require()s this file can wait for bootstrap - tier resolution in
+  // particular - instead of guessing with a sleep". Loading the page first
+  // loses that race: the renderer reads the tier once at startup, caches
+  // isAdmin=false because the call has not returned, and every screenshot below
+  // is then of the WRONG TIER -- amber Audit Mode banner, destructive controls
+  // absent, and a "Restart as administrator?" modal that dims the page for
+  // every frame after it. Nothing throws and the PNGs look plausible, which is
+  // the whole problem.
+  await main.bootstrapped;
 
   const win = new BrowserWindow({
     width: 1440,
@@ -66,6 +78,45 @@ app.whenReady().then(async () => {
   console.log('');
   console.log('Vanish screenshots (real engine, real machine)');
   console.log('=============================================');
+
+  // Say the tier out loud. A wrong-tier run produces a full set of
+  // plausible-looking PNGs and no error at all, so the only thing that makes it
+  // visible is printing it.
+  //
+  // WAIT FOR THE RENDERER'S ANSWER FIRST, and this is not belt-and-braces.
+  // `await main.bootstrapped` above settles the MAIN process's tier before the
+  // window exists, which is what fixes the screenshots -- but the renderer
+  // still has to ask over IPC, and `isAdmin` is initialised to false in
+  // core.js while it waits. Reading it the instant loadFile resolves therefore
+  // prints "audit" on an elevated machine whose screenshots are correct: a
+  // diagnostic that reports a bug that is not there, which is no better than
+  // one that hides a bug that is.
+  //
+  // The badge is the signal, because it has a THIRD value. It ships as
+  // "Standard User" in index.html and is replaced with "Full Mode" or "Audit
+  // Mode" only once the tier lands, so it distinguishes "not answered yet"
+  // from "answered audit" -- which `isAdmin === false` cannot do.
+  // tierDeadline, not `deadline`: this function already declares one further
+  // down for the hygiene scan. Two `const deadline`s in one scope is a
+  // SyntaxError at MODULE INSTANTIATION -- nothing in the file runs, not even
+  // the mkdirSync on the first line, app.whenReady() is never registered, and
+  // Electron puts up a modal error dialog that nobody is there to dismiss. The
+  // run then sits at zero CPU with no output directory looking like a hang.
+  const tierDeadline = Date.now() + 15000;
+  let tier = null;
+  for (;;) {
+    tier = await run(`(() => ({
+      isAdmin: typeof isAdmin === 'undefined' ? null : isAdmin,
+      tier: typeof tierState === 'undefined' ? null : tierState.tier,
+      badge: (document.getElementById('admin-indicator') || {}).textContent || ''
+    }))()`);
+    if (/Full Mode|Audit Mode/.test(tier.badge) || Date.now() > tierDeadline) break;
+    await wait(200);
+  }
+  console.log(`  tier: ${tier.tier} (isAdmin ${tier.isAdmin}, badge "${tier.badge.trim()}")`);
+  if (!/Full Mode|Audit Mode/.test(tier.badge)) {
+    console.log('  NOTE: the tier never resolved in the renderer; the shots below are of an undecided page.');
+  }
 
   // The frame the user actually gets first. Taken early on purpose: the point
   // of the progressive rewrite is that the page is legible before the slow

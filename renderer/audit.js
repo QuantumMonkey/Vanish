@@ -195,8 +195,19 @@ async function loadAuditData(force = false) {
       },
       draw: (broken) => {
         renderBrokenEntriesSummary(broken);
-        const n = ((broken && broken.findings) || []).length;
-        auditReportWork(n, n === 1 ? 'program that cannot uninstall itself' : 'programs that cannot uninstall themselves');
+        // 6e7h: counted apart, because they are different problems with
+        // different answers. A Steam title has a working uninstall route and
+        // needs nothing from Force Uninstall; an orphaned entry has no route at
+        // all. Tallying them together is what put Dota 2 behind a banner
+        // offering to force-remove it.
+        const all = (broken && broken.findings) || [];
+        const p = (typeof window !== 'undefined' && window.VanishPlatforms) || null;
+        const managed = p ? all.filter((f) => p.detectPlatform(f.uninstallString || '')) : [];
+        const orphaned = all.length - managed.length;
+        auditReportWork(orphaned,
+          orphaned === 1 ? 'program that cannot uninstall itself' : 'programs that cannot uninstall themselves');
+        auditReportWork(managed.length,
+          managed.length === 1 ? 'program its store uninstalls for it' : 'programs their stores uninstall for them');
       },
       fail: (msg) => { auditSectionFailed('audit-broken-body', 'check which programs can still uninstall themselves', msg); auditReportBlind('broken uninstall entries'); }
     },
@@ -1685,29 +1696,72 @@ function renderBrokenEntriesSummary(broken) {
     return;
   }
 
-  // Named, not just counted. "3 programs" sends the user to a screen to find
-  // out which; the names are what let them decide whether to bother.
-  const names = found.slice(0, 5).map((f) => esc(f.name || f.displayName || '(unnamed entry)'));
-  const rest = found.length - names.length;
+  // 6e7h: ask lib/platforms.js before calling anything broken.
+  //
+  // Dota 2 was the entire finding on the operator's machine, reported as "can
+  // no longer remove itself". It can: its uninstall string is
+  // `"...\steam.exe" steam://uninstall/570`, steam.exe is present, and
+  // uninstallerOk came back TRUE. The only evidence against it was a missing
+  // content folder -- which for a Steam title means the game is not currently
+  // installed, not that anything is broken. Operator, 2026-09-07: "dota 2 is a
+  // steam game, it is managed via steam, which is common knowledge. such logic
+  // should be built into the commentary generator."
+  //
+  // The knowledge was already in the repository. lib/platforms.js has matched
+  // steam://uninstall since 8ns and carries the instructions to go with it; it
+  // was simply never asked here -- detectPlatform had exactly one caller, in
+  // the bulk queue. Asking it here rather than teaching scanner.ps1 about Steam
+  // keeps one copy of the patterns, which is the reason that file exists.
+  const platforms = (typeof window !== 'undefined' && window.VanishPlatforms) || null;
+  const nameOf = (f) => f.name || f.displayName || '(unnamed entry)';
+  const rows = found.map((f) => ({
+    name: nameOf(f),
+    platform: platforms ? platforms.detectPlatform(f.uninstallString || '') : null,
+    evidence: f.evidence || (Array.isArray(f.reasons) ? f.reasons[0] : '') || ''
+  }));
 
-  body.innerHTML = `
-    <div class="panel-state" style="text-align: left; padding: 12px 14px;">
-      <i class="fa-solid fa-bolt" style="color: var(--color-warning);"></i>
-      <div>
-        <div>${found.length === 1
-          ? 'One program is still listed in Programs and Features but can no longer remove itself.'
-          : `${esc(String(found.length))} programs are still listed in Programs and Features but can no longer remove themselves.`}</div>
-        <div class="finding-evidence" style="margin-left: 0; margin-top: 6px;">
-          ${names.join(', ')}${rest > 0 ? `, and ${esc(String(rest))} more` : ''}
+  const managed = rows.filter((r) => r.platform);
+  const orphaned = rows.filter((r) => !r.platform);
+
+  // One alignment, one row per program, the name next to its own explanation
+  // (qcii). The old version centred a large icon, centred the sentence, then
+  // put every name into one small muted line underneath and the action button
+  // hard left -- three elements on three alignments, with the single most
+  // useful thing in the section, the name, the least visible thing in it.
+  const rowHtml = (r, why) => `
+      <div class="advisor-row">
+        <div class="advisor-row-main">
+          <div class="advisor-row-name">${esc(r.name)}</div>
+          <div class="advisor-row-why">${esc(why)}</div>
         </div>
-      </div>
-    </div>
+      </div>`;
+
+  const managedHtml = managed.length === 0 ? '' : `
+    <div class="advisor-group">
+      <div class="advisor-group-head">${managed.length === 1
+        ? 'One is managed by the store that installed it'
+        : `${esc(String(managed.length))} are managed by the store that installed them`}</div>
+      ${managed.map((r) => rowHtml(r, platforms.platformMessage(r.platform))).join('')}
+    </div>`;
+
+  const orphanedHtml = orphaned.length === 0 ? '' : `
+    <div class="advisor-group">
+      <div class="advisor-group-head">${orphaned.length === 1
+        ? 'One is still listed in Programs and Features but can no longer remove itself'
+        : `${esc(String(orphaned.length))} are still listed in Programs and Features but can no longer remove themselves`}</div>
+      ${orphaned.map((r) => rowHtml(r, r.evidence)).join('')}
+    </div>`;
+
+  body.innerHTML = managedHtml + orphanedHtml + (orphaned.length === 0 ? `
+    <div class="cleaner-actions">
+      <span style="font-size: 11.5px; color: var(--text-muted);">Nothing here needs Force Uninstall -- each one has a working route through its own store.</span>
+    </div>` : `
     <div class="cleaner-actions">
       <button class="btn-sec btn-compact" id="btn-audit-open-force">
         <i class="fa-solid fa-bolt"></i> Review them
       </button>
       <span style="font-size: 11.5px; color: var(--text-muted);">Nothing is removed until you pick it, and what you pick goes to quarantine.</span>
-    </div>`;
+    </div>`);
 
   const btn = document.getElementById('btn-audit-open-force');
   if (btn) btn.addEventListener('click', () => switchTab('force-uninstall'));
@@ -1752,7 +1806,7 @@ function renderRedundancyGroups(redundancy) {
     const isWaived = waived.has(g.category);
     const rows = (g.apps ?? []).map(a => `
       <div class="redundancy-app-row">
-        <span class="redundancy-pill">${esc(a.name)}</span>
+        <span class="redundancy-pill" title="${esc(a.name)}">${esc(a.name)}</span>
         <button class="btn-sec btn-compact redundancy-uninstall-btn" data-app-id="${esc(a.id)}">
           <i class="fa-solid fa-magnifying-glass"></i> Review to uninstall
         </button>

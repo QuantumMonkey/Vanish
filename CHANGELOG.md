@@ -10,6 +10,71 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ## [Unreleased]
 
+**Vanish stops blaming the machine for its own limits.**
+
+Reported by the operator against a screenshot, 2026-09-07: *"an elevated
+application with full permissions should not feel it is unable to do things
+without providing a valid or indisputable reason."*
+
+Measured before anything was changed -- one elevated run of all 13 finders, 768
+blind spots, grouped by the reason each finder had already recorded. **Not one
+was a permission failure.** 700 were `scan-capped`, which is Vanish's own
+15,000-directory budget; 50 were links pointing outside the search root that it
+deliberately declines to follow; 12 were repositories with no upstream branch;
+4 were `NTUSER.DAT` logs held open by another process. Machine Hygiene reported
+all of it as *"N locations could not be read"* and offered *"Running elevated
+lets the checks read locations that were refused this time"* -- to an
+Administrator, about a cap no token can raise.
+
+- **Blind spots are grouped by cause and named on screen**, each carrying the
+  sentence the finder itself wrote: *"The scan visited 15000 directories under
+  C:\Users\… and stopped early so a run never hangs. Pass a narrower 'roots'
+  list to cover what was skipped."* A limit with a stated reason and a stated
+  remedy, rather than a number.
+- **The headline follows the evidence**: "Vanish stopped looking in N places"
+  when the budget is the whole story, "N locations were not read" otherwise.
+  Neither claims an inability.
+- **Elevation is offered only against an actual denial**, and only when the
+  session is not already elevated.
+- A reason nobody has classified is reported as not-yet-explained rather than
+  folded into a neighbouring cause -- guessing "limit" would invent
+  reassurance and guessing "denied" would invent a permission problem.
+- **The floor sentence printed twice**, one line apart: the duplicate-reason
+  filter compared reasons to each other but never to the caveat, and both were
+  the same string.
+
+**Dota 2 is a Steam game, and the Health Advisor now knows it.** The
+broken-entries scan returned exactly one finding on the reporting machine, with
+`uninstallerOk` **true** -- steam.exe present and working. Its only evidence was
+a missing content folder, which for a Steam title means the game is not
+installed, not that the entry is broken. The section said *"can no longer remove
+itself"* and offered Force Uninstall. `lib/platforms.js` has matched
+`steam://uninstall` since 0.8 and carries the route to go with it; it simply had
+one caller, in the bulk queue, and the advisor never asked. It asks now, from the
+renderer, so there is still exactly one copy of the patterns.
+
+**Two Health Advisor sections stop reading as loose parts.** Overlapping
+programs put a program name at the left edge of its card and the button that
+uninstalls it at the right -- about 750px apart, with the next row's button
+directly underneath and nothing to say which belonged to which. The group is now
+the grid, so names and buttons share columns and sit beside each other. The
+broken-entries section stops centring a list it cannot centre well: one row per
+program, name first.
+
+**`screenshot-probe.js` was filming the wrong tier.** Same defect as the demo
+recorder: it built its window before the main process had resolved elevation, so
+every screenshot showed Audit Mode on an elevated machine, behind a modal
+offering to restart as administrator.
+
+**Every JavaScript file in the repository is now checked for parse errors.** A
+duplicate top-level `const` is not a loud failure here, it is a hang: the file
+never instantiates, so nothing in it runs -- not even its first line -- Electron
+raises a modal error dialog with nobody there to dismiss it, and the run sits at
+zero CPU looking like a slow scan. That has now happened three times
+(`mainSrc`, `small`, and `deadline` while writing the fix above). `node --check`
+finds it in milliseconds across all 87 files, so a person no longer has to be
+the one who notices.
+
 **The demo recording, which was the last item in docs/PRE-RELEASE.md.**
 
 No shipped code changed, and there is deliberately no version bump: `tools/` and

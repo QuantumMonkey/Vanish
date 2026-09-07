@@ -499,6 +499,85 @@ console.log('D-1 regression: the uninstall wizard leftover screen, at the place 
     "and is filed under 'other' rather than dropped");
 }
 
+// ---------------------------------------------------------------------------
+console.log('');
+console.log('Why a location was not read (sf71)');
+// ---------------------------------------------------------------------------
+//
+// The defect: the screen reported every blind spot as "could not be read",
+// which on an elevated machine asserts that Windows refused. Measured against
+// a real elevated run of all 13 finders, 700 of 768 records were `scan-capped`
+// -- Vanish's own 15000-directory budget -- and NOT ONE was a permission
+// failure. The app was describing its own decision as an inability, and then
+// offering a UAC prompt to fix it.
+{
+  const blind = (reason, over) => Object.assign({
+    path: 'C:\\somewhere', reason, detail: `detail for ${reason}`, finder: 'a-finder'
+  }, over || {});
+
+  const capped = f.summariseBlindSpots([
+    blind('scan-capped'), blind('scan-capped'), blind('not-searched')
+  ]);
+
+  assert(capped.total === 3, 'every record is counted');
+  assert(capped.deniedCount === 0, 'a directory budget is not a permission failure');
+  assert(capped.elevationWouldHelp === false,
+    'and elevation is NOT offered for it -- a UAC prompt cannot raise a limit Vanish imposed on itself');
+  assert(capped.allOurOwnDoing === true,
+    "so the screen may say 'Vanish stopped looking' rather than implying refusal");
+  assert(capped.groups.length === 1 && capped.groups[0].cause === 'limit',
+    'scan-capped and not-searched are the same cause: Vanish chose to stop');
+  assert(capped.groups[0].reasons.length === 2 && capped.groups[0].reasons[0].reason === 'scan-capped',
+    'and the reasons inside a cause are kept, biggest first, rather than merged away');
+  assert(capped.groups[0].reasons[0].detail === 'detail for scan-capped',
+    "the finder's own sentence survives to the screen, which is the whole point of New-Unreadable");
+
+  const denied = f.summariseBlindSpots([blind('scan-capped'), blind('access-denied')]);
+  assert(denied.deniedCount === 1 && denied.elevationWouldHelp === true,
+    'one genuine denial among many limits does offer elevation');
+  assert(denied.allOurOwnDoing === false,
+    'and the "Vanish stopped looking" wording is withheld, because that is no longer the whole story');
+
+  // A repo with no upstream is not an unreadable location. Filing it as one is
+  // how 12 perfectly readable repositories became evidence that the disk was
+  // refusing us.
+  const gitish = f.summariseBlindSpots([blind('no-upstream'), blind('git-error')]);
+  assert(gitish.groups.length === 1 && gitish.groups[0].cause === 'unanswerable',
+    'a repo with no upstream is a question that could not be answered, not a location that could not be read');
+  assert(gitish.deniedCount === 0, 'and nothing about it implicates permissions');
+
+  // The default is the load-bearing part.
+  const novel = f.summariseBlindSpots([blind('some-brand-new-reason')]);
+  assert(novel.groups[0].cause === 'unknown',
+    'a reason nobody classified lands in "unknown" rather than being folded into a neighbour');
+  assert(novel.unknownCount === 1, 'and is counted, so it can be noticed');
+  assert(novel.allOurOwnDoing === false,
+    'an unknown reason does NOT get to claim it was only Vanish stopping -- that would invent reassurance');
+  assert(novel.elevationWouldHelp === false,
+    'nor does it get to claim a permission problem -- that would invent the opposite');
+
+  assert(f.blindCauseOf('access-denied') === 'denied' && f.blindCauseOf('') === 'unknown',
+    'blindCauseOf maps a known reason and refuses to guess at an empty one');
+
+  const none = f.summariseBlindSpots([]);
+  assert(none.total === 0 && none.groups.length === 0 && none.allOurOwnDoing === false,
+    'nothing blind is not "all our own doing" -- there is nothing to attribute');
+
+  // The headline is where the user meets this.
+  const capHead = f.headlineFor(f.UI_HAS_WORK, 5, 3, 100, capped);
+  assert(/Vanish stopped looking in 3 places/.test(capHead),
+    'the has-work headline names Vanish as the one that stopped');
+  assert(!/could not be read/.test(capHead),
+    'and does not say "could not be read", which is a claim about ability');
+
+  const denHead = f.headlineFor(f.UI_HAS_WORK, 5, 2, 100, denied);
+  assert(/2 locations were not read/.test(denHead),
+    'a mixed set drops to "were not read", which asserts nothing about why');
+
+  assert(!/vanish/.test(f.headlineFor(f.UI_INCOMPLETE, 0, 3, 100, capped)),
+    'and no headline lowercases the product name to fit a clause');
+}
+
 console.log('');
 console.log(`Result: ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

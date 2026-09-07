@@ -556,7 +556,16 @@ app.whenReady().then(async () => {
   const incClean = bar_incomplete.secondary.find((a) => a.id === 'open-clean');
   assert(incClean.enabled === false, 'System Clean is refused');
   assert(/floor/i.test(incClean.why), `and refused for the right reason (got '${incClean.why}')`);
-  assert(bar_incomplete.caveat.length > 0, 'and a caveat explains what would change the answer');
+  // sf71: this used to assert `caveat.length > 0`, and the caveat it was
+  // asserting was the unconditional "Running elevated lets the checks read
+  // locations that were refused this time" -- shown to an Administrator, about
+  // records that were never refused. The intent behind the assertion is kept
+  // (the screen must explain what it could not do) and moved to where the
+  // explanation now lives: a breakdown naming each cause.
+  assert(Array.isArray(bar_incomplete.blindBreakdown) && bar_incomplete.blindBreakdown.length > 0,
+    'and the screen explains what it did not read rather than only counting it');
+  assert(bar_incomplete.caveat === '',
+    'no elevation is offered for blind spots whose cause is unknown -- inventing a permission problem is the same bug facing the other way');
 
   // has-work, but two locations could not be read. The findings are real and
   // worth showing; the byte TOTAL is a floor, so acting on it is refused while
@@ -570,7 +579,52 @@ app.whenReady().then(async () => {
   assert(bar_blind.primary.enabled === true, 'findings that WERE read are still reviewable');
   const bar_blindClean = bar_blind.secondary.find((a) => a.id === 'open-clean');
   assert(bar_blindClean.enabled === false, 'but the action computed from the byte total is refused');
-  assert(bar_blind.caveat.length > 0, 'and the bar carries the caveat');
+  assert(Array.isArray(bar_blind.blindBreakdown) && bar_blind.blindBreakdown.length > 0,
+    'and the bar carries the breakdown of what was not read');
+
+  // sf71, the case that started it: Vanish's OWN directory budget.
+  //
+  // Measured on the reporting machine, elevated: 700 of 768 blind spots were
+  // scan-capped. The screen called them "could not be read" and offered a UAC
+  // prompt. A prompt cannot raise a limit Vanish imposed on itself, so the
+  // user pays for the elevation and the number does not move.
+  const bar_capped = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [{ module: 'reclaim', costClass: 'cheap', bytes: 5000000000 }],
+    unreadable: [
+      { path: 'a', reason: 'scan-capped', detail: 'The scan visited 15000 directories and stopped early.' },
+      { path: 'b', reason: 'scan-capped', detail: 'The scan visited 15000 directories and stopped early.' }
+    ],
+    findingCount: 1, unreadableCount: 2, examinedCount: 12, totalBytes: 5000000000
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  assert(bar_capped.caveat === '',
+    'a directory budget offers no elevation, because elevation cannot raise it');
+  const cappedClean = bar_capped.secondary.find((a) => a.id === 'open-clean');
+  assert(/Vanish stopped looking/.test(cappedClean.why),
+    `the refusal names Vanish as the one that stopped (got '${cappedClean.why}')`);
+  assert(!/could not be read/i.test(cappedClean.why),
+    'and does not claim the location could not be read, which is a claim about ability');
+  assert(bar_capped.blindBreakdown[0] && /stopped looking/i.test(bar_capped.blindBreakdown[0].label),
+    'and the breakdown names the cause');
+  assert(/15000 directories/.test(bar_capped.blindBreakdown[0].detail || ''),
+    "carrying the finder's own sentence, which is the whole reason New-Unreadable demands a detail");
+
+  // A genuine denial is the ONE case elevation belongs on -- and only when
+  // this session is not already elevated.
+  const elevatedNow = await run('(() => typeof isAdmin !== "undefined" && isAdmin === true)()');
+  const bar_denied = await run(`(() => hygieneDecisionActions({
+    state: window.VanishFindings.UI_HAS_WORK,
+    findings: [{ module: 'reclaim', costClass: 'cheap', bytes: 5000000000 }],
+    unreadable: [{ path: 'a', reason: 'access-denied', detail: 'Windows refused it.' }],
+    findingCount: 1, unreadableCount: 1, examinedCount: 12, totalBytes: 5000000000
+  }, { scanning: false, returned: 9, total: 9 }))()`);
+  if (elevatedNow) {
+    assert(bar_denied.caveat === '',
+      'an already-elevated session is not asked to elevate again, even against a real denial');
+  } else {
+    assert(/administrator/i.test(bar_denied.caveat),
+      `an unelevated session IS offered elevation against a real denial (got '${bar_denied.caveat}')`);
+  }
 
   // Two different refusals must not share one sentence. A control that is off
   // for two reasons and prints one of them is a control that lies.

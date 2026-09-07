@@ -2220,18 +2220,35 @@ input:checked + .slider:before {
   line-height: 1.4;
 }
 
+/* The GROUP is the grid, not the row (qcii). A per-row grid sizes its own
+   columns, so the buttons would only line up by accident; making the container
+   the grid gives every row the same two columns -- the first as wide as the
+   longest program name and no wider, the second the buttons. The name and its
+   button end up a dozen pixels apart AND the buttons still form a column,
+   which the previous space-between layout achieved by putting 750px of empty
+   card between a program and the control that acts on it. */
 .redundancy-app-pills {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content;
+  gap: 6px 12px;
+  align-items: center;
 }
 
+/* qcii: a name and its own control, close enough to be read as one thing.
+   This was `justify-content: space-between` on a full-width row, which pinned
+   the program name to the left edge of the card and its button to the right --
+   measured at 1280 wide, about 750px of empty card between "Android Studio"
+   and the button that uninstalls it, with the next row's button directly
+   below. At that separation nothing tells you which button belongs to which
+   program, and the rows are as tall as the gap is wide so there is no line to
+   follow either. Bounding the row keeps the buttons aligned in a column while
+   putting each one an eye-movement away from its own name. */
+/* display:contents so the row's two children land directly in the group's
+   grid and share its columns with every other row. The row keeps no box of its
+   own -- background, padding and border would be dropped by display:contents
+   anyway, and none is needed once the name and its button are adjacent. */
 .redundancy-app-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
+  display: contents;
 }
 
 .redundancy-pill {
@@ -2241,6 +2258,13 @@ input:checked + .slider:before {
   padding: 3px 10px;
   font-size: 12px;
   color: var(--text-white);
+  /* The name column is max-content, so a very long program name would push the
+     button off the card on a narrow window. Truncate the name instead: the
+     button must stay reachable, and the full name is on the row's title. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .redundancy-group.is-waived {
@@ -2262,7 +2286,47 @@ input:checked + .slider:before {
   padding: 6px 10px;
 }
 
-.redundancy-actions { display: flex; justify-content: flex-end; margin-top: 2px; }
+/* Left, with the rows. Right-aligned it sat directly under the last row's
+   "Review to uninstall" and read as a third row's action rather than the
+   group's -- one card, one alignment (qcii). */
+.redundancy-actions { display: flex; justify-content: flex-start; margin-top: 6px; }
+
+/* qcii: the broken-entries section, one program per row, name above its own
+   explanation. The old version used .panel-state, which centres its contents --
+   right for the one-line success case it was built for ("Every program here can
+   still uninstall itself.") and wrong the moment the section carries a list and
+   an action: a centred icon, a centred sentence, every name crushed into one
+   small muted line, and the button hard left. Four things, three alignments. */
+.advisor-group + .advisor-group { margin-top: 14px; }
+.advisor-group-head {
+  font-size: 12.5px;
+  color: var(--text-white);
+  margin-bottom: 8px;
+}
+.advisor-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--border-glass);
+  background: rgba(255, 255, 255, 0.015);
+  border-radius: 0 6px 6px 0;
+}
+.advisor-row + .advisor-row { margin-top: 6px; }
+.advisor-row-main { min-width: 0; }
+/* The name is the most useful thing in the section, so it is the most legible
+   thing in it. It used to be the least. */
+.advisor-row-name {
+  font-size: 13px;
+  color: var(--text-white);
+  font-weight: 500;
+}
+.advisor-row-why {
+  font-size: 11.5px;
+  color: var(--text-gray);
+  line-height: 1.5;
+  margin-top: 3px;
+}
 
 /* No-redundancy success message */
 .audit-ok-box {
@@ -3911,7 +3975,7 @@ input:checked + .slider:before {
 .hygiene-decision-headline {
   font-family: var(--font-title);
   font-size: 15px;
-  color: var(--text-light);
+  color: var(--text-white);
   margin-bottom: 3px;
 }
 .hygiene-decision-sub { font-size: 12px; color: var(--text-gray); line-height: 1.5; }
@@ -3924,7 +3988,7 @@ input:checked + .slider:before {
   border-radius: 8px;
   border: 1px solid var(--border-glass-active);
   background: transparent;
-  color: var(--text-light);
+  color: var(--text-white);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -3959,6 +4023,59 @@ input:checked + .slider:before {
   color: var(--text-gray);
   margin: 0 0 18px 2px;
   letter-spacing: 0.2px;
+}
+
+/* sf71: the causes behind "N were not read", named rather than counted.
+   Each row is one cause with its count and the sentence the finder itself
+   wrote, so the reason is on the page and not only in a tooltip -- the same
+   promise .hygiene-decision-off makes above.
+
+   The prefix is "blindcause" and not "blind" because .hygiene-blind-row is
+   ALREADY TAKEN, a hundred lines up, by the per-location list at the foot of
+   this panel -- and it is display:flex. The first version of this block reused
+   that name and the two rule sets merged: these rows laid out sideways, the
+   cause label crushed into a column narrow enough to stack "A read failed" one
+   word per line. No error, no warning, just a wrong layout. */
+.hygiene-blindcause-breakdown {
+  margin: 0 0 12px 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-glass);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.015);
+}
+.hygiene-blindcause-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+.hygiene-blindcause-row + .hygiene-blindcause-row {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border-glass);
+}
+.hygiene-blindcause-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hygiene-blindcause-label {
+  font-size: 12.5px;
+  color: var(--text-white);
+}
+.hygiene-blindcause-count {
+  font-size: 12px;
+  color: var(--text-gray);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.hygiene-blindcause-detail {
+  font-size: 11.5px;
+  color: var(--text-gray);
+  line-height: 1.5;
+  margin-top: 3px;
 }
 
 /* Where the primary action lands. Marking beats filtering: filtering would

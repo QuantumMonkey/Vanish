@@ -633,11 +633,52 @@ function hygieneDecisionActions(decision, ctx) {
   const counts = hygieneCostCounts(d.findings);
   const reclaimBytes = hygieneModuleBytes(d.findings, 'reclaim');
   const blind = Number(d.unreadableCount) || 0;
+  const spots = d.blindSpots || F.summariseBlindSpots(d.unreadable || []);
+
   // The reason a byte total cannot be acted on, reused verbatim wherever a
   // control is disabled for it, so the operator meets one explanation.
+  //
+  // sf71: this used to open "N locations could not be read", full stop. On an
+  // elevated machine that is a claim of refusal, and measurement said it was
+  // false for 700 of 768 records -- those were Vanish's own 15000-directory
+  // budget. A tool running with every privilege the OS has should not describe
+  // its own choice to stop as an inability, and if it does report an
+  // inability it owes an indisputable reason. So the opening clause now
+  // follows the evidence, and the causes are named underneath.
   const floorWhy =
-    `${blind} location${blind === 1 ? '' : 's'} could not be read, so the total is a floor and not a total. ` +
+    (spots.allOurOwnDoing
+      ? `Vanish stopped looking in ${blind} place${blind === 1 ? '' : 's'}, so the total is a floor and not a total. `
+      : `${blind} location${blind === 1 ? '' : 's'} ${blind === 1 ? 'was' : 'were'} not read, so the total is a floor and not a total. `) +
     'Vanish will not offer an action computed from it.';
+
+  // Named causes, biggest first, each carrying the sentence the finder already
+  // wrote. New-Unreadable has required a reason and a detail from the start on
+  // the argument that "10 errors" is not actionable; this is where that
+  // finally reaches the screen.
+  const blindBreakdown = spots.groups.map((g) => {
+    const top = g.reasons[0];
+    return {
+      label: g.label,
+      count: g.count,
+      // The detail is the finder's own words -- it is written for a person and
+      // already says things like "the scan visited 15000 directories under
+      // C:\Users\... and stopped early so a run never hangs".
+      detail: top && top.detail ? top.detail : '',
+      reason: top ? top.reason : ''
+    };
+  });
+
+  // Elevation is offered ONLY against records that actually say denied, and
+  // only when this session is not already elevated. The old text said
+  // "Running elevated lets the checks read locations that were refused this
+  // time" unconditionally -- shown to an Administrator, about a cap that no
+  // token affects. That is the app inventing a permission problem and then
+  // selling a UAC prompt as the fix.
+  const alreadyElevated = typeof isAdmin !== 'undefined' && isAdmin === true;
+  const elevationCaveat =
+    spots.elevationWouldHelp && !alreadyElevated
+      ? `${spots.deniedCount} of these were refused by Windows. Running Vanish as administrator would let those be read.`
+      : '';
 
   if (d.state === F.UI_NOTHING_FOUND) {
     return {
@@ -659,14 +700,15 @@ function hygieneDecisionActions(decision, ctx) {
       phase: 'incomplete',
       headline: 'No decision available',
       sub:
-        `Nothing was found in the ${d.examinedCount} location${d.examinedCount === 1 ? '' : 's'} that could be read, ` +
-        `and ${blind} could not be read at all. That is not "clean", and no action will be offered from it.`,
+        `Nothing was found in the ${d.examinedCount} location${d.examinedCount === 1 ? '' : 's'} that were read, ` +
+        `and ${blind} ${blind === 1 ? 'was' : 'were'} not read. That is not "clean", and no action will be offered from it.`,
       primary: hygieneAct('run', 'Run again', true, '', 'go'),
       secondary: [
         hygieneAct('copy', 'Copy report', true, ''),
         hygieneAct('open-clean', 'Open System Clean', false, floorWhy)
       ],
-      caveat: 'Running elevated lets the checks read locations that were refused this time.',
+      caveat: elevationCaveat,
+      blindBreakdown: blindBreakdown,
       never: never
     };
   }
@@ -752,9 +794,72 @@ function hygieneDecisionActions(decision, ctx) {
         : 'Ranked by what it would cost to get back, not by size.',
     primary: primary,
     secondary: [hygieneAct('copy', 'Copy report', true, ''), cleanAct],
-    caveat: blind > 0 ? floorWhy : '',
+    // NOT floorWhy. That string is already attached to the disabled System
+    // Clean button as its refusal reason, and the bar renders those underneath
+    // -- so putting the identical sentence here printed it twice, one line
+    // apart, which is what the operator's screenshot shows. The caveat now
+    // carries the one thing the button's reason does not: whether elevation is
+    // relevant, which is usually "no".
+    caveat: elevationCaveat,
+    blindBreakdown: blind > 0 ? blindBreakdown : [],
     never: never
   };
+}
+
+// One sentence describing the blind spots, chosen by what actually caused
+// them. Always sentence-initial, because both callers put it after a full stop.
+//
+// Deliberately no lowercase variant. The "Vanish stopped looking" wording opens
+// with the product name, and folding that to lower case so it can follow a
+// comma is how a sentence ends up saying "vanish" -- which is why the two
+// callers were rewritten to start a new sentence instead.
+function hygieneBlindClause(decision) {
+  const n = Number(decision && decision.unreadableCount) || 0;
+  const spots = (decision && decision.blindSpots)
+    || window.VanishFindings.summariseBlindSpots((decision && decision.unreadable) || []);
+  return spots.allOurOwnDoing
+    ? `Vanish stopped looking in ${n} place${n === 1 ? '' : 's'}`
+    : `${n} location${n === 1 ? '' : 's'} ${n === 1 ? 'was' : 'were'} not read`;
+}
+
+// The answer to "why could you not look there?", on the screen, in the
+// finder's own words (bd sf71).
+//
+// The operator's objection was precise: an elevated application with every
+// privilege the OS grants should not report itself unable to do something
+// without a valid or indisputable reason. It always had one -- New-Unreadable
+// has demanded a reason and a written detail since the contract was written --
+// and the UI was discarding both in favour of a count. So this shows the cause,
+// how many, and the sentence the finder wrote, which for the common case reads
+// "The scan visited 15000 directories under C:\Users\... and stopped early so a
+// run never hangs. Pass a narrower 'roots' list to cover what was skipped."
+//
+// That is a Vanish limit with a stated reason and a stated remedy. It is not
+// the machine refusing, and it should never have been reported as one.
+function hygieneBlindBreakdownHtml(groups) {
+  const list = Array.isArray(groups) ? groups.filter(Boolean) : [];
+  if (list.length === 0) return '';
+
+  // NOT .hygiene-blind-row. That class already exists, further down this same
+  // panel, for the per-location list at the bottom -- and it is display:flex.
+  // Reusing the name silently laid these rows out sideways: the cause label
+  // squeezed into a narrow column ("A / read / failed" stacked one word per
+  // line), the count beside it, the detail off to the right. Nothing errored;
+  // the CSS simply merged. Hence a distinct prefix.
+  const rows = list.map((g) => `
+      <div class="hygiene-blindcause-row">
+        <div class="hygiene-blindcause-head">
+          <span class="hygiene-blindcause-label">${hygieneEsc(g.label)}</span>
+          <span class="hygiene-blindcause-count">${hygieneEsc(String(g.count))}</span>
+        </div>
+        ${g.detail ? `<div class="hygiene-blindcause-detail">${hygieneEsc(g.detail)}</div>` : ''}
+      </div>`).join('');
+
+  return `
+    <div class="hygiene-blindcause-breakdown">
+      <div class="hygiene-blindcause-title">Why those were not read</div>
+      ${rows}
+    </div>`;
 }
 
 function renderHygieneDecisionBar(model) {
@@ -778,7 +883,19 @@ function renderHygieneDecisionBar(model) {
   const offReasons = []
     .concat(model.primary && !model.primary.enabled && model.primary.why ? [model.primary.why] : [])
     .concat((model.secondary || []).filter((a) => !a.enabled && a.why).map((a) => a.why));
-  const uniqueReasons = offReasons.filter((r, i) => offReasons.indexOf(r) === i);
+
+  // Deduped against the CAVEAT as well as against each other. The filter used
+  // to compare reasons only to other reasons, so a caveat that happened to be
+  // the same sentence as a disabled control's reason printed twice, one line
+  // apart -- which is exactly what happened, because both were floorWhy. The
+  // caveat is included in the comparison rather than the caller being trusted
+  // to never repeat itself.
+  const seen = new Set(model.caveat ? [model.caveat] : []);
+  const uniqueReasons = offReasons.filter((r) => {
+    if (seen.has(r)) return false;
+    seen.add(r);
+    return true;
+  });
 
   el.innerHTML = `
     <div class="hygiene-decisionbar phase-${hygieneEsc(model.phase)}">
@@ -797,6 +914,7 @@ function renderHygieneDecisionBar(model) {
         ? `<div class="hygiene-decision-off">${uniqueReasons.map((r) => `<div>${hygieneEsc(r)}</div>`).join('')}</div>`
         : ''
     }
+    ${hygieneBlindBreakdownHtml(model.blindBreakdown)}
     <div class="hygiene-decision-never">${hygieneEsc(model.never)}</div>
   `;
 }
@@ -830,7 +948,7 @@ function hygieneReportText() {
   lines.push(`State: ${d.state}`);
   lines.push(`${d.findingCount} finding(s), ${d.examinedCount} location(s) examined, ${d.unreadableCount} unreadable`);
   if (d.unreadableCount > 0) {
-    lines.push('Byte totals below are a floor, not a total: some locations could not be read.');
+    lines.push('Byte totals below are a floor, not a total: some locations were not read.');
   }
   lines.push('');
   for (const f of d.findings) {
@@ -920,7 +1038,10 @@ function renderHygieneVerdict(decision) {
       body =
         decision.unreadableCount > 0
           ? `Across ${decision.examinedCount} location${decision.examinedCount === 1 ? '' : 's'}. ` +
-            `${decision.unreadableCount} could not be read, so there may be more.`
+            // sf71: follows the evidence rather than asserting refusal. On the
+            // machine this was reported from, every one of these was Vanish's
+            // own directory budget.
+            `${hygieneBlindClause(decision)}, so there may be more.`
           : `Across ${decision.examinedCount} location${decision.examinedCount === 1 ? '' : 's'}, all of them readable.`;
       break;
     case F.UI_NOTHING_FOUND:
@@ -936,8 +1057,8 @@ function renderHygieneVerdict(decision) {
       icon = 'fa-triangle-exclamation';
       lead = 'Nothing found -- but the checks did not finish';
       body =
-        `No findings in the ${decision.examinedCount} location${decision.examinedCount === 1 ? '' : 's'} that could be read, ` +
-        `and ${decision.unreadableCount} that could not. This is NOT the same as clean, and Vanish will not ` +
+        `No findings in the ${decision.examinedCount} location${decision.examinedCount === 1 ? '' : 's'} that were read. ` +
+        `${hygieneBlindClause(decision)}. This is NOT the same as clean, and Vanish will not ` +
         'round it up to clean for you.';
       break;
     default:
@@ -1016,7 +1137,13 @@ function renderHygieneChecklist() {
         } else if (blind > 0) {
           icon = 'fa-triangle-exclamation';
           cls = 'blind';
-          note = `could not read ${blind} location${blind === 1 ? '' : 's'}`;
+          // Per check, classified the same way the bar is. On the machine that
+          // reported this, the two rows reading "could not read 76 locations"
+          // were both a link pointing outside the search root that Vanish
+          // deliberately does not follow -- a decision, stated as a failure.
+          note = window.VanishFindings.summariseBlindSpots(r.unreadable || []).allOurOwnDoing
+            ? `stopped early in ${blind} place${blind === 1 ? '' : 's'}`
+            : `${blind} location${blind === 1 ? '' : 's'} not read`;
         } else {
           icon = 'fa-circle-check';
           cls = 'clean';
@@ -1089,7 +1216,7 @@ function renderHygieneModules(decision, partial) {
     } else if (partial) {
       summary = `${ran.length} check${ran.length === 1 ? '' : 's'} back so far`;
     } else if (blind > 0) {
-      summary = `no findings, but ${blind} of ${ran.length} check${ran.length === 1 ? '' : 's'} could not read everything`;
+      summary = `no findings, but ${blind} of ${ran.length} check${ran.length === 1 ? '' : 's'} did not cover everything`;
     } else {
       summary = `${ran.length} check${ran.length === 1 ? '' : 's'} ran and found nothing`;
     }

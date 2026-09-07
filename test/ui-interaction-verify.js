@@ -602,6 +602,64 @@ app.whenReady().then(async () => {
   assert(withFindings.badge === '2', `the badge carries the count (${withFindings.badge})`);
   assert(withFindings.hasButton === true, 'and there is a way through to review them');
 
+  // 6e7h: a store-managed title is not a broken entry.
+  //
+  // This is the real payload the engine returned for the operator's machine,
+  // trimmed. Note uninstallerOk: steam.exe is PRESENT and fine. The only
+  // evidence against Dota 2 was a missing content folder, which for a Steam
+  // title means the game is not installed right now -- and the section
+  // announced "can no longer remove itself" and offered Force Uninstall.
+  const steamCase = await win.webContents.executeJavaScript(`(() => {
+    try {
+      renderBrokenEntriesSummary({ success: true, findings: [{
+        displayName: 'Dota 2',
+        publisher: 'Valve',
+        uninstallString: '"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe" steam://uninstall/570',
+        uninstallerOk: true,
+        evidence: 'install folder is gone: C:\\\\Program Files (x86)\\\\Steam\\\\steamapps\\\\common\\\\dota 2 beta'
+      }]});
+      const body = document.getElementById('audit-broken-body');
+      return {
+        text: body.textContent.replace(/\\s+/g, ' ').trim(),
+        hasForceButton: Boolean(document.getElementById('btn-audit-open-force'))
+      };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(!steamCase.error, 'a store-managed entry renders without throwing', steamCase.error || '');
+  assert(/Dota 2/.test(steamCase.text), 'the game is still named', String(steamCase.text).slice(0, 160));
+  assert(!/can no longer remove itself|cannot uninstall itself/i.test(steamCase.text),
+    'and is NOT described as unable to remove itself, because Steam removes it',
+    String(steamCase.text).slice(0, 200));
+  assert(/Steam manages this program's uninstall/.test(steamCase.text),
+    'the commentary names the platform, from lib/platforms.js rather than a second copy of the patterns',
+    String(steamCase.text).slice(0, 200));
+  assert(/right-click the game and choose Manage/.test(steamCase.text),
+    'and gives the route that actually works');
+  assert(steamCase.hasForceButton === false,
+    'Force Uninstall is not offered for it -- there is nothing broken to force');
+
+  // Mixed: the two must not collapse into one another.
+  const mixedCase = await win.webContents.executeJavaScript(`(() => {
+    try {
+      renderBrokenEntriesSummary({ success: true, findings: [
+        { displayName: 'Dota 2', uninstallString: '"C:\\\\Steam\\\\steam.exe" steam://uninstall/570' },
+        { displayName: 'GhostApp', uninstallString: 'C:\\\\Gone\\\\unins000.exe', evidence: 'uninstaller is missing' }
+      ]});
+      const body = document.getElementById('audit-broken-body');
+      return {
+        text: body.textContent.replace(/\\s+/g, ' ').trim(),
+        hasForceButton: Boolean(document.getElementById('btn-audit-open-force')),
+        badge: document.getElementById('audit-broken-count').textContent
+      };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+  assert(!mixedCase.error, 'a mixed set renders without throwing', mixedCase.error || '');
+  assert(/Dota 2/.test(mixedCase.text) && /GhostApp/.test(mixedCase.text),
+    'both are named');
+  assert(mixedCase.hasForceButton === true,
+    'and Force Uninstall comes back, because one of them genuinely has no route');
+  assert(mixedCase.badge === '2', `the badge still counts both entries (${mixedCase.badge})`);
+
   const clickedThrough = await win.webContents.executeJavaScript(`(() => {
     try {
       document.getElementById('btn-audit-open-force').click();
