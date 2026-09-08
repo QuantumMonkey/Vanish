@@ -8,7 +8,19 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ---
 
-## [Unreleased]
+## [1.1.0] -- 2026-09-08
+
+**Why this number.** MINOR by docs/RELEASING.md's own test -- "what would a
+user have to be told?" -- and the answer here is *"Vanish now explains what
+overlapping programs actually cost you"*, which is the definition of a
+milestone rather than a bug fix. The blind-spot rework and the Steam fix would
+have been PATCH on their own; the resolution database is a capability that did
+not exist. MINOR runs 0-9, so this is well inside the no-double-digits rule.
+
+The binaries are **not** the 1.0.0 binaries with a new label. Rebuilding under
+the old number would have put two different executables into the world under
+one name, which is the sort of thing this project rebuilds a whole panel to
+avoid.
 
 **Overlapping programs get a resolution database instead of one sentence.**
 

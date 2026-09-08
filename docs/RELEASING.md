@@ -122,6 +122,7 @@ MAJOR.
 | `0.9.3` | 2026-08-29 | The two git checks stop reporting the same repository once per junction alias -- 27 paths were 14 repositories -- and share one walk: 60 seconds to 7 |
 | `0.9.4` | 2026-08-29 | The consumer search stops listing one tree once per marker; and the benchmarks are re-based after the old per-check figures failed to reproduce |
 | `1.0.0` | 2026-09-06 | The honesty pass -- numbered 1.0.0 rather than 0.10.0 on the operator's no-double-digits rule, with the gates independently met. A refused sweep stops reading as a clean machine, Force Uninstall moves out of the sidebar to the two places it is actually wanted, and the definitions panel says how much of BleachBit's catalogue it cannot reach |
+| `1.1.0` | 2026-09-08 | Overlapping programs get a resolution database: 24 categories that each name a symptom you could go and check, what still stands even when coexisting is normal, and when a conflict actually applies. Machine Hygiene stops reporting its own scan budget as the machine refusing it, and the Health Advisor learns that a Steam game is uninstalled by Steam |
 
 `0.9` previously named the pre-release chore list (the elevated confirmations,
 the demo recording, signing, a second machine, a final docs pass). Those are
