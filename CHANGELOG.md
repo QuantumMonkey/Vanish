@@ -32,9 +32,20 @@ sentence and the same colour.
 - **Every entry must name a symptom** -- something you could go and check. If
   the honest symptom is "nothing happens", the severity is `coexist` and it is
   never counted as work. That is what stops browsers, note-taking apps,
-  editors, game launchers and chat clients from being a standing reminder,
-  **without anyone having to dismiss them**. Those groups now offer nothing to
-  dismiss, because nothing was suggested.
+  editors, game launchers and chat clients from being counted against you.
+- **But coexisting is not costless, and every category now says what still
+  stands.** A browser you rarely open is still a network-facing renderer with
+  its own extensions, saved passwords and update channel -- and rarely opened
+  means rarely patched. Remote-desktop products you stopped using still accept
+  connections with whatever password they were left holding. Peripheral suites
+  ship kernel-mode drivers. This line is **required** on every coexisting
+  category, because those are exactly where a screen would otherwise say
+  "nothing, this is fine" and stop.
+- **"Keep all of these" is offered on every group**, including the ones Vanish
+  does not count. It is not an apology for a false alarm -- it is how a person
+  records a decision the system cannot reach on its own. Waiving now also stops
+  the explanation being re-delivered on every load, while the programs stay
+  listed and the reasoning is one click from returning.
 - **Four severities**: `conflict` (running both breaks something), `cost` (each
   one costs a service, a listener or a global hotkey continuously), `clutter`
   (file associations and context menus only), `coexist`. The card is coloured

@@ -606,17 +606,33 @@ app.whenReady().then(async () => {
   //
   // Operator, 2026-09-07: "calling out obsidian and notion is good for sure,
   // but the option to allow both to exist and not become a persistent reminder
-  // is also good." The waiver already existed -- what was missing is that it
-  // should not be NEEDED for a category where coexisting is normal. So the
-  // assertion is not "a waiver exists" but "there is nothing here to waive".
+  // is also good. it helps." That was a COMPLIMENT to the waiver, and it was
+  // first read here as a complaint -- the control was removed from coexisting
+  // categories on the reasoning that there was nothing to dismiss. Corrected
+  // 2026-09-08: "reinstate it, and let the user make an informed decision
+  // while an unknowing system calls it clutter and informs the system of their
+  // preferences."
+  //
+  // So the waiver is on EVERY group. It is not an apology for a false alarm;
+  // it is the channel a person uses to tell the system something it cannot
+  // work out on its own, and the thing that stops a correct observation from
+  // being re-delivered forever.
+  //
+  // And 'coexist' does not mean costless. Same message: "more browsers means
+  // more attack surfaces, so we want to minimise those as much as possible,
+  // dutifully." Every category carries `standing` -- what remains true even
+  // when running several is normal -- and it is required on the coexisting
+  // ones, because those are exactly where a screen would otherwise say
+  // "nothing, this is fine" and stop.
   const redundancyRender = await win.webContents.executeJavaScript(`(() => {
     try {
       renderRedundancyGroups({ success: true, groups: [
         {
           category: 'Note Taking', count: 2, counted: false,
           severity: 'coexist', conflictWhen: 'never',
-          symptom: 'Nothing. A hosted workspace and a folder of markdown are different tools.',
-          advice: 'Listed so you can see them.',
+          symptom: 'Nothing breaks. A hosted workspace and a folder of markdown are different tools.',
+          standing: 'Two apps is two places an API key can end up, one possibly in plain text.',
+          advice: 'Keep both if you use both.',
           apps: [{ id: 'a1', name: 'Notion' }, { id: 'a2', name: 'Obsidian' }]
         },
         {
@@ -650,12 +666,15 @@ app.whenReady().then(async () => {
 
   assert(/sev-coexist/.test(note.cls || ''),
     'a coexisting category is styled as normal rather than as a warning', note.cls);
-  assert(note.hasWaive === false,
-    'and offers NOTHING to dismiss, because nothing was suggested -- the reminder is gone without the user acting');
+  assert(note.hasWaive === true,
+    'and it still offers "Keep all of these" -- the waiver is how a person records a decision, not an apology for a false alarm');
   assert(!/Consider keeping only one/i.test(note.text || ''),
     'the old one-size sentence is gone', String(note.text || '').slice(0, 120));
   assert(/different tools/.test(note.text || ''),
     "and the category's own explanation is what appears instead");
+  assert(/Still worth knowing/.test(note.text || '') && /plain text/.test(note.text || ''),
+    'coexisting is not reported as costless -- what still stands is on the card',
+    String(note.text || '').slice(0, 200));
 
   assert(/sev-conflict/.test(av.cls || ''),
     'a category that genuinely fights is styled as a conflict', av.cls);
@@ -668,6 +687,46 @@ app.whenReady().then(async () => {
 
   assert(redundancyRender.badge === '1',
     `the badge counts only what carries a consequence (got '${redundancyRender.badge}')`);
+
+  // What waiving actually DOES for a group that was never counted. Removing it
+  // from a count it was never in would be a no-op, and a no-op button is worse
+  // than no button. It stops the explanation being re-delivered.
+  const waivedRender = await win.webContents.executeJavaScript(`(() => {
+    try {
+      const before = appSettings.redundancyWaivers;
+      appSettings.redundancyWaivers = ['Note Taking'];
+      renderRedundancyGroups({ success: true, groups: [{
+        category: 'Note Taking', count: 2, counted: false,
+        severity: 'coexist', conflictWhen: 'never',
+        symptom: 'Nothing breaks. A hosted workspace and a folder of markdown are different tools.',
+        standing: 'Two apps is two places an API key can end up, one possibly in plain text.',
+        advice: 'Keep both if you use both.',
+        apps: [{ id: 'a1', name: 'Notion' }, { id: 'a2', name: 'Obsidian' }]
+      }]});
+      const card = document.querySelector('.redundancy-group');
+      const out = {
+        cls: card.className,
+        text: card.textContent.replace(/\\s+/g, ' ').trim(),
+        names: Array.from(card.querySelectorAll('.redundancy-pill')).map(p => p.textContent.trim()),
+        undo: (card.querySelector('[data-waive-toggle]') || {}).textContent || ''
+      };
+      appSettings.redundancyWaivers = before;
+      return out;
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+
+  assert(!waivedRender.error, 'a waived group renders without throwing', waivedRender.error || '');
+  assert(/is-waived/.test(waivedRender.cls || ''), 'a waived group is marked as decided', waivedRender.cls);
+  assert(!/different tools/.test(waivedRender.text || ''),
+    'and stops repeating the explanation, which is what makes it stop being a reminder',
+    String(waivedRender.text || '').slice(0, 200));
+  assert(!/Still worth knowing/.test(waivedRender.text || ''),
+    'including what still stands -- the decision covered that too');
+  assert((waivedRender.names || []).join(',') === 'Notion,Obsidian',
+    'but the programs are still listed, because the user asked to see the overlap',
+    (waivedRender.names || []).join(','));
+  assert(/Undo/.test(waivedRender.undo || ''),
+    'and the reasoning is one click from coming back', waivedRender.undo);
 
   // 6e7h: a store-managed title is not a broken entry.
   //

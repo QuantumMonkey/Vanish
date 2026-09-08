@@ -2264,6 +2264,22 @@ input:checked + .slider:before {
   line-height: 1.4;
 }
 
+/* What stands true even when running several is perfectly normal -- usually
+   attack surface. Given its own line and its own colour because "coexist" must
+   not be read as "costless": a browser you never open is still a network-facing
+   renderer with saved passwords and an update channel nobody is exercising. */
+.redundancy-standing {
+  font-size: 11.5px;
+  color: var(--text-gray);
+  line-height: 1.5;
+  padding-left: 9px;
+  border-left: 2px solid hsla(38, 92%, 50%, 0.35);
+}
+.redundancy-standing-key {
+  color: var(--color-warning);
+  font-weight: 600;
+}
+
 .redundancy-group-header {
   display: flex;
   align-items: center;

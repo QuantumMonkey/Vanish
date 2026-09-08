@@ -1859,27 +1859,34 @@ function renderRedundancyGroups(redundancy) {
             <span class="audit-badge${g.counted && !isWaived ? ' danger' : ''}">${esc(g.count)} installed</span>
           </span>
         </div>
-        ${g.symptom ? `<div class="redundancy-symptom"><span class="redundancy-symptom-key">${esc(sev.symptomKey)}</span>${esc(g.symptom)}</div>` : ''}
+        ${isWaived
+          // Waived means "I have read this and decided", so the explanation
+          // stops being re-delivered every time the page loads. The group stays
+          // listed -- the user asked to see the overlap -- and the reasoning is
+          // one click away again. That is what keeps a correct observation from
+          // turning into a persistent reminder, and it is why the control is
+          // offered on EVERY group rather than only the ones Vanish counts:
+          // the waiver is the channel a person uses to tell the system
+          // something it cannot work out on its own.
+          ? `<div class="redundancy-override-notice"><i class="fa-solid fa-circle-check"></i> ${g.counted
+              ? 'You chose to keep all of these - Vanish will keep listing them and will not count them as something needing a look.'
+              : 'You have decided about these - Vanish will keep listing them without repeating why.'}</div>`
+          : `${g.symptom ? `<div class="redundancy-symptom"><span class="redundancy-symptom-key">${esc(sev.symptomKey)}</span>${esc(g.symptom)}</div>` : ''}
+        ${g.standing ? `<div class="redundancy-standing"><span class="redundancy-standing-key">Still worth knowing: </span>${esc(g.standing)}</div>` : ''}
         ${g.advice ? `<div class="redundancy-tip">${esc(g.advice)}</div>` : ''}
         ${g.conflictWhen && g.conflictWhen !== 'never' && g.conflictWhen !== 'installed'
           ? `<div class="redundancy-when">Only when ${esc(g.conflictWhen)} -- having them installed is not the problem.</div>`
           : ''
-        }
-        ${isWaived
-          ? `<div class="redundancy-override-notice"><i class="fa-solid fa-circle-check"></i> You chose to keep all of these - Vanish will keep showing this group, but will not flag it as unusual.</div>`
-          : ''
+        }`
         }
         <div class="redundancy-app-pills">${rows}</div>
-        ${g.counted
-          ? `<div class="redundancy-actions">
+        <div class="redundancy-actions">
           <button class="btn-sec btn-compact" data-waive-toggle="${esc(g.category)}">
-            <i class="fa-solid ${isWaived ? 'fa-rotate-left' : 'fa-circle-check'}"></i> ${isWaived ? 'Undo, flag this again' : 'Keep all of these'}
+            <i class="fa-solid ${isWaived ? 'fa-rotate-left' : 'fa-circle-check'}"></i> ${isWaived
+              ? (g.counted ? 'Undo, flag this again' : 'Undo, show the detail again')
+              : 'Keep all of these'}
           </button>
-        </div>`
-          // Nothing to waive on a group that was never counted. Offering "Keep
-          // all of these" here would imply Vanish had suggested otherwise.
-          : ''
-        }
+        </div>
       </div>
     `;
   }).join('');

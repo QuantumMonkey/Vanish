@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "_readme": [
     "The resolution database behind 'Overlapping programs' on the Health Advisor.",
     "",
@@ -10,7 +10,7 @@
     "Obsidian are not substitutes -- one is a hosted collaborative workspace,",
     "the other a folder of local markdown -- and people run both on purpose.",
     "Meanwhile two real-time antivirus engines genuinely do fight, and that got",
-    "the same mild sentence as two note-taking apps.",
+    "the same mild sentence.",
     "",
     "Operator, 2026-09-07: 'find out about every possible category or other",
     "potential conflicts and build a resolution database, so the warning system",
@@ -19,16 +19,34 @@
     "THE RULE FOR ADDING AN ENTRY. Every category must name a SYMPTOM: something",
     "the user could actually observe if the overlap mattered. If the honest",
     "symptom is 'nothing happens', the severity is 'coexist' and it is not",
-    "flagged. A warning nobody can verify is a warning nobody should trust, and",
+    "counted. A warning nobody can verify is a warning nobody should trust, and",
     "this file exists because the previous version had thirteen of them.",
+    "",
+    "AND THE SECOND RULE, added 2026-09-08. Operator: 'more browsers means more",
+    "attack surfaces, so we want to minimise those as much as possible,",
+    "dutifully. this is simply an example.' COEXIST DOES NOT MEAN COSTLESS.",
+    "Every category therefore also carries `standing`: what remains true even",
+    "when running several is perfectly normal. For browsers that is attack",
+    "surface -- each one is a network-facing renderer with its own extensions,",
+    "saved passwords and update channel, and the one you rarely open is the one",
+    "that is rarely patched. A screen that says 'nothing, this is fine' and",
+    "stops there is the unknowing system the operator was describing.",
+    "",
+    "`standing` is REQUIRED on every coexist category, enforced by",
+    "repo-invariants-verify. A category that cannot say what still stands has",
+    "not earned the right to say 'nothing'.",
     "",
     "SEVERITY, in descending order of how much it should interrupt:",
     "  conflict - running both actively breaks or degrades something.",
     "  cost     - each one costs something continuously: a service, a startup",
     "             entry, a listening port, a global hotkey.",
     "  clutter  - they only compete over file associations and context menus.",
-    "  coexist  - having several is a normal choice. NOT flagged by default,",
-    "             which is the point: it should not need a user to dismiss it.",
+    "  coexist  - having several is a normal choice. Not counted as work.",
+    "",
+    "Severity decides how loudly Vanish speaks. It does NOT decide whether the",
+    "user gets to answer: 'Keep all of these' is offered on every group,",
+    "because the waiver is how a person tells the system something it cannot",
+    "work out on its own.",
     "",
     "conflictWhen says WHEN the trouble starts, because it is not always at",
     "install time. Two VPN clients installed side by side are harmless; two",
@@ -48,7 +66,8 @@
       "severity": "conflict",
       "conflictWhen": "both have real-time protection on",
       "symptom": "File operations get slower, and the two engines can flag each other's temporary files. Windows Security Center also switches Microsoft Defender's real-time protection off as soon as another antivirus registers with it, so you may not be running the one you think you are.",
-      "advice": "Keep one real-time scanner. A second on-demand-only scanner that you run manually does not register as real-time and is fine alongside it."
+      "advice": "Keep one real-time scanner. A second on-demand-only scanner that you run manually does not register as real-time and is fine alongside it.",
+      "standing": "Every engine you keep is a kernel-level filter driver with about the deepest access Windows grants, plus a vendor update channel you are trusting. That is worth one of, not several."
     },
     {
       "name": "Virtual Machine",
@@ -56,7 +75,8 @@
       "severity": "conflict",
       "conflictWhen": "more than one wants the CPU virtualisation extensions",
       "symptom": "A VM refuses to start with a message about VT-x or AMD-V being unavailable, or runs far slower than it should. Hyper-V takes ownership of the virtualisation extensions, and it is switched on by WSL2, Windows Sandbox, Memory Integrity and Credential Guard as well as by its own feature.",
-      "advice": "This is not about disk space -- decide which hypervisor owns virtualisation on this machine. Current VMware and VirtualBox builds can run on top of the Windows Hypervisor Platform, at reduced speed, rather than fighting it."
+      "advice": "This is not about disk space -- decide which hypervisor owns virtualisation on this machine. Current VMware and VirtualBox builds can run on top of the Windows Hypervisor Platform, at reduced speed, rather than fighting it.",
+      "standing": "A hypervisor installs kernel drivers and virtual network adapters that stay loaded whether or not a VM is running."
     },
     {
       "name": "VPN Client",
@@ -64,7 +84,8 @@
       "severity": "conflict",
       "conflictWhen": "two are connected at the same time",
       "symptom": "Traffic stops, or DNS queries leave through the wrong tunnel. Each client adds a virtual adapter and rewrites the routing table, and two of them disagree about which route wins.",
-      "advice": "Having several installed is fine and often deliberate -- connect one at a time. Only remove the ones you no longer have an account for."
+      "advice": "Having several installed is fine and often deliberate -- connect one at a time. Only remove the ones you no longer have an account for.",
+      "standing": "Each client keeps a service able to rewrite your routing and DNS, and stored credentials for the account. One you no longer pay for is a credential nobody is watching."
     },
     {
       "name": "Disk Encryption",
@@ -72,7 +93,8 @@
       "severity": "conflict",
       "conflictWhen": "more than one manages the system volume",
       "symptom": "Full-disk products each want to own the boot chain and the volume filter stack. Two of them on the same system volume is a recovery problem, not a performance one.",
-      "advice": "One full-disk product per system volume. Container-based use (a VeraCrypt file container on a BitLocker disk) is a different thing and is fine."
+      "advice": "One full-disk product per system volume. Container-based use (a VeraCrypt file container on a BitLocker disk) is a different thing and is fine.",
+      "standing": "A product you have stopped using may still hold a boot component, and its recovery key is one you have probably not checked in a long time. Check that before removing anything."
     },
     {
       "name": "Firewall",
@@ -80,7 +102,8 @@
       "severity": "conflict",
       "conflictWhen": "both filter packets",
       "symptom": "Connections fail in ways neither product explains, because two packet-filtering drivers are making decisions about the same traffic and only one of them logged it.",
-      "advice": "Keep one packet filter. Monitoring tools that only watch traffic, rather than filtering it, are fine alongside."
+      "advice": "Keep one packet filter. Monitoring tools that only watch traffic, rather than filtering it, are fine alongside.",
+      "standing": "A packet filter sees every connection this machine makes. Two of them is two vendors with that view."
     },
     {
       "name": "Backup / Imaging",
@@ -88,7 +111,8 @@
       "severity": "cost",
       "conflictWhen": "two schedule snapshots at overlapping times",
       "symptom": "Each installs a resident agent and a scheduled task, and both use the Volume Shadow Copy Service. Overlapping jobs can fail each other's snapshots, and the failure is reported by whichever lost.",
-      "advice": "One scheduled backup product is usually enough. If you keep two on purpose, make sure their schedules do not overlap."
+      "advice": "One scheduled backup product is usually enough. If you keep two on purpose, make sure their schedules do not overlap.",
+      "standing": "Backup agents run as SYSTEM and hold credentials for wherever they write. An agent for a destination you no longer use is a stored credential with nothing watching it."
     },
     {
       "name": "Remote Desktop",
@@ -96,7 +120,8 @@
       "severity": "cost",
       "conflictWhen": "installed",
       "symptom": "Each one installs a background service, and most listen for inbound connections whether or not you use them. That is an always-on service and an open door per product.",
-      "advice": "Keep the ones you actually connect with. Check the 'What can be reached from outside' section above -- anything listed there is reachable now, not only when you launch it."
+      "advice": "Keep the ones you actually connect with. Check the 'What can be reached from outside' section above -- anything listed there is reachable now, not only when you launch it.",
+      "standing": "This is the category most worth minimising deliberately. Each one is a way in, and an unattended-access product you have stopped using still accepts connections with whatever password it was left holding."
     },
     {
       "name": "Cloud Storage / Sync",
@@ -104,7 +129,8 @@
       "severity": "cost",
       "conflictWhen": "installed",
       "symptom": "Each runs a resident sync agent and adds an Explorer overlay-icon handler. Windows only ever shows the first 15 overlay handlers in alphabetical order, so past that point some clients' sync badges silently stop appearing -- the sync still works, the status just stops being shown.",
-      "advice": "Keep the ones you actually sync to. A second copy of the same folder tree also costs the disk space twice."
+      "advice": "Keep the ones you actually sync to. A second copy of the same folder tree also costs the disk space twice.",
+      "standing": "Each holds a long-lived token to an account and can read the folders it syncs. One you no longer use is a token still valid and no longer watched."
     },
     {
       "name": "Peripheral / RGB Suite",
@@ -112,7 +138,8 @@
       "severity": "cost",
       "conflictWhen": "two claim the same device",
       "symptom": "Several services and startup entries each, and most claim exclusive access to the devices they support. Two of them on one machine typically means lighting that resets itself, or a device only one of them can see.",
-      "advice": "Keep the suite for the hardware you actually own. These are among the heaviest background installs on a typical gaming machine."
+      "advice": "Keep the suite for the hardware you actually own. These are among the heaviest background installs on a typical gaming machine.",
+      "standing": "These ship kernel-mode drivers for hardware access and update services that run as SYSTEM, and they are a recurring source of privilege-escalation advisories. A suite for hardware you no longer own is pure exposure."
     },
     {
       "name": "Download Manager",
@@ -120,7 +147,8 @@
       "severity": "cost",
       "conflictWhen": "two hook the browser",
       "symptom": "Each installs a browser integration that intercepts download clicks. With two, whichever hooks first takes the download and the other does nothing -- or both pop up.",
-      "advice": "Keep one. The browser extension is the part that collides, so removing the extension is enough if you want to keep the app."
+      "advice": "Keep one. The browser extension is the part that collides, so removing the extension is enough if you want to keep the app.",
+      "standing": "Each one hooks the browser and handles files arriving from the network before you have looked at them."
     },
     {
       "name": "Screenshot / Screen",
@@ -128,7 +156,8 @@
       "severity": "cost",
       "conflictWhen": "two register the same hotkey",
       "symptom": "Global hotkeys are exclusive in Windows -- PrtSc in particular. Whichever tool starts first gets it, and the other silently does nothing when you press it. Which one wins can change between reboots.",
-      "advice": "Keep one on the hotkey. A second tool is fine if you give it a different shortcut or launch it by hand."
+      "advice": "Keep one on the hotkey. A second tool is fine if you give it a different shortcut or launch it by hand.",
+      "standing": "A screen capture tool can read anything on screen, including a password manager while it is open, and several upload to a hosted account by default."
     },
     {
       "name": "Clipboard / Input Remapper",
@@ -136,7 +165,8 @@
       "severity": "cost",
       "conflictWhen": "two bind the same key",
       "symptom": "The same exclusive-hotkey problem as screenshot tools, plus remappers that work at different layers can produce a key that behaves differently depending on which app has focus.",
-      "advice": "Fine to keep several -- make sure they are not bound to the same keys."
+      "advice": "Fine to keep several -- make sure they are not bound to the same keys.",
+      "standing": "A clipboard history stores whatever you copied, passwords included, and usually as plain text on disk. A key remapper sees every keystroke by design."
     },
     {
       "name": "Torrent Client",
@@ -144,7 +174,8 @@
       "severity": "cost",
       "conflictWhen": "two are running",
       "symptom": "Each wants its own listening port and its own share of the upload budget. Two running at once mostly means they compete with each other for the same bandwidth.",
-      "advice": "Keep one running. Several installed is harmless if only one starts with Windows."
+      "advice": "Keep one running. Several installed is harmless if only one starts with Windows.",
+      "standing": "Each opens an inbound listening port and accepts connections from strangers -- that is how the protocol works, not a misconfiguration. One you no longer use should not still be listening."
     },
     {
       "name": "Compression Tool",
@@ -152,7 +183,8 @@
       "severity": "clutter",
       "conflictWhen": "installed",
       "symptom": "Each adds its own shell context-menu entries and claims archive file associations. Nothing breaks; the right-click menu gets longer and double-clicking a .zip opens whichever registered last.",
-      "advice": "Worth tidying if the context menu bothers you. Not worth removing a tool you use for it."
+      "advice": "Worth tidying if the context menu bothers you. Not worth removing a tool you use for it.",
+      "standing": "Archive tools parse hostile input for a living and have the CVE history to match. The number matters less than whether the ones you keep are still getting updates."
     },
     {
       "name": "PDF Reader",
@@ -160,7 +192,8 @@
       "severity": "clutter",
       "conflictWhen": "installed",
       "symptom": "They compete for the .pdf association and for the in-browser PDF handler, so a PDF may open in one you did not expect.",
-      "advice": "Set the default you want in Settings > Apps > Default apps. A lightweight reader plus a full editor is a normal pairing."
+      "advice": "Set the default you want in Settings > Apps > Default apps. A lightweight reader plus a full editor is a normal pairing.",
+      "standing": "PDF readers parse untrusted files and have a long history of doing it badly. The risk is not how many you have -- it is the old one you never open and therefore never update."
     },
     {
       "name": "Office Suite",
@@ -168,7 +201,8 @@
       "severity": "clutter",
       "conflictWhen": "installed",
       "symptom": "Both register handlers for .docx, .xlsx and friends, so documents can open in the suite you did not mean. These are large installs, so the disk cost is real even though nothing breaks.",
-      "advice": "Keep the one you write in; keep a second only if you need it to open files the first one mangles."
+      "advice": "Keep the one you write in; keep a second only if you need it to open files the first one mangles.",
+      "standing": "Both register macro-capable handlers. The suite you never update is the one that ends up opening the attachment."
     },
     {
       "name": "Video Player",
@@ -176,7 +210,8 @@
       "severity": "clutter",
       "conflictWhen": "installed",
       "symptom": "File associations, and some players install codec or shell-extension components that stay behind them.",
-      "advice": "Harmless to keep several. A media server such as Plex or Kodi is not the same job as a desktop player and is not a duplicate of one."
+      "advice": "Harmless to keep several. A media server such as Plex or Kodi is not the same job as a desktop player and is not a duplicate of one.",
+      "standing": "Media players parse untrusted files, and some pull codec packs from outside the vendor. A media server additionally listens on the network."
     },
     {
       "name": "Audio Player",
@@ -184,55 +219,62 @@
       "severity": "clutter",
       "conflictWhen": "installed",
       "symptom": "File associations, and each keeps its own library database.",
-      "advice": "Harmless to keep several. A streaming client and a local library player are different tools, not duplicates."
+      "advice": "Harmless to keep several. A streaming client and a local library player are different tools, not duplicates.",
+      "standing": "Each keeps its own library index and cached artwork, and a streaming client holds a logged-in session."
     },
     {
       "name": "Web Browser",
       "keywords": ["chrome", "firefox", "edge", "opera", "brave", "vivaldi", "safari", "tor browser", "maxthon", "waterfox", "librewolf", "seamonkey", "pale moon"],
       "severity": "coexist",
       "conflictWhen": "never",
-      "symptom": "Nothing. Browsers are built to sit alongside each other, and having several is usually deliberate -- work and personal profiles, a second engine for sites that only render properly in one, or testing.",
-      "advice": "Listed so you can see them, not because anything is wrong. Note that Microsoft Edge is a Windows component and cannot be uninstalled from Programs and Features on most Windows 11 installs, so it is not a candidate even if you want it gone."
+      "symptom": "Nothing breaks. Browsers are built to sit alongside each other, and having several is usually deliberate -- work and personal profiles, a second engine for sites that only render properly in one, or testing.",
+      "advice": "Keep the ones you actually use. Remove the ones you keep 'just in case' -- that is the set worth minimising. Note that Microsoft Edge is a Windows component and cannot be uninstalled from Programs and Features on most Windows 11 installs, so it is not a candidate even if you want it gone.",
+      "standing": "MORE BROWSERS IS MORE ATTACK SURFACE, and this is the category where that is worth acting on. Each one is a network-facing renderer with its own extensions, its own saved passwords and its own update channel -- and the one you rarely open is the one that is rarely patched, which is the worst of both. Coexisting is normal; keeping five is still a decision."
     },
     {
       "name": "Note Taking",
       "keywords": ["notion", "obsidian", "onenote", "evernote", "roam research", "logseq", "joplin", "simplenote", "bear", "zettlr", "anytype"],
       "severity": "coexist",
       "conflictWhen": "never",
-      "symptom": "Nothing. These look like duplicates by category and mostly are not: a hosted collaborative workspace and a folder of local markdown files are different tools with different failure modes, and people run both deliberately.",
-      "advice": "Listed so you can see them. Worth a look only if one of them is somewhere you have not opened in a year -- and Machine Hygiene, not this screen, is where you find out what removing it would cost."
+      "symptom": "Nothing breaks. These look like duplicates by category and mostly are not: a hosted collaborative workspace and a folder of local markdown files are different tools with different failure modes, and people run both deliberately.",
+      "advice": "Keep both if you use both. Worth a look only if one of them is somewhere you have not opened in a year.",
+      "standing": "Notes sprawl, and that is the cost here rather than conflict: two apps is two places an API key or a password can end up, and one of them may be storing it as plain text on disk. Machine Hygiene is the screen that tells you which."
     },
     {
       "name": "Code Editor / IDE",
       "keywords": ["visual studio code", "vscode", "sublime text", "notepad++", "atom", "brackets", "eclipse", "intellij", "pycharm", "webstorm", "android studio", "xcode", "neovim", "cursor", "zed"],
       "severity": "coexist",
       "conflictWhen": "never",
-      "symptom": "Nothing. A language-specific IDE and a general-purpose editor are not substitutes, and most developers use both on the same day.",
-      "advice": "Listed so you can see them. These are large installs, so the one worth checking is any IDE for a language you have stopped writing."
+      "symptom": "Nothing breaks. A language-specific IDE and a general-purpose editor are not substitutes, and most developers use both on the same day.",
+      "advice": "Keep what you write in. The one worth checking is an IDE for a language you have stopped using -- those are large, and they are rarely uninstalled on purpose.",
+      "standing": "Editors run extensions with full filesystem access, and IDEs commonly hold signing keys, cloud tokens and saved connection strings. An IDE you no longer open still has all of them, and is no longer being updated."
     },
     {
       "name": "Game Launcher",
       "keywords": ["steam", "epic games", "gog galaxy", "ea app", "origin", "ubisoft connect", "uplay", "battle.net", "rockstar games launcher", "xbox", "itch"],
       "severity": "coexist",
       "conflictWhen": "never",
-      "symptom": "Nothing. You have a launcher because you have games on it, and removing the launcher does not move the games anywhere.",
-      "advice": "Listed so you can see them. Removing one of these removes your route to the games it manages -- check the library first."
+      "symptom": "Nothing breaks. You have a launcher because you have games on it, and removing the launcher does not move the games anywhere.",
+      "advice": "Removing one of these removes your route to the games it manages -- check the library first.",
+      "standing": "Each runs a background updater, most add themselves to startup, and each holds a logged-in session and often saved payment details. A launcher for a store you no longer buy from is a session still open."
     },
     {
       "name": "Communication / Chat",
       "keywords": ["discord", "slack", "microsoft teams", "zoom", "skype", "telegram", "whatsapp", "signal", "element", "webex", "google chat"],
       "severity": "coexist",
       "conflictWhen": "never",
-      "symptom": "Nothing. These are different networks, not competing products -- you cannot reach a Slack workspace from Discord.",
-      "advice": "Listed so you can see them. The one worth removing is one whose network you no longer belong to."
+      "symptom": "Nothing breaks. These are different networks, not competing products -- you cannot reach a Slack workspace from Discord.",
+      "advice": "Keep the networks you belong to. The one worth removing is one whose network you have left.",
+      "standing": "Each runs a background process with network access, a logged-in session, and usually a startup entry. One you have stopped using is a session still signed in and an auto-updater still running."
     },
     {
       "name": "Image Editor",
       "keywords": ["photoshop", "gimp", "affinity photo", "paint.net", "krita", "lightroom", "luminar", "capture one", "darktable", "pixelmator"],
       "severity": "coexist",
       "conflictWhen": "never",
-      "symptom": "Nothing. Photo editing, raw development and digital painting are different jobs that this category cannot tell apart.",
-      "advice": "Listed so you can see them. These can be large, so check sizes rather than counts."
+      "symptom": "Nothing breaks. Photo editing, raw development and digital painting are different jobs that this category cannot tell apart.",
+      "advice": "Keep what you use. These can be large, so check sizes rather than counts.",
+      "standing": "Mostly disk rather than risk: scratch files, preview caches and catalogues that outlive the projects they were built for."
     }
   ]
 }

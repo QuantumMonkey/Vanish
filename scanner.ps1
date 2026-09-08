@@ -3344,6 +3344,13 @@ function Get-SoftwareRedundancy {
                 conflictWhen = [string]$rule.conflictWhen
                 symptom      = [string]$rule.symptom
                 advice       = [string]$rule.advice
+                # What remains true even when running several is normal.
+                # Operator, 2026-09-08: "more browsers means more attack
+                # surfaces, so we want to minimise those as much as possible,
+                # dutifully." A category that coexists still costs something,
+                # and a screen that says "nothing, this is fine" and stops
+                # there is not informing anybody.
+                standing     = [string]$rule.standing
                 counted      = $counted
                 # Kept so nothing that reads `tip` breaks, but it is now the
                 # category's own advice rather than one sentence shared by all

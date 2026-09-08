@@ -225,6 +225,17 @@ console.log('The redundancy resolution database is well formed');
       if (typeof c.advice !== 'string' || c.advice.trim().length < 20) problems.push(`${where}: no advice`);
       if (typeof c.conflictWhen !== 'string' || !c.conflictWhen.trim()) problems.push(`${where}: no conflictWhen`);
 
+      // COEXIST DOES NOT MEAN COSTLESS, and this is the assertion that enforces
+      // it. Operator, 2026-09-08: "more browsers means more attack surfaces, so
+      // we want to minimise those as much as possible, dutifully. this is
+      // simply an example." A category allowed to answer "nothing breaks" and
+      // stop there is the unknowing system that request was about, so the one
+      // place `standing` is mandatory is exactly where the screen would
+      // otherwise fall silent.
+      if (typeof c.standing !== 'string' || c.standing.trim().length < 20) {
+        problems.push(`${where}: no standing -- say what remains true even when running several is normal`);
+      }
+
       // A 'coexist' category that claims a conflict is contradicting itself.
       if (c.severity === 'coexist' && c.conflictWhen !== 'never') {
         problems.push(`${where}: severity coexist but conflictWhen is "${c.conflictWhen}"`);
