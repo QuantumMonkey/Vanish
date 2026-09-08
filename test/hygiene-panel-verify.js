@@ -1074,8 +1074,18 @@ app.whenReady().then(async () => {
       'the verdict takes its total from the sections array rather than a constant beside it');
     assert(!/AUDIT_SECTION_COUNT/.test(src),
       'and no hardcoded section count survives anywhere in the file');
-    const runCount = (src.match(/^\s*run: \(\) => window\.api\./gm) || []).length;
-    assert(runCount >= 6,
+    // Both shapes a section's run can take. A section that has to check the
+    // engine's result -- find-broken-entries, get-software-redundancy -- writes
+    // `run: async () => {` and then awaits, so a scan matching only the
+    // one-line arrow silently undercounts and reports it as "the scan stopped
+    // matching". Which is exactly what it did.
+    // 7 today, and the scan is checked against every `run:` in the file below
+    // so the threshold cannot drift away from reality unnoticed.
+    const runCount = (src.match(/^\s*run: (?:async )?\(\) =>/gm) || []).length;
+    const allRuns = (src.match(/^\s*run:/gm) || []).length;
+    assert(runCount === allRuns,
+      `the scan recognises every section's run, whatever shape it takes (${runCount} of ${allRuns})`);
+    assert(runCount >= 7,
       `found ${runCount} sections in the array (a low number means this scan stopped matching, not that sections were deleted)`);
   }
 

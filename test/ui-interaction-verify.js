@@ -602,6 +602,73 @@ app.whenReady().then(async () => {
   assert(withFindings.badge === '2', `the badge carries the count (${withFindings.badge})`);
   assert(withFindings.hasButton === true, 'and there is a way through to review them');
 
+  // The resolution database, on screen.
+  //
+  // Operator, 2026-09-07: "calling out obsidian and notion is good for sure,
+  // but the option to allow both to exist and not become a persistent reminder
+  // is also good." The waiver already existed -- what was missing is that it
+  // should not be NEEDED for a category where coexisting is normal. So the
+  // assertion is not "a waiver exists" but "there is nothing here to waive".
+  const redundancyRender = await win.webContents.executeJavaScript(`(() => {
+    try {
+      renderRedundancyGroups({ success: true, groups: [
+        {
+          category: 'Note Taking', count: 2, counted: false,
+          severity: 'coexist', conflictWhen: 'never',
+          symptom: 'Nothing. A hosted workspace and a folder of markdown are different tools.',
+          advice: 'Listed so you can see them.',
+          apps: [{ id: 'a1', name: 'Notion' }, { id: 'a2', name: 'Obsidian' }]
+        },
+        {
+          category: 'Antivirus / Security', count: 2, counted: true,
+          severity: 'conflict', conflictWhen: 'both have real-time protection on',
+          symptom: 'File operations get slower and the engines flag each other.',
+          advice: 'Keep one real-time scanner.',
+          apps: [{ id: 'b1', name: 'Kaspersky' }, { id: 'b2', name: 'Avast' }]
+        }
+      ]});
+      const list = document.getElementById('audit-redundancy-list');
+      const badge = document.getElementById('audit-redundancy-count');
+      const cards = Array.from(list.querySelectorAll('.redundancy-group'));
+      const byCat = {};
+      for (const c of cards) {
+        const cat = c.querySelector('.redundancy-category').textContent.trim();
+        byCat[cat] = {
+          cls: c.className,
+          text: c.textContent.replace(/\\s+/g, ' ').trim(),
+          hasWaive: Boolean(c.querySelector('[data-waive-toggle]'))
+        };
+      }
+      return { badge: badge.textContent, badgeShown: badge.style.display !== 'none', cats: byCat };
+    } catch (e) { return { error: String((e && e.stack) || e) }; }
+  })()`);
+
+  assert(!redundancyRender.error, 'the redundancy section renders resolutions without throwing',
+    redundancyRender.error || '');
+  const note = redundancyRender.cats['Note Taking'] || {};
+  const av = redundancyRender.cats['Antivirus / Security'] || {};
+
+  assert(/sev-coexist/.test(note.cls || ''),
+    'a coexisting category is styled as normal rather than as a warning', note.cls);
+  assert(note.hasWaive === false,
+    'and offers NOTHING to dismiss, because nothing was suggested -- the reminder is gone without the user acting');
+  assert(!/Consider keeping only one/i.test(note.text || ''),
+    'the old one-size sentence is gone', String(note.text || '').slice(0, 120));
+  assert(/different tools/.test(note.text || ''),
+    "and the category's own explanation is what appears instead");
+
+  assert(/sev-conflict/.test(av.cls || ''),
+    'a category that genuinely fights is styled as a conflict', av.cls);
+  assert(av.hasWaive === true,
+    'and it CAN be dismissed, because that one was a suggestion');
+  assert(/Keep one real-time scanner/.test(av.text || ''),
+    'carrying advice specific to the conflict rather than a generic line');
+  assert(/both have real-time protection on/.test(av.text || ''),
+    'and saying when the conflict actually applies');
+
+  assert(redundancyRender.badge === '1',
+    `the badge counts only what carries a consequence (got '${redundancyRender.badge}')`);
+
   // 6e7h: a store-managed title is not a broken entry.
   //
   // This is the real payload the engine returned for the operator's machine,

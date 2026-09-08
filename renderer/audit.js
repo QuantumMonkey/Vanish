@@ -162,16 +162,29 @@ async function loadAuditData(force = false) {
       fail: (msg) => { auditSectionFailed('audit-updates-body', 'ask Windows Update', msg); auditReportBlind('Windows Update'); }
     },
     {
-      run: () => window.api.getSoftwareRedundancy(),
+      run: async () => {
+        const res = await window.api.getSoftwareRedundancy();
+        // Same contract as find-broken-entries, and the same trap: the engine
+        // reports a failure as a RESOLVED { success: false }, which would reach
+        // draw() and render as "no overlapping programs" -- a scan that did not
+        // run wearing the shape of a clean machine. It now says so instead.
+        if (!res || res.success !== true) {
+          throw new Error((res && res.error) || 'The scan did not return a result.');
+        }
+        return res;
+      },
       draw: (redundancy) => {
         renderRedundancyGroups(redundancy);
-        // The section already subtracts the groups you waived before badging
-        // the rest as "still needs a look". Reusing that number rather than
-        // counting groups again is what stops the headline from contradicting
-        // the badge three inches below it.
+        // Only the groups that CARRY a consequence, and only those not waived.
+        // A category the resolution database marks 'coexist' is still drawn --
+        // the user asked to see the overlap -- but it is not a thing that needs
+        // a look, so it does not appear in the headline and does not have to be
+        // dismissed to stop appearing there. That is the whole point of the
+        // database: browsers and note-taking apps stopped being a standing
+        // reminder without anyone having to click anything.
         const groups = redundancy.groups || [];
         const waived = new Set(appSettings.redundancyWaivers || []);
-        const active = groups.filter((g) => !waived.has(g.category)).length;
+        const active = groups.filter((g) => g.counted && !waived.has(g.category)).length;
         auditReportWork(active, active === 1 ? 'group of overlapping programs' : 'groups of overlapping programs');
       },
       fail: (msg) => { auditSectionFailed('audit-redundancy-list', 'group installed programs', msg); auditReportBlind('overlapping programs'); }
@@ -1767,6 +1780,22 @@ function renderBrokenEntriesSummary(broken) {
   if (btn) btn.addEventListener('click', () => switchTab('force-uninstall'));
 }
 
+// How each severity from redundancy-rules.json is presented.
+//
+// The labels are deliberately not synonyms for "bad". Three of the four say
+// what the overlap actually costs, and the fourth says it costs nothing --
+// which is the honest answer for browsers, note-taking apps, editors, game
+// launchers and chat clients, and was previously not available to this screen
+// at all. The symptomKey in front of the sentence tells the user whether they
+// are reading a prediction or a reassurance.
+const SEVERITY_STYLE = {
+  conflict: { label: 'They fight',      icon: 'fa-triangle-exclamation', symptomKey: 'What goes wrong: ' },
+  cost:     { label: 'Each one costs',  icon: 'fa-gauge-high',           symptomKey: 'What it costs: ' },
+  clutter:  { label: 'Cosmetic',        icon: 'fa-layer-group',          symptomKey: 'What you notice: ' },
+  coexist:  { label: 'Normal together', icon: 'fa-circle-check',         symptomKey: '' },
+  unknown:  { label: 'Unclassified',    icon: 'fa-triangle-exclamation', symptomKey: 'What goes wrong: ' }
+};
+
 function renderRedundancyGroups(redundancy) {
   const list = document.getElementById('audit-redundancy-list');
   const countBadge = document.getElementById('audit-redundancy-count');
@@ -1783,7 +1812,10 @@ function renderRedundancyGroups(redundancy) {
   // needs a look (waived groups excluded, i.e. discounted out of it); the
   // second badge accounts for the difference instead of hiding it.
   if (countBadge) {
-    const active = groups.length - waivedCount;
+    // Counts what the headline counts. Before the resolution database this was
+    // every group, so a machine with two browsers and two note-taking apps
+    // reported four things needing attention and kept reporting them.
+    const active = groups.filter((g) => g.counted && !waived.has(g.category)).length;
     countBadge.textContent = active;
     countBadge.style.display = active > 0 ? 'inline-flex' : 'none';
   }
@@ -1812,23 +1844,42 @@ function renderRedundancyGroups(redundancy) {
         </button>
       </div>`
     ).join('');
+    // The severity comes from redundancy-rules.json, not from this file. An
+    // unrecognised one is treated as the loudest available rather than the
+    // quietest: a category that forgot to declare itself should be noisy, and
+    // the failure that matters is a real conflict going unmentioned.
+    const sev = SEVERITY_STYLE[g.severity] || SEVERITY_STYLE.unknown;
+
     return `
-      <div class="redundancy-group${isWaived ? ' is-waived' : ''}">
+      <div class="redundancy-group sev-${esc(g.severity || 'unknown')}${isWaived ? ' is-waived' : ''}">
         <div class="redundancy-group-header">
-          <span class="redundancy-category"><i class="fa-solid fa-triangle-exclamation" style="margin-right:6px;"></i>${esc(g.category)}</span>
-          <span class="audit-badge${isWaived ? '' : ' danger'}">${esc(g.count)} installed</span>
+          <span class="redundancy-category"><i class="fa-solid ${sev.icon}" style="margin-right:6px;"></i>${esc(g.category)}</span>
+          <span class="redundancy-header-right">
+            <span class="redundancy-sev-chip">${esc(sev.label)}</span>
+            <span class="audit-badge${g.counted && !isWaived ? ' danger' : ''}">${esc(g.count)} installed</span>
+          </span>
         </div>
-        <div class="redundancy-tip">${esc(g.tip)}</div>
+        ${g.symptom ? `<div class="redundancy-symptom"><span class="redundancy-symptom-key">${esc(sev.symptomKey)}</span>${esc(g.symptom)}</div>` : ''}
+        ${g.advice ? `<div class="redundancy-tip">${esc(g.advice)}</div>` : ''}
+        ${g.conflictWhen && g.conflictWhen !== 'never' && g.conflictWhen !== 'installed'
+          ? `<div class="redundancy-when">Only when ${esc(g.conflictWhen)} -- having them installed is not the problem.</div>`
+          : ''
+        }
         ${isWaived
           ? `<div class="redundancy-override-notice"><i class="fa-solid fa-circle-check"></i> You chose to keep all of these - Vanish will keep showing this group, but will not flag it as unusual.</div>`
           : ''
         }
         <div class="redundancy-app-pills">${rows}</div>
-        <div class="redundancy-actions">
+        ${g.counted
+          ? `<div class="redundancy-actions">
           <button class="btn-sec btn-compact" data-waive-toggle="${esc(g.category)}">
             <i class="fa-solid ${isWaived ? 'fa-rotate-left' : 'fa-circle-check'}"></i> ${isWaived ? 'Undo, flag this again' : 'Keep all of these'}
           </button>
-        </div>
+        </div>`
+          // Nothing to waive on a group that was never counted. Offering "Keep
+          // all of these" here would imply Vanish had suggested otherwise.
+          : ''
+        }
       </div>
     `;
   }).join('');

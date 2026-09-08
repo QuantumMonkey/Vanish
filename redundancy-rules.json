@@ -1,0 +1,238 @@
+{
+  "version": 1,
+  "_readme": [
+    "The resolution database behind 'Overlapping programs' on the Health Advisor.",
+    "",
+    "WHY IT EXISTS. Every category used to get the same sentence: 'You have N",
+    "different X applications installed. Consider keeping only one.' That is",
+    "advice about a category the advisor knows nothing about, and for most of",
+    "them it is wrong. Two browsers is a normal, deliberate setup. Notion and",
+    "Obsidian are not substitutes -- one is a hosted collaborative workspace,",
+    "the other a folder of local markdown -- and people run both on purpose.",
+    "Meanwhile two real-time antivirus engines genuinely do fight, and that got",
+    "the same mild sentence as two note-taking apps.",
+    "",
+    "Operator, 2026-09-07: 'find out about every possible category or other",
+    "potential conflicts and build a resolution database, so the warning system",
+    "has some intelligence not limited to user input.'",
+    "",
+    "THE RULE FOR ADDING AN ENTRY. Every category must name a SYMPTOM: something",
+    "the user could actually observe if the overlap mattered. If the honest",
+    "symptom is 'nothing happens', the severity is 'coexist' and it is not",
+    "flagged. A warning nobody can verify is a warning nobody should trust, and",
+    "this file exists because the previous version had thirteen of them.",
+    "",
+    "SEVERITY, in descending order of how much it should interrupt:",
+    "  conflict - running both actively breaks or degrades something.",
+    "  cost     - each one costs something continuously: a service, a startup",
+    "             entry, a listening port, a global hotkey.",
+    "  clutter  - they only compete over file associations and context menus.",
+    "  coexist  - having several is a normal choice. NOT flagged by default,",
+    "             which is the point: it should not need a user to dismiss it.",
+    "",
+    "conflictWhen says WHEN the trouble starts, because it is not always at",
+    "install time. Two VPN clients installed side by side are harmless; two",
+    "CONNECTED at once fight over the routing table. Advice that says 'uninstall",
+    "one' when the real answer is 'only connect one' is wrong in a way the user",
+    "will discover the hard way.",
+    "",
+    "Read by scanner.ps1 (Get-SoftwareRedundancy) for both the keywords and the",
+    "resolution, so there is one copy of each. Shipped via package.json's files",
+    "and extraResources lists, next to corrections.json."
+  ],
+
+  "categories": [
+    {
+      "name": "Antivirus / Security",
+      "keywords": ["avast", "avg", "avira", "bitdefender", "kaspersky", "norton", "mcafee", "malwarebytes", "eset", "defender", "sophos", "trend micro", "f-secure", "webroot", "comodo"],
+      "severity": "conflict",
+      "conflictWhen": "both have real-time protection on",
+      "symptom": "File operations get slower, and the two engines can flag each other's temporary files. Windows Security Center also switches Microsoft Defender's real-time protection off as soon as another antivirus registers with it, so you may not be running the one you think you are.",
+      "advice": "Keep one real-time scanner. A second on-demand-only scanner that you run manually does not register as real-time and is fine alongside it."
+    },
+    {
+      "name": "Virtual Machine",
+      "keywords": ["vmware", "virtualbox", "hyper-v", "parallels", "qemu", "utm", "virt-manager", "virtualpc"],
+      "severity": "conflict",
+      "conflictWhen": "more than one wants the CPU virtualisation extensions",
+      "symptom": "A VM refuses to start with a message about VT-x or AMD-V being unavailable, or runs far slower than it should. Hyper-V takes ownership of the virtualisation extensions, and it is switched on by WSL2, Windows Sandbox, Memory Integrity and Credential Guard as well as by its own feature.",
+      "advice": "This is not about disk space -- decide which hypervisor owns virtualisation on this machine. Current VMware and VirtualBox builds can run on top of the Windows Hypervisor Platform, at reduced speed, rather than fighting it."
+    },
+    {
+      "name": "VPN Client",
+      "keywords": ["nordvpn", "expressvpn", "protonvpn", "surfshark", "mullvad", "private internet access", "cyberghost", "windscribe", "tunnelbear", "openvpn", "wireguard", "hotspot shield", "ivpn"],
+      "severity": "conflict",
+      "conflictWhen": "two are connected at the same time",
+      "symptom": "Traffic stops, or DNS queries leave through the wrong tunnel. Each client adds a virtual adapter and rewrites the routing table, and two of them disagree about which route wins.",
+      "advice": "Having several installed is fine and often deliberate -- connect one at a time. Only remove the ones you no longer have an account for."
+    },
+    {
+      "name": "Disk Encryption",
+      "keywords": ["veracrypt", "truecrypt", "bitlocker", "diskcryptor", "symantec encryption", "sophos safeguard", "eset full disk"],
+      "severity": "conflict",
+      "conflictWhen": "more than one manages the system volume",
+      "symptom": "Full-disk products each want to own the boot chain and the volume filter stack. Two of them on the same system volume is a recovery problem, not a performance one.",
+      "advice": "One full-disk product per system volume. Container-based use (a VeraCrypt file container on a BitLocker disk) is a different thing and is fine."
+    },
+    {
+      "name": "Firewall",
+      "keywords": ["zonealarm", "comodo firewall", "glasswire", "tinywall", "simplewall", "netlimiter", "peerblock"],
+      "severity": "conflict",
+      "conflictWhen": "both filter packets",
+      "symptom": "Connections fail in ways neither product explains, because two packet-filtering drivers are making decisions about the same traffic and only one of them logged it.",
+      "advice": "Keep one packet filter. Monitoring tools that only watch traffic, rather than filtering it, are fine alongside."
+    },
+    {
+      "name": "Backup / Imaging",
+      "keywords": ["acronis", "macrium", "aomei backupper", "easeus todo backup", "veeam agent", "paragon backup", "genie timeline", "todo backup"],
+      "severity": "cost",
+      "conflictWhen": "two schedule snapshots at overlapping times",
+      "symptom": "Each installs a resident agent and a scheduled task, and both use the Volume Shadow Copy Service. Overlapping jobs can fail each other's snapshots, and the failure is reported by whichever lost.",
+      "advice": "One scheduled backup product is usually enough. If you keep two on purpose, make sure their schedules do not overlap."
+    },
+    {
+      "name": "Remote Desktop",
+      "keywords": ["teamviewer", "anydesk", "rustdesk", "chrome remote", "parsec", "nomachine", "remote desktop", "vnc", "ultraviewer", "zoho assist", "splashtop"],
+      "severity": "cost",
+      "conflictWhen": "installed",
+      "symptom": "Each one installs a background service, and most listen for inbound connections whether or not you use them. That is an always-on service and an open door per product.",
+      "advice": "Keep the ones you actually connect with. Check the 'What can be reached from outside' section above -- anything listed there is reachable now, not only when you launch it."
+    },
+    {
+      "name": "Cloud Storage / Sync",
+      "keywords": ["onedrive", "dropbox", "google drive", "box sync", "mega", "pcloud", "sync.com", "icloud", "nextcloud", "tresorit"],
+      "severity": "cost",
+      "conflictWhen": "installed",
+      "symptom": "Each runs a resident sync agent and adds an Explorer overlay-icon handler. Windows only ever shows the first 15 overlay handlers in alphabetical order, so past that point some clients' sync badges silently stop appearing -- the sync still works, the status just stops being shown.",
+      "advice": "Keep the ones you actually sync to. A second copy of the same folder tree also costs the disk space twice."
+    },
+    {
+      "name": "Peripheral / RGB Suite",
+      "keywords": ["armoury crate", "icue", "razer synapse", "logitech g hub", "logitech gaming software", "msi center", "msi dragon center", "gigabyte rgb fusion", "asrock polychrome", "steelseries engine", "alienware command center", "openrgb", "signalrgb"],
+      "severity": "cost",
+      "conflictWhen": "two claim the same device",
+      "symptom": "Several services and startup entries each, and most claim exclusive access to the devices they support. Two of them on one machine typically means lighting that resets itself, or a device only one of them can see.",
+      "advice": "Keep the suite for the hardware you actually own. These are among the heaviest background installs on a typical gaming machine."
+    },
+    {
+      "name": "Download Manager",
+      "keywords": ["idm", "internet download manager", "freedownload manager", "jdownloader", "xtreme download", "download accelerator"],
+      "severity": "cost",
+      "conflictWhen": "two hook the browser",
+      "symptom": "Each installs a browser integration that intercepts download clicks. With two, whichever hooks first takes the download and the other does nothing -- or both pop up.",
+      "advice": "Keep one. The browser extension is the part that collides, so removing the extension is enough if you want to keep the app."
+    },
+    {
+      "name": "Screenshot / Screen",
+      "keywords": ["snagit", "greenshot", "lightshot", "picpick", "sharex", "flameshot", "screenpresso", "hypersnap"],
+      "severity": "cost",
+      "conflictWhen": "two register the same hotkey",
+      "symptom": "Global hotkeys are exclusive in Windows -- PrtSc in particular. Whichever tool starts first gets it, and the other silently does nothing when you press it. Which one wins can change between reboots.",
+      "advice": "Keep one on the hotkey. A second tool is fine if you give it a different shortcut or launch it by hand."
+    },
+    {
+      "name": "Clipboard / Input Remapper",
+      "keywords": ["ditto", "clipx", "copyq", "autohotkey", "powertoys", "sharpkeys", "keytweak", "x-mouse button"],
+      "severity": "cost",
+      "conflictWhen": "two bind the same key",
+      "symptom": "The same exclusive-hotkey problem as screenshot tools, plus remappers that work at different layers can produce a key that behaves differently depending on which app has focus.",
+      "advice": "Fine to keep several -- make sure they are not bound to the same keys."
+    },
+    {
+      "name": "Torrent Client",
+      "keywords": ["utorrent", "bittorrent", "qbittorrent", "deluge", "transmission", "vuze", "tixati", "picotorrent"],
+      "severity": "cost",
+      "conflictWhen": "two are running",
+      "symptom": "Each wants its own listening port and its own share of the upload budget. Two running at once mostly means they compete with each other for the same bandwidth.",
+      "advice": "Keep one running. Several installed is harmless if only one starts with Windows."
+    },
+    {
+      "name": "Compression Tool",
+      "keywords": ["winrar", "7-zip", "winzip", "bandzip", "peazip", "izarc", "hamster zip", "nanazip"],
+      "severity": "clutter",
+      "conflictWhen": "installed",
+      "symptom": "Each adds its own shell context-menu entries and claims archive file associations. Nothing breaks; the right-click menu gets longer and double-clicking a .zip opens whichever registered last.",
+      "advice": "Worth tidying if the context menu bothers you. Not worth removing a tool you use for it."
+    },
+    {
+      "name": "PDF Reader",
+      "keywords": ["adobe reader", "adobe acrobat", "foxit", "sumatra pdf", "nitro pdf", "pdf-xchange", "pdf viewer", "evince", "okular", "pdf24"],
+      "severity": "clutter",
+      "conflictWhen": "installed",
+      "symptom": "They compete for the .pdf association and for the in-browser PDF handler, so a PDF may open in one you did not expect.",
+      "advice": "Set the default you want in Settings > Apps > Default apps. A lightweight reader plus a full editor is a normal pairing."
+    },
+    {
+      "name": "Office Suite",
+      "keywords": ["microsoft office", "libreoffice", "openoffice", "wps office", "softmaker", "kingsoft", "google docs", "onlyoffice"],
+      "severity": "clutter",
+      "conflictWhen": "installed",
+      "symptom": "Both register handlers for .docx, .xlsx and friends, so documents can open in the suite you did not mean. These are large installs, so the disk cost is real even though nothing breaks.",
+      "advice": "Keep the one you write in; keep a second only if you need it to open files the first one mangles."
+    },
+    {
+      "name": "Video Player",
+      "keywords": ["vlc", "mpc-hc", "mpc-be", "potplayer", "kmplayer", "gom player", "media player classic", "kodi", "plex", "mpv", "daum", "zoom player"],
+      "severity": "clutter",
+      "conflictWhen": "installed",
+      "symptom": "File associations, and some players install codec or shell-extension components that stay behind them.",
+      "advice": "Harmless to keep several. A media server such as Plex or Kodi is not the same job as a desktop player and is not a duplicate of one."
+    },
+    {
+      "name": "Audio Player",
+      "keywords": ["itunes", "winamp", "foobar2000", "aimp", "musicbee", "groove", "spotify", "clementine", "vox", "dopamine"],
+      "severity": "clutter",
+      "conflictWhen": "installed",
+      "symptom": "File associations, and each keeps its own library database.",
+      "advice": "Harmless to keep several. A streaming client and a local library player are different tools, not duplicates."
+    },
+    {
+      "name": "Web Browser",
+      "keywords": ["chrome", "firefox", "edge", "opera", "brave", "vivaldi", "safari", "tor browser", "maxthon", "waterfox", "librewolf", "seamonkey", "pale moon"],
+      "severity": "coexist",
+      "conflictWhen": "never",
+      "symptom": "Nothing. Browsers are built to sit alongside each other, and having several is usually deliberate -- work and personal profiles, a second engine for sites that only render properly in one, or testing.",
+      "advice": "Listed so you can see them, not because anything is wrong. Note that Microsoft Edge is a Windows component and cannot be uninstalled from Programs and Features on most Windows 11 installs, so it is not a candidate even if you want it gone."
+    },
+    {
+      "name": "Note Taking",
+      "keywords": ["notion", "obsidian", "onenote", "evernote", "roam research", "logseq", "joplin", "simplenote", "bear", "zettlr", "anytype"],
+      "severity": "coexist",
+      "conflictWhen": "never",
+      "symptom": "Nothing. These look like duplicates by category and mostly are not: a hosted collaborative workspace and a folder of local markdown files are different tools with different failure modes, and people run both deliberately.",
+      "advice": "Listed so you can see them. Worth a look only if one of them is somewhere you have not opened in a year -- and Machine Hygiene, not this screen, is where you find out what removing it would cost."
+    },
+    {
+      "name": "Code Editor / IDE",
+      "keywords": ["visual studio code", "vscode", "sublime text", "notepad++", "atom", "brackets", "eclipse", "intellij", "pycharm", "webstorm", "android studio", "xcode", "neovim", "cursor", "zed"],
+      "severity": "coexist",
+      "conflictWhen": "never",
+      "symptom": "Nothing. A language-specific IDE and a general-purpose editor are not substitutes, and most developers use both on the same day.",
+      "advice": "Listed so you can see them. These are large installs, so the one worth checking is any IDE for a language you have stopped writing."
+    },
+    {
+      "name": "Game Launcher",
+      "keywords": ["steam", "epic games", "gog galaxy", "ea app", "origin", "ubisoft connect", "uplay", "battle.net", "rockstar games launcher", "xbox", "itch"],
+      "severity": "coexist",
+      "conflictWhen": "never",
+      "symptom": "Nothing. You have a launcher because you have games on it, and removing the launcher does not move the games anywhere.",
+      "advice": "Listed so you can see them. Removing one of these removes your route to the games it manages -- check the library first."
+    },
+    {
+      "name": "Communication / Chat",
+      "keywords": ["discord", "slack", "microsoft teams", "zoom", "skype", "telegram", "whatsapp", "signal", "element", "webex", "google chat"],
+      "severity": "coexist",
+      "conflictWhen": "never",
+      "symptom": "Nothing. These are different networks, not competing products -- you cannot reach a Slack workspace from Discord.",
+      "advice": "Listed so you can see them. The one worth removing is one whose network you no longer belong to."
+    },
+    {
+      "name": "Image Editor",
+      "keywords": ["photoshop", "gimp", "affinity photo", "paint.net", "krita", "lightroom", "luminar", "capture one", "darktable", "pixelmator"],
+      "severity": "coexist",
+      "conflictWhen": "never",
+      "symptom": "Nothing. Photo editing, raw development and digital painting are different jobs that this category cannot tell apart.",
+      "advice": "Listed so you can see them. These can be large, so check sizes rather than counts."
+    }
+  ]
+}

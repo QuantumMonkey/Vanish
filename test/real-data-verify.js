@@ -817,8 +817,31 @@ async function sectionRedundancy() {
     bogus.join('\n')
   );
 
-  const tipsMatch = groups.every((g) => String(g.tip || '').includes(String(g.count)));
-  assert(tipsMatch || groups.length === 0, 'each group advises using its own real count');
+  // The tip used to be "You have N different X applications installed.
+  // Consider keeping only one", so asserting it contained the count was a way
+  // of catching a group that had been built from a stale number. The tip is
+  // now the CATEGORY'S OWN ADVICE out of redundancy-rules.json and does not
+  // mention a count at all -- the count is on the badge beside it. What is
+  // worth asserting instead is that the resolution actually arrived, because
+  // a group with no severity or no symptom is the old flat sentence returning
+  // by another route.
+  const unresolved = groups.filter((g) =>
+    !g.severity || !String(g.symptom || '').trim() || !String(g.advice || '').trim());
+  assert(unresolved.length === 0,
+    'every group carries the resolution its category was given, not a generic sentence',
+    unresolved.map((g) => g.category).join(', '));
+
+  const SEVERITIES = ['conflict', 'cost', 'clutter', 'coexist'];
+  assert(groups.every((g) => SEVERITIES.includes(g.severity)),
+    'and a severity from the known vocabulary',
+    groups.map((g) => `${g.category}=${g.severity}`).join(', '));
+
+  // The point of the whole exercise: a category that coexists is never
+  // reported as work, so it cannot become a standing reminder.
+  const wronglyCounted = groups.filter((g) => g.severity === 'coexist' && g.counted);
+  assert(wronglyCounted.length === 0,
+    'nothing marked coexist is counted as something needing attention',
+    wronglyCounted.map((g) => g.category).join(', '));
 }
 
 // --- force uninstall (7oo.2) -----------------------------------------------

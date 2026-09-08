@@ -10,6 +10,56 @@ and the numbers keep moving past 1.0. See `docs/RELEASING.md` for the rules.
 
 ## [Unreleased]
 
+**Overlapping programs get a resolution database instead of one sentence.**
+
+Operator, 2026-09-07: *"calling out obsidian and notion is good for sure, but
+the option to allow both to exist and not become a persistent reminder is also
+good… build a resolution database, so the warning system has some intelligence
+not limited to user input."*
+
+Every category used to receive the identical line -- *"You have N different X
+applications installed. Consider keeping only one"* -- which is a
+recommendation about a category the advisor knew nothing about. Two browsers is
+a normal setup. Notion and Obsidian are not substitutes. Meanwhile two
+real-time antivirus engines, which genuinely do fight, got the same mild
+sentence and the same colour.
+
+- **`redundancy-rules.json`** now holds both the category keywords and what
+  Vanish knows about each one, read by `scanner.ps1` the same way
+  `corrections.json` is. Keywords and knowledge stay in one file because they
+  are one fact about a category; splitting them is how two halves come to
+  disagree about what a category contains.
+- **Every entry must name a symptom** -- something you could go and check. If
+  the honest symptom is "nothing happens", the severity is `coexist` and it is
+  never counted as work. That is what stops browsers, note-taking apps,
+  editors, game launchers and chat clients from being a standing reminder,
+  **without anyone having to dismiss them**. Those groups now offer nothing to
+  dismiss, because nothing was suggested.
+- **Four severities**: `conflict` (running both breaks something), `cost` (each
+  one costs a service, a listener or a global hotkey continuously), `clutter`
+  (file associations and context menus only), `coexist`. The card is coloured
+  by which, rather than danger-red for all fourteen.
+- **`conflictWhen`** says when the trouble actually starts. Two VPN clients
+  installed are harmless; two *connected* fight over the routing table. Advice
+  saying "uninstall one" when the answer is "only connect one" is wrong in a
+  way you find out the hard way.
+- **24 categories, up from 14**, adding VPN clients, disk encryption,
+  firewalls, backup agents, cloud sync, peripheral/RGB suites, torrent clients,
+  clipboard and input remappers, game launchers and chat clients.
+- The engine reports a missing or malformed database as a **failure** rather
+  than returning zero groups -- the keywords live in that file, so "could not
+  check" must not arrive wearing the shape of "nothing to report".
+
+The entries that were previously buried under the flat sentence are the useful
+ones: Windows Security Center switches Defender's real-time protection off as
+soon as another engine registers, so you may not be running the one you think;
+Hyper-V owns the CPU virtualisation extensions and is switched on by WSL2,
+Sandbox and Memory Integrity as well as its own feature; global hotkeys are
+exclusive, so of two screenshot tools the one that started first gets PrtSc and
+the other silently does nothing; and Windows shows only the first 15 Explorer
+overlay handlers, so past a few cloud-sync clients some sync badges stop
+appearing.
+
 **Vanish stops blaming the machine for its own limits.**
 
 Reported by the operator against a screenshot, 2026-09-07: *"an elevated

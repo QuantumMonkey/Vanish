@@ -52,6 +52,7 @@
       "splash-deelevate.html",
       "scanner.ps1",
       "corrections.json",
+      "redundancy-rules.json",
       "assets/**/*",
       "lib/**/*",
       "finders/**/*",
@@ -68,6 +69,10 @@
       {
         "from": "corrections.json",
         "to": "corrections.json"
+      },
+      {
+        "from": "redundancy-rules.json",
+        "to": "redundancy-rules.json"
       },
       {
         "from": "finders",

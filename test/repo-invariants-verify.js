@@ -160,6 +160,101 @@ console.log('Every JavaScript file in the repository actually parses');
 
 // ---------------------------------------------------------------------------
 console.log('');
+console.log('The redundancy resolution database is well formed');
+// ---------------------------------------------------------------------------
+//
+// redundancy-rules.json is the only thing standing between "Consider keeping
+// only one" and a screen that knows two browsers are fine. Its whole value is
+// that every category names a SYMPTOM -- something the user could go and
+// check. A category with no symptom is back to the sentence this file replaced.
+//
+// The severity is also load-bearing in a way that is easy to get wrong: it
+// decides whether a group is COUNTED in the Health Advisor's headline. A typo
+// in a severity string does not fail anywhere -- it silently becomes
+// 'unknown', which is counted, so the mistake shows up as a nag rather than an
+// error. Hence pinning the vocabulary here.
+{
+  const rulesPath = path.join(root, 'redundancy-rules.json');
+  assert(fs.existsSync(rulesPath), 'redundancy-rules.json is present');
+
+  let rules = null;
+  try {
+    rules = JSON.parse(fs.readFileSync(rulesPath, 'utf8'));
+  } catch (e) {
+    assert(false, `redundancy-rules.json parses -- ${e.message}`);
+  }
+
+  if (rules) {
+    const SEVERITIES = ['conflict', 'cost', 'clutter', 'coexist'];
+    const cats = Array.isArray(rules.categories) ? rules.categories : [];
+
+    assert(cats.length >= 20,
+      `it covers a useful spread of categories (${cats.length})`);
+
+    const problems = [];
+    const names = new Set();
+    const keywordOwner = new Map();
+
+    for (const c of cats) {
+      const where = c && c.name ? c.name : '(unnamed)';
+      if (!c || typeof c.name !== 'string' || !c.name.trim()) { problems.push('a category has no name'); continue; }
+      if (names.has(c.name)) problems.push(`${where}: duplicate category name`);
+      names.add(c.name);
+
+      if (!Array.isArray(c.keywords) || c.keywords.length === 0) problems.push(`${where}: no keywords`);
+      else {
+        for (const k of c.keywords) {
+          if (typeof k !== 'string' || !k.trim()) { problems.push(`${where}: empty keyword`); continue; }
+          // scanner.ps1 lowercases the app name and matches with -like, so an
+          // upper-case keyword silently never matches anything.
+          if (k !== k.toLowerCase()) problems.push(`${where}: keyword "${k}" is not lower case, so it can never match`);
+          const owner = keywordOwner.get(k);
+          // A keyword in two categories puts the same program in both groups.
+          if (owner && owner !== c.name) problems.push(`${where}: keyword "${k}" is also in ${owner}`);
+          keywordOwner.set(k, c.name);
+        }
+      }
+
+      if (!SEVERITIES.includes(c.severity)) {
+        problems.push(`${where}: severity "${c.severity}" is not one of ${SEVERITIES.join(', ')}`);
+      }
+      // The rule that makes this database worth trusting.
+      if (typeof c.symptom !== 'string' || c.symptom.trim().length < 20) {
+        problems.push(`${where}: no symptom -- say what the user would actually observe, or make it 'coexist'`);
+      }
+      if (typeof c.advice !== 'string' || c.advice.trim().length < 20) problems.push(`${where}: no advice`);
+      if (typeof c.conflictWhen !== 'string' || !c.conflictWhen.trim()) problems.push(`${where}: no conflictWhen`);
+
+      // A 'coexist' category that claims a conflict is contradicting itself.
+      if (c.severity === 'coexist' && c.conflictWhen !== 'never') {
+        problems.push(`${where}: severity coexist but conflictWhen is "${c.conflictWhen}"`);
+      }
+      if (c.severity !== 'coexist' && c.conflictWhen === 'never') {
+        problems.push(`${where}: conflictWhen "never" but severity is "${c.severity}"`);
+      }
+    }
+
+    for (const p of problems) console.log(`        ${p}`);
+    assert(problems.length === 0, `every category is complete and consistent (${cats.length} checked, ${problems.length} problems)`);
+
+    // The categories the operator reported by name, pinned. These are the ones
+    // that were being flagged as problems and are not.
+    for (const name of ['Web Browser', 'Note Taking', 'Code Editor / IDE', 'Game Launcher']) {
+      const c = cats.find((x) => x.name === name);
+      assert(c && c.severity === 'coexist',
+        `${name} coexists, so it is never counted as work`);
+    }
+    // And the ones that genuinely do bite, so a future tidy-up cannot quietly
+    // demote them to keep the screen calm.
+    for (const name of ['Antivirus / Security', 'Virtual Machine']) {
+      const c = cats.find((x) => x.name === name);
+      assert(c && c.severity === 'conflict', `${name} is a real conflict and stays one`);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+console.log('');
 console.log('Every unreadable reason the engine emits is classified (sf71)');
 // ---------------------------------------------------------------------------
 //

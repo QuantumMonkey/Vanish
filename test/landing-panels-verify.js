@@ -60,7 +60,19 @@ app.whenReady().then(async () => {
   // auditReportWork inside it.
   const updatesStart = auditSrc.indexOf('run: () => window.api.getWindowsUpdates()');
   assert(updatesStart !== -1, 'premise: the Windows updates section is registered in the sections list');
-  const updatesEnd = auditSrc.indexOf('run: () =>', updatesStart + 10);
+  // The end of the block is the NEXT section's run, in either form it takes.
+  //
+  // This used to search for the literal 'run: () =>' and nothing else. Sections
+  // whose run has to check the engine's result write `run: async () => {`
+  // instead -- find-broken-entries has for a while, and get-software-redundancy
+  // now does too -- so the search ran straight past them and the "block" grew
+  // to swallow the next section's auditReportWork. The assertion then failed
+  // against a section that had done nothing wrong. A source scan that cannot
+  // see half the shapes in the array is worse than no scan, because it fails
+  // somewhere other than where the problem is.
+  const rest = auditSrc.slice(updatesStart + 10);
+  const nextRun = rest.match(/\n\s*run: (?:async )?\(\) =>/);
+  const updatesEnd = nextRun ? updatesStart + 10 + nextRun.index : -1;
   const updatesBlock = auditSrc.slice(updatesStart, updatesEnd === -1 ? auditSrc.length : updatesEnd);
   assert(!/auditReportWork/.test(updatesBlock),
     'Windows updates contributes NO work to the verdict - a panel that nagged about updates would be claiming they are the user problem',

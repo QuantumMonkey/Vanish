@@ -3209,31 +3209,64 @@ function Set-StartupTaskEnabled {
     }
 }
 
+# Which severities are worth interrupting for, and which are just visible.
+#
+# 'conflict' and 'cost' have consequences that continue whether or not the user
+# ever opens the program: a driver fighting another driver, a service running,
+# a port listening, a hotkey taken. 'clutter' is file associations and context
+# menus -- real, cosmetic, and not something to put in a headline count.
+# 'coexist' is not a finding at all.
+$script:RedundancyCountedSeverities = @('conflict', 'cost')
+
 function Get-SoftwareRedundancy {
     $installedApps = Get-InstalledApps
 
-    # Category keyword map: category => list of name keywords (case-insensitive)
-    $categories = @{
-        "Web Browser"         = @("chrome","firefox","edge","opera","brave","vivaldi","safari","tor browser","maxthon","waterfox","librewolf","seamonkey","pale moon")
-        "PDF Reader"          = @("adobe reader","adobe acrobat","foxit","sumatra pdf","nitro pdf","pdf-xchange","pdf viewer","evince","okular","pdf24")
-        "Video Player"        = @("vlc","mpc-hc","mpc-be","potplayer","kmplayer","gom player","media player classic","kodi","plex","mpv","daum","zoom player")
-        "Audio Player"        = @("itunes","winamp","foobar2000","aimp","musicbee","groove","spotify","clementine","vox","dopamine")
-        "Compression Tool"    = @("winrar","7-zip","winzip","bandzip","peazip","izarc","hamster zip","nanazip")
-        "Screenshot / Screen" = @("snagit","greenshot","lightshot","picpick","sharex","flameshot","screenpresso","hypersnap")
-        "Antivirus / Security"= @("avast","avg","avira","bitdefender","kaspersky","norton","mcafee","malwarebytes","eset","defender","sophos","trend micro","f-secure","webroot","comodo")
-        "Download Manager"    = @("idm","internet download manager","freedownload manager","jdownloader","xtreme download","download accelerator")
-        "Note Taking"         = @("notion","obsidian","onenote","evernote","notepad++","roam research","logseq","joplin","simplenote","bear","zettlr")
-        "Remote Desktop"      = @("teamviewer","anydesk","rustdesk","chrome remote","parsec","nomachine","remote desktop","vnc","ultraviewer","zoho assist","splashtop")
-        "Code Editor / IDE"   = @("visual studio code","vscode","sublime text","atom","notepad++","brackets","eclipse","intellij","pycharm","webstorm","android studio","xcode","vim","emacs","neovim")
-        "Office Suite"        = @("microsoft office","libreoffice","openoffice","wps office","softmaker","kingsoft","google docs","onlyoffice")
-        "Image Editor"        = @("photoshop","gimp","affinity photo","paint.net","krita","lightroom","luminar","capture one","darktable","pixelmator")
-        "Virtual Machine"     = @("vmware","virtualbox","hyper-v","parallels","qemu","utm","virt-manager","virtualpc")
+    # The category map AND what Vanish knows about each category now live in
+    # redundancy-rules.json, next to corrections.json and read the same way.
+    #
+    # WHY THE KNOWLEDGE MOVED OUT OF HERE. This function used to hold a bare
+    # keyword map and hand every category the identical sentence: "You have N
+    # different X applications installed. Consider keeping only one." That is a
+    # recommendation about a category the advisor knew nothing about, and for
+    # most of them it was wrong -- two browsers is a normal setup, and Notion
+    # and Obsidian are not substitutes for each other. Meanwhile two real-time
+    # antivirus engines, which genuinely do fight, got the same mild sentence.
+    # Operator, 2026-09-07: "build a resolution database, so the warning system
+    # has some intelligence not limited to user input."
+    #
+    # Keywords and resolution live in ONE file because they are one fact about
+    # a category. Splitting them -- keywords here, knowledge in the renderer --
+    # is how two halves come to disagree about what a category even contains.
+    $rulesPath = Join-Path $PSScriptRoot "redundancy-rules.json"
+    $rules = $null
+    if (Test-Path $rulesPath) {
+        try {
+            $rules = Get-Content $rulesPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        } catch {
+            $rules = $null
+        }
+    }
+
+    # No rules, no categories -- the keywords are IN the file, so there is
+    # nothing to group by and nothing honest to say about what was found.
+    # Report the failure rather than returning an empty result that reads as
+    # "no overlapping programs on this machine" (aeu: could-not-look must never
+    # arrive at a decider wearing the same shape as nothing-found).
+    if ($null -eq $rules -or $null -eq $rules.categories -or @($rules.categories).Count -eq 0) {
+        return @{
+            success       = $false
+            error         = "The resolution database (redundancy-rules.json) could not be read, so overlapping programs were not checked. This is not the same as finding none."
+            groups        = @()
+            hasRedundancy = $false
+        }
     }
 
     $groups = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-    foreach ($catName in $categories.Keys) {
-        $keywords = $categories[$catName]
+    foreach ($rule in @($rules.categories)) {
+        $catName  = [string]$rule.name
+        $keywords = @($rule.keywords)
+        if ([string]::IsNullOrWhiteSpace($catName) -or $keywords.Count -eq 0) { continue }
 
         # Collapse to PRODUCT FAMILIES, not registry rows (7oo.6). Edge, Edge
         # Update and the WebView2 runtime are one browser; reporting "3 web
@@ -3289,18 +3322,46 @@ function Get-SoftwareRedundancy {
 
         # Redundancy means two DIFFERENT products doing the same job.
         if ($matched.Count -gt 1) {
+            $severity = [string]$rule.severity
+            if ([string]::IsNullOrWhiteSpace($severity)) { $severity = 'unknown' }
+
+            # 'counted' is what the Health Advisor's headline tally uses, and it
+            # is NOT the same as "shown". A coexisting pair stays on the screen
+            # so the user can see it; it just stops being counted as something
+            # that needs a look, which is what made it a standing reminder.
+            #
+            # An unrecognised severity is counted. A new category that forgot to
+            # say how serious it is should be noisy rather than silently exempt:
+            # the failure that matters here is a real conflict going unmentioned,
+            # not a false alarm.
+            $counted = ($severity -eq 'unknown') -or ($script:RedundancyCountedSeverities -contains $severity)
+
             $groups.Add([PSCustomObject]@{
-                category = $catName
-                count    = $matched.Count
-                apps     = $matched
-                tip      = "You have $($matched.Count) different $catName applications installed. Consider keeping only one."
+                category     = $catName
+                count        = $matched.Count
+                apps         = $matched
+                severity     = $severity
+                conflictWhen = [string]$rule.conflictWhen
+                symptom      = [string]$rule.symptom
+                advice       = [string]$rule.advice
+                counted      = $counted
+                # Kept so nothing that reads `tip` breaks, but it is now the
+                # category's own advice rather than one sentence shared by all
+                # of them with the name substituted in.
+                tip          = [string]$rule.advice
             })
         }
     }
 
     return @{
-        groups = $groups
+        success       = $true
+        groups        = $groups
         hasRedundancy = ($groups.Count -gt 0)
+        # So the UI never has to guess whether it is looking at a machine with
+        # no overlaps or a rules file that did not load. rulesVersion also lets
+        # a support question be answered without asking the user to open JSON.
+        rulesVersion  = $rules.version
+        rulesCategoryCount = @($rules.categories).Count
     }
 }
 

@@ -2190,14 +2190,78 @@ input:checked + .slider:before {
 .status-dot.passive { background: var(--text-muted); }
 
 /* Redundancy alert boxes */
+/* The card used to be danger-red for every category, because every category
+   got the same sentence. It is now coloured by what the overlap actually
+   costs, from redundancy-rules.json: red only when two products genuinely
+   fight, amber when each one costs a service or a hotkey, neutral when they
+   only compete over file associations, and green when having several is a
+   normal choice. Red for a second web browser is how a screen teaches people
+   to ignore it. */
 .redundancy-group {
-  background: hsla(350, 89%, 60%, 0.06);
-  border: 1px solid hsla(350, 89%, 60%, 0.18);
+  background: hsla(222, 40%, 15%, 0.35);
+  border: 1px solid var(--border-glass);
   border-radius: 10px;
   padding: 14px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.redundancy-group.sev-conflict {
+  background: hsla(350, 89%, 60%, 0.06);
+  border-color: hsla(350, 89%, 60%, 0.28);
+}
+.redundancy-group.sev-cost {
+  background: hsla(38, 92%, 50%, 0.05);
+  border-color: hsla(38, 92%, 50%, 0.22);
+}
+.redundancy-group.sev-clutter {
+  background: hsla(217, 91%, 60%, 0.04);
+  border-color: hsla(217, 91%, 60%, 0.18);
+}
+.redundancy-group.sev-coexist {
+  background: hsla(142, 71%, 45%, 0.04);
+  border-color: hsla(142, 71%, 45%, 0.16);
+}
+
+.redundancy-group.sev-conflict .redundancy-category { color: var(--color-danger); }
+.redundancy-group.sev-cost     .redundancy-category { color: var(--color-warning); }
+.redundancy-group.sev-clutter  .redundancy-category { color: var(--color-primary); }
+.redundancy-group.sev-coexist  .redundancy-category { color: var(--color-success); }
+
+.redundancy-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.redundancy-sev-chip {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  border: 1px solid var(--border-glass);
+  color: var(--text-gray);
+  white-space: nowrap;
+}
+
+/* The symptom is the load-bearing sentence: it is what the user could go and
+   check. It gets the readable colour; the advice underneath is secondary. */
+.redundancy-symptom {
+  font-size: 11.5px;
+  color: var(--text-gray);
+  line-height: 1.5;
+}
+.redundancy-symptom-key {
+  color: var(--text-white);
+  font-weight: 600;
+}
+.redundancy-when {
+  font-size: 11px;
+  color: var(--color-warning);
+  line-height: 1.4;
 }
 
 .redundancy-group-header {
