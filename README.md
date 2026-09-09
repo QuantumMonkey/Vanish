@@ -2,11 +2,11 @@
 
 **A system cleaner and uninstaller built for developers and digital hygienists -- on-device, approval-gated, and reversible by default.**
 
-Vanish opens on a **Health Advisor** dashboard: what this machine is, where the disk went, what starts with Windows, what holds a network connection, what is listening, what is installed twice. From there it maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts the leftovers uninstallers abandon, and **quarantines everything it removes so it can be put back**. Everything runs locally. Nothing leaves your machine.
+Vanish opens on a **Health Advisor** dashboard: what this machine is, where the disk went, what starts with Windows, what holds a network connection, what is listening, what is installed twice. From there it maps every installed application (desktop + Microsoft Store), walks you through clean uninstalls with a native-uninstaller-first wizard, hunts the leftovers uninstallers abandon, and **quarantines everything it removes so it can be put back**. Everything runs locally: no telemetry, no cloud lookup, and the only outbound traffic is two Network-panel tools you switch on yourself -- see [What Vanish does NOT do](#what-vanish-does-not-do).
 
 The "for developers" part is not decoration. A general-purpose cleaner does not know that `node_modules` is disposable and a `.jks` keystore is not, that an unpushed branch exists nowhere else in the world, or that a stash is invisible to every other tool you own. Vanish leads with **what a delete would destroy** and only then with what it would free -- see [Rescue before reclaim](#rescue-before-reclaim).
 
-> **1.0.0**, verified locally with `npm test` -- 2,766 assertions, and again unelevated through a de-elevated scheduled task, because an Administrator token reads through a Deny ACE and nine suites cannot build the condition they exist to test while elevated. **1.0 is not a finish line here and versions keep moving past it** -- see [docs/RELEASING.md](docs/RELEASING.md). It does mean the ship gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) are met and nothing is carried as unfinished; it does not mean the work stops. Read [Status](#status) and [Known limitations](#known-limitations) before you rely on it.
+> **1.1.0**, verified locally with `npm test` -- 2,836 assertions, and again unelevated through a de-elevated scheduled task, because an Administrator token reads through a Deny ACE and nine suites cannot build the condition they exist to test while elevated. **1.0 is not a finish line here and versions keep moving past it** -- see [docs/RELEASING.md](docs/RELEASING.md). It does mean the ship gates in [docs/PRE-RELEASE.md](docs/PRE-RELEASE.md) are met and nothing is carried as unfinished; it does not mean the work stops. Read [Status](#status) and [Known limitations](#known-limitations) before you rely on it.
 
 ![Vanish demo](docs/media/vanish-demo.gif)
 
@@ -66,7 +66,7 @@ This same scan → propose → quarantine pattern is how every other destructive
 | Network activity -- which programs hold connections, and a verdict including "nothing on this PC is using the network". Reads local byte counters only; it never opens a socket, and never claims a per-program byte rate Windows cannot attribute | [scanner.ps1](scanner.ps1) `Get-NetworkActivity` |
 | Hold background transfers -- caps Windows Update's background downloading and pauses running background transfers, with every changed setting written to disk before it is touched, and released automatically if Vanish closes or crashes while a hold is on | [scanner.ps1](scanner.ps1) `Invoke-NetworkHoldApply` |
 | Startup audit: Run/RunOnce keys, logon-triggered Scheduled Tasks, auto-start services -- with **orphan detection** (entries whose executable no longer exists) | [scanner.ps1](scanner.ps1) `Get-StartupItems` |
-| Software redundancy detection: 14 category clusters (browsers, PDF readers, AV tools...) flagging duplicate installs | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
+| Overlapping programs: 24 categories, each naming what the overlap actually costs -- and never flagging the ones where running several is normal | [scanner.ps1](scanner.ps1) `Get-SoftwareRedundancy` |
 | Search, type filter, sort (name/size/date), and column filters -- click a header, pick which Publishers or Types to show -- over the full app inventory | [renderer/core.js](renderer/core.js) `filterAndRenderApps`, [renderer/column-filter.js](renderer/column-filter.js) |
 
 ### Watch an install, and see what it left behind
@@ -127,7 +127,7 @@ Discovery depth and deletion are independent: you can scan Advanced and still de
 
 Status vocabulary follows this project's own **promptgate Rule 10**: *Implemented* means coded with a passing local verification suite; it does **not** mean *Complete*. The clean-VM gate is now **met for Windows 11** -- see [Known limitations](#known-limitations) for what that still does not cover -- so treat everything below as "works on Windows 11, on the machines it was built and used on," not "certified everywhere."
 
-**Implemented and locally verified (1.0.0):**
+**Implemented and locally verified (1.1.0):**
 - Quarantine-first removal for every destructive path -- files move into a versioned vault, registry keys export to a `.reg` restore manifest, *before* anything is removed ([lib/vault.js](lib/vault.js))
 - Audit Mode / Full Mode elevation tiers enforced independently in both the main process and the PowerShell engine -- a destructive action reachable only through a channel neither layer gates has not been found ([main.js](main.js) `fullModeOnly()`, [scanner.ps1](scanner.ps1) `Test-IsElevated`)
 - Restore point before uninstall, on by default, admin-gated ([scanner.ps1](scanner.ps1) `Create-RestorePoint`)

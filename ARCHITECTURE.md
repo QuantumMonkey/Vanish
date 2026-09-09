@@ -251,7 +251,7 @@ Representative, not exhaustive -- scanner.ps1 is ~3,100 lines. The table below c
 | `Check-AdminStatus` | Elevation state via `WindowsPrincipal` | Replaces banned `net session` probe |
 | `Get-SystemDiagnostics` | OS / CPU / RAM / GPU / disks / uptime via CIM | Narrow `SELECT` queries; every section fails soft |
 | `Get-StartupItems` | Run/RunOnce keys + logon Scheduled Tasks + auto services | `exeExists` orphan flag; Microsoft-path services excluded; task scan capped at 80 |
-| `Get-SoftwareRedundancy` | Group installed apps into 14 category clusters | Flags only categories with 2+ matches |
+| `Get-SoftwareRedundancy` | Group installed apps into the categories in `redundancy-rules.json` (24 today) and attach each category's resolution | Reports only categories with 2+ product families; severity decides whether a group is COUNTED as work, so `coexist` categories are shown and never flagged. A missing or malformed rules file is a failure, not zero groups -- the keywords live in it |
 | `Test-VaultEntryId` / `Resolve-SafeVaultPath` | Validate manifest-supplied entry ids and relative paths before any join | Entry ids must be a UUIDv4; every resolved path is proven to still resolve inside its own entry folder (Vuln 1 fix) |
 | `Test-ProtectedDestination` / `Resolve-DestinationTarget` | Refuse a vault restore into a privileged-execution location | Resolves junctions to their real target before judging, not just the literal path (SEC-2 fix) |
 | `Invoke-QuarantineItems` / `Invoke-VaultRestore` / `Invoke-VaultDelete` | The vault pipeline: move-not-delete, `.reg` export/import, permanent removal | Per-item all-or-nothing; `Move-ItemTransactional` never leaves a half-moved item |
