@@ -133,10 +133,14 @@ and `tools/gif-decode.js`, which exists to check the encoder rather than trust
 it. Registered in `run-all.ps1` as "GIF encoder (f1tx)".
 
 The account name is redacted to `you` in the recording. It is a **public** repo
-under a pseudonym and the findings are full of `C:\Users\<name>`; promptgate
-Rule 18 already forbids local paths in doc files, and a GIF is a doc file that
-happens not to be greppable. Identifiers only -- no finding, count or verdict is
-touched.
+and the findings are full of `C:\Users\<name>`; promptgate Rule 18 already
+forbids local paths in doc files, and a GIF is a doc file that happens not to be
+greppable. Identifiers only -- no finding, count or verdict is touched.
+
+*Corrected 2026-09-10:* this paragraph first justified the redaction by calling
+the repository pseudonymous. That was an inference nobody had stated -- the
+operator's own records describe the account as a handle, not a pseudonym. The
+redaction stands on Rule 18 alone and never needed the stronger reason.
 
 ## Cut permanently
 

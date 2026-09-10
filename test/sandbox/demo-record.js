@@ -269,12 +269,15 @@ app.whenReady().then(async () => {
     // -----------------------------------------------------------------------
 
     // The findings are real, and real findings on a real machine are full of
-    // C:\Users\<name>. This recording goes in the README of a PUBLIC repository
-    // published under a pseudonym, so the account name is not a detail -- it
-    // links the pseudonym to a person, permanently, in a binary asset that is
-    // awkward to retract once it is cloned. Promptgate Rule 18 already forbids
-    // local filesystem paths in doc files; a GIF is a doc file that happens not
-    // to be greppable.
+    // C:\Users\<name>. This recording goes in the README of a PUBLIC repository,
+    // and a Windows account name and local paths do not belong in a binary asset
+    // that is awkward to retract once it is cloned. Promptgate Rule 18 already
+    // forbids local filesystem paths in doc files; a GIF is a doc file that
+    // happens not to be greppable.
+    //
+    // An earlier version of this comment called the repository pseudonymous and
+    // made that the reason. It was an inference nobody had stated; the operator's
+    // records describe the account as a handle. The redaction never needed it.
     //
     // What this does and does not do: it replaces an IDENTIFIER with a
     // placeholder. It does not touch a finding, a count, a size or a verdict.
